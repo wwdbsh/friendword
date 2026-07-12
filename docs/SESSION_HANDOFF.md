@@ -1,64 +1,65 @@
 # PROJECT HANDOFF
 
-> 갱신: 2026-07-13 01:00 KST · 최신 커밋 `5f9406d` (main, CI 그린)
-> 읽는 순서: 이 문서 → `docs/TASKS.md` → 필요 시 `FRIENDWORD_HANDOFF.md`(제품 원본), `docs/DESIGN.md`(디자인), `CLAUDE.md`/`AGENTS.md`(협업 규칙)
+> 갱신: 2026-07-13 02:15 KST · 최신 커밋 `2eb67e7` (main, CI 그린)
+> 읽는 순서: 이 문서 → `docs/TASKS.md` → 필요 시 `FRIENDWORD_HANDOFF.md`(제품 원본), `docs/DESIGN.md`(디자인), `docs/OPS.md`(운영), `docs/REVENUECAT_SETUP.md`(결제 셋업), `CLAUDE.md`/`AGENTS.md`(협업 규칙)
 
 ## CURRENT STATE
 
 - **제품**: Shipaton 2026 참가작 friend-led dating campaign 앱. 8/1 이후 App Store 최초 출시 필수, RevenueCat IAP 필수.
-- **모노레포**: `apps/mobile`(Expo SDK 57, expo-router) · `apps/web`(Next.js 15) · `packages/{domain,contracts,config,ui-tokens,data,adapters}` · `supabase/` · `media-worker`(스텁). pnpm, node-linker=hoisted.
-- **백엔드**: hosted Supabase `friendword`(ref `oknolcxsvogrhnxnyosr`, link 완료). 마이그레이션 0001~0005 배포됨. 상태 전이는 전부 SECURITY DEFINER RPC(`submit_pitch_for_consent`, `get_consent_preview`, `claim_consent_request`, `approve_and_publish_pitch`) — 클라이언트에 status/subject 쓰기 권한 없음.
-- **파이프라인 (동작 확인됨)**: 모바일 5트랙 피치 작성(로컬) → 제출 시 서버 draft 생성 + 음성 서명 업로드(`pitch-media` 비공개 버킷) + 동의 토큰 발급 → Dater가 토큰으로 클레임 → 승인·발행(campaign+slug+멤버십 생성). 프로덕션 E2E 통과.
-- **웹**: `/consent/[token]` 전체 플로우 동작(anon preview → 매직링크 로그인 → claim → 음성 검토 → approve → `/p/[slug]`). `/p/[slug]`는 실데이터(service role 조회 + 음성 signed URL 실재생) + `demo-blair` fixture fallback. Playwright 10 테스트.
-- **이메일**: Resend SMTP 연결 검증 완료. confirmation/magic_link 템플릿은 `supabase/config.toml` + `supabase/templates/*`로 관리(`supabase config push`), 둘 다 `{{ .Token }}` 노출. OTP 왕복(발송→코드 수신→verifyOtp→세션) 프로덕션 검증됨. 템플릿 전파는 push 후 ~10분 소요.
-- **실행 환경**: tmux `friendword-web`(:3000) · `friendword-mobile`(expo, iPhone 17 Pro 시뮬레이터) · `friendword-codex-1/2/3`(워커, 현재 미사용).
-- **검증**: `pnpm lint && pnpm typecheck && pnpm test && pnpm format:check` · `bash scripts/test-db.sh`(suite 01~05) · `cd apps/web && pnpm test:e2e` — 전부 그린.
+- **핵심 루프 완성**: Flow A(모바일 피치: 관계→사진→음성→제출+미디어 업로드+동의 링크 공유 화면) → Flow B(웹 동의: preview→매직링크→claim→음성·사진 검토(개별 제외)→공개 기간 선택→발행) → 공개 페이지(실사진·실오디오) → Flow C(verified interest: 프로필 게이트→제출→Dater 인박스 accept/decline) → Intro Room(1:1 채팅+신고·차단·나가기) → 캠페인 pause/resume/archive. **프로덕션 E2E 39체크 전부 그린** (`node scripts/e2e-production.mjs`).
+- **모노레포**: `apps/mobile`(Expo SDK 57) · `apps/web`(Next.js 15) · `packages/{domain,contracts,config,ui-tokens,data,adapters}` · `supabase/`. pnpm hoisted.
+- **백엔드**: hosted Supabase(ref `oknolcxsvogrhnxnyosr`). 마이그레이션 **0001~0010** 배포. 모든 상태 전이는 SECURITY DEFINER RPC — submit/preview/claim/approve(+공개기간)/exclude_pitch_asset/submit_interest/list_campaign_interests/decide_interest/list_my_intro_rooms/leave_intro_room/set_campaign_status/track_event. 클라이언트 campaigns 쓰기 그랜트 전면 회수.
+- **웹 표면**: `/p/[slug]`(실데이터+fixture fallback), `/p/[slug]/interest`, `/consent/[token]`, `/inbox`(관심 인박스+캠페인 관리), `/rooms`·`/rooms/[id]`(채팅), API `/api/transcribe`(OpenAI 전사→구조화 초안, 키 없으면 501), `/api/revenuecat`(웹훅, 토큰 없으면 501).
+- **어댑터**: `FRIENDWORD_PROVIDER_MODE=real` + OPENAI_API_KEY → 실 OpenAI 전사/구조화/모더레이션. identity는 Unconfigured(호출 시 명시적 실패 — 절대 fake 안 함).
+- **이메일**: Resend SMTP 검증 완료, confirmation/magic_link 템플릿 코드 관리(`supabase config push`, 반영 ~10분), OTP 왕복 프로덕션 검증.
+- **RevenueCat**: SDK·페이월(`/paywall`)·웹훅·크레딧 원장·엔타이틀먼트 코드 완성. 활성화는 사용자 셋업 대기(`docs/REVENUECAT_SETUP.md`).
+- **analytics**: `track_event` RPC(화이트리스트·2KB 캡·서버 스탬프) + 퍼널 전 구간 이벤트 배선.
+- **실행 환경**: tmux `friendword-web`(:3000) · `friendword-mobile`(expo). `apps/web/.env`·`apps/mobile/.env`는 루트 `.env` 심링크.
+- **검증 명령**: `pnpm lint && pnpm typecheck && pnpm test && pnpm format:check` · `bash scripts/test-db.sh`(suite 01~10) · `cd apps/web && pnpm test:e2e`(10) · `node scripts/e2e-production.mjs`(39, dev 서버 필요) — 전부 그린.
 
-## DONE
+## DONE (이번 세션, 2026-07-13)
 
-- 웹 동의 플로우 `/consent/[token]` + ConsentRepo + Playwright 5 스펙 (`0845a37`)
-- `/p/[slug]` 실데이터화 + PitchPlayer 실오디오 + 이메일 템플릿 브랜딩 (`5f9406d`)
-- 모노레포 스캐폴드 + CI + 코어 스키마 22테이블/RLS/불변식 (`4e37735`)
-- Hype Mixtape 디자인 시스템 + 모바일 피치 플로우 + 데이터/어댑터 레이어 + 웹 피치 페이지 (`b843b96`)
-- 모바일 제출 경로 Supabase 실연결 + 이메일 OTP 로그인 시트 (`a8bcf4b`)
-- Flow B 백엔드: 동의 preview/claim/approve·발행 RPC + 테스트 (`e55990d`)
-- 인프라: Supabase link·배포, `.env` 구성, GitHub CI(db-tests 포함)
+- Slice 5B-1/5B-2: 웹 동의 플로우 + `/p/[slug]` 실데이터 (`0845a37`, `5f9406d`)
+- TODO 2: 이메일 템플릿 {{ .Token }} + OTP 왕복 실검증 (`fee2096`)
+- Slice 6A/6B: 모바일 사진 업로드+`pitch_assets`+공유 화면, 동의·공개 페이지 사진 (`52e00c9`)
+- Slice 7: verified interest 전체(0006) + `/p/[slug]/interest` + `/inbox` (`dd5f072`)
+- Slice 8: Intro Room 채팅·신고·차단·나가기(0007) + `/rooms` (`259eaac`)
+- Slice 9: 캠페인 라이프사이클(0008) + `docs/OPS.md` 운영 런북 (`919b0f9`)
+- Slice 11: analytics 파이프라인(0009) + 전 표면 이벤트 (`7667cad`)
+- Slice 12: OpenAI 어댑터+`/api/transcribe`, 사진 제외·공개 기간(0010), E2E 스크립트 repo 편입 (`5000951`)
+- Slice 10: RevenueCat SDK·페이월·웹훅 (`2eb67e7`)
 
-## IN PROGRESS
+## TODO (남은 것 — 대부분 사용자 액션 게이트)
 
-- 없음 (의도적으로 클린 컷에서 중단)
-
-## TODO
-
-1. ~~(사용자) Resend SMTP 입력~~ — **완료 (2026-07-13 사용자 확인)**
-2. ~~(P1) Magic Link `{{ .Token }}` + OTP 실검증~~ — **완료 (템플릿 2종 config push, OTP 왕복 프로덕션 검증)**
-3. ~~(P1) Slice 5B-1: 웹 `/consent/[token]`~~ — **완료 (프로덕션 E2E 12/12, Playwright 10/10)**
-4. ~~(P1) Slice 5B-2: `/p/[slug]` 실데이터화~~ — **완료 (프로덕션 E2E 14/14, 실캠페인 렌더 QA)**
-   4b. **(사용자·출시 게이트) Resend 도메인 인증** — 현재 발신자 `onboarding@resend.dev`(샌드박스)는 계정 소유자 메일로만 발송 가능. 실사용자 로그인하려면 Resend에 도메인 인증 후 대시보드 SMTP sender 교체 필요
-5. **(P2) 모바일**: 제출 시 사진 업로드 추가 (`HybridPitchDraftService.uploadRecording` 옆에), 제출 성공 후 동의 링크 공유 화면 (`draft.server.consentToken` 로컬 보관 중)
-6. **(P2)** verified interest flow (인터레스트 프로필 + accept/decline RPC)
-7. **(P3)** Intro Room 채팅 + 신고·차단 UI
-8. **(P3)** RevenueCat sandbox 연동 (`creator_launch_credit_499` consumable + `campaign_30d_1999`)
-9. **(P3)** analytics 이벤트 파이프라인 (`docs/ANALYTICS_PLAN.md` 퍼널)
-10. **(게이트)** 공식 Rules 게시 시 `docs/HACKATHON_RULES.md` 재확인
+1. **(사용자·출시 게이트) Resend 도메인 인증** — 샌드박스 발신자는 소유자 메일로만 발송. 도메인 인증 + SMTP sender 교체 전엔 실사용자 로그인 불가
+2. **(사용자) OPENAI_API_KEY 입력** — 넣는 즉시 `/api/transcribe`가 실전사·구조화 초안 생성 (지금은 501)
+3. **(사용자) RevenueCat 셋업** — `docs/REVENUECAT_SETUP.md` 체크리스트 (대시보드·제품 2종·키 2개·dev build). Shipaton 필수
+4. **(사용자+Advisor·출시 게이트) 신원 확인 공급자 선정** — selfie liveness/face match 벤더 결정 + 키 입력 → `UnconfiguredIdentityVerificationProvider` 교체. 실사용자 받기 전 필수
+5. **(P1) 모바일 dev build** — `expo prebuild` + `expo run:ios` (react-native-purchases 네이티브 모듈)
+6. **(P1) App Store 출시 준비** — 18+ 나이 게이트 화면, EAS 빌드, 심사 메타데이터, 7월 말 심사 제출 + 수동 release (데이팅 4.3(b)+UGC 리스크)
+7. **(P2) 9:16 모션 피치 MP4 export** (media-worker), 자막·키네틱 텍스트(전사 결과 활용), Vouch Cards(Flow D)
+8. **(P2) 만료 캠페인 자동 status 전이** (현재는 읽기 시 필터로 처리 — pg_cron 또는 스케줄러)
+9. **(게이트)** Devpost 공식 Rules 게시 시 `docs/HACKATHON_RULES.md` 재확인
 
 ## IMPORTANT DECISIONS
 
-- **워커 운영**: 사용자 특별지시로 codex 위임 중단, Advisor(Fable 5) 단독 구현 모드 (limit 리셋과 무관하게 유지)
-- **보안**: API 키는 사용자가 직접 입력. Claude는 위치만 안내, 값 수신 금지
-- **디자인**: "Hype Mixtape" 확정 (크림+탠저린/핫핑크/선샤인, 스티커 미학, Unbounded+Bricolage). 초기 "촛불" 컨셉은 사용자 거부로 폐기 — 차분한/무디 방향 금지
-- **아키텍처**: 상태 전이·동의·발행은 RPC 전용(클라이언트 GRANT에서 status 제외). 동의 토큰은 raw 1회 반환 + sha256 해시만 저장. 모바일 드래프트는 로컬 작성→제출 시 서버 동기화(하이브리드). `apps/mobile/.env`는 루트 `.env` 심링크
-- **테스트**: Docker 부재로 supabase 로컬 스택 대신 로컬 PG17 + plain-SQL 하니스(`scripts/test-db.sh`), CI는 postgres:17 컨테이너
+- **워커 운영**: codex 위임 중단, Advisor(Fable 5) 단독 구현 모드
+- **보안**: API 키·토큰 값은 사용자가 직접 입력. Claude는 위치만 안내
+- **디자인**: "Hype Mixtape" (크림+탠저린/핫핑크/선샤인, 스티커 미학, Unbounded+Bricolage). 웹 공용 스타일 `apps/web/src/styles/flowCard.module.css`
+- **아키텍처**: 상태 전이는 전부 RPC. 동의 토큰 raw 1회+sha256. 스토리지 버킷 `pitch-media`(draft 폴더)·`profile-media`(user 폴더, 관심 수신 Dater만 열람). 웹 세션 storageKey `friendword-web-auth`. 채팅은 4초 폴링(텍스트 전용)
+- **정직성 원칙(무mock)**: 미설정 기능은 501/명시 안내로 노출 — 전사(키 대기), 결제(셋업 대기), 신원(벤더 대기). fake 완료 경로 없음
+- **테스트**: 로컬 PG17 하니스(suite 01~10), CI postgres:17, 프로덕션 풀퍼널 E2E `scripts/e2e-production.mjs`
 
 ## ISSUES / RISKS
 
-- Resend 샌드박스 발신자(`onboarding@resend.dev`)는 소유자 메일 외 발송 시 500 → 도메인 인증 전까지 타인 로그인 불가 (출시 게이트, TODO 4b)
-- 이메일 템플릿 변경은 `supabase config push` 후 auth 서비스 반영까지 ~10분 지연. config.toml에는 원격 값 미러링 필수(미지정 키는 로컬 기본값으로 리셋됨) — SMTP 크리덴셜은 절대 config.toml에 넣지 않음
-- App Review 리스크(데이팅 4.3b + UGC): 7월 말 심사 제출 + 수동 release 계획 준수 필요
-- `database.types.ts`는 수동 부분 타입 — 테이블 추가 시 갱신 누락 주의
-- 시뮬레이터 탭 자동화 불가 → 인터랙션 QA는 사용자 손 테스트 또는 프로덕션 E2E 스크립트(핸드오프의 QA 패턴: service role로 유저 생성→anon으로 RLS 검증→정리)로 대체
-- plpgsql 함정: OUT 파라미터/컬럼 충돌 시 `#variable_conflict use_column`; 캠페인 published insert 전에 consent approved 필요(0001 트리거)
+- Resend 샌드박스 → 도메인 인증 전 타 사용자 이메일 발송 500 (출시 게이트 1)
+- 이메일 템플릿 config push 후 auth 서비스 반영 ~10분. config.toml에 원격 값 미러링 필수, SMTP 크리덴셜 금지
+- App Review 리스크(데이팅 4.3b + UGC): 7월 말 제출 + 수동 release
+- `database.types.ts` 수동 부분 타입 — 테이블·RPC 추가 시 갱신 필수
+- 시뮬레이터 인터랙션 QA는 사용자 손 테스트(모바일 사진 업로드→공유 화면 경로는 코드 검증만 됨, 손 QA 권장)
+- plpgsql 함정: `#variable_conflict use_column`; publish 전 consent approved 트리거(0001); RPC 시그니처 변경은 DROP 후 CREATE(기본값으로 하위 호환)
+- 만료 캠페인은 읽기 필터로만 처리(status는 published 유지) — 자동 전이는 TODO 8
 
 ## LOG SUMMARY
 
-2026-07-12~13 단일 세션에서 빈 repo → 프로덕션 연결 제품 뼈대 완성. 커밋 7개(모두 CI 그린): 스캐폴드/스키마 → 디자인+3표면 병렬 구축(codex 워커 3인) → 워커 limit 소진 후 Advisor 단독으로 모바일 실연결·Flow B 백엔드·프로덕션 E2E까지. 마이그레이션 5개 배포, 테스트 34+ / DB 스위트 5 / Playwright 5 통과.
+2026-07-12~13 연속 세션. 빈 repo → 코어 루프 전체 완성. 이번 구간 커밋 9개(모두 CI 그린): 웹 동의/실데이터 → 이메일 검증 → 사진 파이프라인 → verified interest → Intro Room → 라이프사이클+운영 → analytics → 전사+동의 심화 → RevenueCat. 마이그레이션 10개 배포, DB 스위트 10, Playwright 10, 프로덕션 E2E 39체크.

@@ -88,6 +88,15 @@ export type InterestRow = {
   readonly updated_at: string;
 };
 
+export type MessageRow = {
+  readonly id: string;
+  readonly intro_room_id: string;
+  readonly sender_user_id: string;
+  readonly body: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -155,6 +164,50 @@ export type Database = {
         Row: InterestRow;
         // Writes flow through submit_interest / decide_interest RPCs.
         Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      messages: {
+        Row: MessageRow;
+        Insert: {
+          readonly intro_room_id: string;
+          readonly sender_user_id: string;
+          readonly body: string;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      reports: {
+        Row: {
+          readonly id: string;
+          readonly reporter_user_id: string;
+          readonly reported_user_id: string | null;
+          readonly campaign_id: string | null;
+          readonly reason: string;
+          readonly status: string;
+          readonly created_at: string;
+          readonly updated_at: string;
+        };
+        Insert: {
+          readonly reporter_user_id: string;
+          readonly reported_user_id?: string | null;
+          readonly campaign_id?: string | null;
+          readonly reason: string;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      blocks: {
+        Row: {
+          readonly id: string;
+          readonly blocker_user_id: string;
+          readonly blocked_user_id: string;
+          readonly created_at: string;
+        };
+        Insert: {
+          readonly blocker_user_id: string;
+          readonly blocked_user_id: string;
+        };
         Update: Record<string, never>;
         Relationships: [];
       };
@@ -245,6 +298,21 @@ export type Database = {
         Returns: readonly {
           readonly intro_room_id: string | null;
         }[];
+      };
+      list_my_intro_rooms: {
+        Args: Record<string, never>;
+        Returns: readonly {
+          readonly room_id: string;
+          readonly campaign_id: string;
+          readonly campaign_slug: string | null;
+          readonly other_user_id: string;
+          readonly other_display_name: string;
+          readonly created_at: string;
+        }[];
+      };
+      leave_intro_room: {
+        Args: { readonly target_room_id: string };
+        Returns: undefined;
       };
     };
     Enums: {

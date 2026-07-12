@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { InterestRepo, type BrowserSupabaseClient, type CampaignInterest } from '@friendword/data';
@@ -38,6 +39,7 @@ export function InboxView() {
   const [state, setState] = useState<InboxState>({ step: 'loading' });
   const [deciding, setDeciding] = useState<string | null>(null);
   const [decisionNote, setDecisionNote] = useState<string | null>(null);
+  const [openedRoomId, setOpenedRoomId] = useState<string | null>(null);
 
   const loadInbox = useCallback(async () => {
     if (client === null) {
@@ -82,6 +84,7 @@ export function InboxView() {
     try {
       const repo = new InterestRepo(client);
       const { introRoomId } = await repo.decideInterest(interestId, decision);
+      setOpenedRoomId(decision === 'accepted' ? introRoomId : null);
       setDecisionNote(
         decision === 'accepted'
           ? introRoomId === null
@@ -157,6 +160,11 @@ export function InboxView() {
               <span className={styles.badge}>Interest inbox</span>
               <h1 className={styles.title}>People who want to meet you.</h1>
               {decisionNote !== null && <p className={styles.lede}>{decisionNote}</p>}
+              {openedRoomId !== null && (
+                <Link className={styles.primary} href={`/rooms/${openedRoomId}`}>
+                  Open the intro room
+                </Link>
+              )}
             </section>
 
             {state.interests.map((interest) => (

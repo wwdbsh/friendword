@@ -1,0 +1,79 @@
+.roomCard {
+  display: flex;
+  flex-direction: column;
+}
+
+.roomHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.safetyToggle {
+  padding: var(--space-xs) var(--space-md);
+  border: var(--stroke-sticker) solid var(--color-ink);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.safetyPanel {
+  margin: var(--space-sm) 0;
+  padding: var(--space-md);
+  border: var(--stroke-sticker) solid var(--color-ink);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface));
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-height: 16rem;
+  max-height: 50dvh;
+  overflow-y: auto;
+  margin: var(--space-md) 0;
+  padding: var(--space-md);
+  border: var(--stroke-sticker) solid var(--color-ink);
+  border-radius: var(--radius-md);
+  background: var(--color-background);
+}
+
+.bubbleMine,
+.bubbleTheirs {
+  max-width: 80%;
+  padding: var(--space-sm) var(--space-md);
+  border: var(--stroke-sticker) solid var(--color-ink);
+  border-radius: var(--radius-md);
+  line-height: var(--line-normal);
+  overflow-wrap: anywhere;
+}
+
+.bubbleMine {
+  align-self: flex-end;
+  background: var(--color-hype);
+  color: var(--color-on-hype);
+  border-bottom-right-radius: var(--radius-sm);
+}
+
+.bubbleTheirs {
+  align-self: flex-start;
+  background: var(--color-surface);
+  border-bottom-left-radius: var(--radius-sm);
+}
+
+.composer {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: stretch;
+}
+
+.composer input {
+  flex: 1;
+}
+
+.composer button {
+  margin-top: 0;
+}

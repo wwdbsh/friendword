@@ -1,67 +1,59 @@
-# 세션 핸드오프 — 2026-07-13 00:25 (Asia/Seoul)
+# PROJECT HANDOFF
 
-> 이전 세션(Claude Fable 5, Advisor)이 다음 세션에게 남기는 문서.
-> 제품 판단의 source of truth는 `FRIENDWORD_HANDOFF.md`, 협업 규칙은 `CLAUDE.md`/`AGENTS.md`, 디자인은 `docs/DESIGN.md`("Hype Mixtape"), 작업 상태는 `docs/TASKS.md`.
+> 갱신: 2026-07-13 00:40 KST · 최신 커밋 `5712883` (main, CI 그린)
+> 읽는 순서: 이 문서 → `docs/TASKS.md` → 필요 시 `FRIENDWORD_HANDOFF.md`(제품 원본), `docs/DESIGN.md`(디자인), `CLAUDE.md`/`AGENTS.md`(협업 규칙)
 
-## 현재 상태 요약
+## CURRENT STATE
 
-Shipaton 2026 참가작 Friendword. 스캐폴드부터 Flow B 백엔드까지 하루 만에 완료. 모든 커밋이 CI 그린, 프로덕션 Supabase에 마이그레이션 0001~0005 배포됨.
+- **제품**: Shipaton 2026 참가작 friend-led dating campaign 앱. 8/1 이후 App Store 최초 출시 필수, RevenueCat IAP 필수.
+- **모노레포**: `apps/mobile`(Expo SDK 57, expo-router) · `apps/web`(Next.js 15) · `packages/{domain,contracts,config,ui-tokens,data,adapters}` · `supabase/` · `media-worker`(스텁). pnpm, node-linker=hoisted.
+- **백엔드**: hosted Supabase `friendword`(ref `oknolcxsvogrhnxnyosr`, link 완료). 마이그레이션 0001~0005 배포됨. 상태 전이는 전부 SECURITY DEFINER RPC(`submit_pitch_for_consent`, `get_consent_preview`, `claim_consent_request`, `approve_and_publish_pitch`) — 클라이언트에 status/subject 쓰기 권한 없음.
+- **파이프라인 (동작 확인됨)**: 모바일 5트랙 피치 작성(로컬) → 제출 시 서버 draft 생성 + 음성 서명 업로드(`pitch-media` 비공개 버킷) + 동의 토큰 발급 → Dater가 토큰으로 클레임 → 승인·발행(campaign+slug+멤버십 생성). 프로덕션 E2E 통과.
+- **웹**: `/p/demo-blair` fixture 피치 페이지 완성(재생 시뮬레이션·자막·CTA·Playwright 5 테스트). 실데이터 미연결.
+- **실행 환경**: tmux `friendword-web`(:3000) · `friendword-mobile`(expo, iPhone 17 Pro 시뮬레이터) · `friendword-codex-1/2/3`(워커, 현재 미사용).
+- **검증**: `pnpm lint && pnpm typecheck && pnpm test && pnpm format:check` · `bash scripts/test-db.sh`(suite 01~05) · `cd apps/web && pnpm test:e2e` — 전부 그린.
 
-| 커밋      | 내용                                                                                                  |
-| --------- | ----------------------------------------------------------------------------------------------------- |
-| `4e37735` | 모노레포 스캐폴드 + 코어 스키마/RLS + 문서 골격                                                       |
-| `b843b96` | Hype Mixtape 디자인 시스템 + 모바일 피치 플로우(5트랙) + 데이터 레이어 + 웹 공개 피치 페이지(fixture) |
-| `a8bcf4b` | 모바일 제출 경로 실연결 (submit RPC 0004, 서명 업로드, 이메일 OTP 시트)                               |
-| `e55990d` | Flow B 서버 측 (0005: consent preview/claim/approve_and_publish RPC)                                  |
+## DONE
 
-## 실행 중인 환경 (죽었으면 재기동)
+- 모노레포 스캐폴드 + CI + 코어 스키마 22테이블/RLS/불변식 (`4e37735`)
+- Hype Mixtape 디자인 시스템 + 모바일 피치 플로우 + 데이터/어댑터 레이어 + 웹 피치 페이지 (`b843b96`)
+- 모바일 제출 경로 Supabase 실연결 + 이메일 OTP 로그인 시트 (`a8bcf4b`)
+- Flow B 백엔드: 동의 preview/claim/approve·발행 RPC + 테스트 (`e55990d`)
+- 인프라: Supabase link·배포, `.env` 구성, GitHub CI(db-tests 포함)
 
-- **tmux `friendword-web`**: `pnpm --filter @friendword/web dev` → http://localhost:3000 (피치 데모: `/p/demo-blair`)
-- **tmux `friendword-mobile`**: `cd apps/mobile && npx expo start --ios` → iPhone 17 Pro 시뮬레이터 (부팅: `xcrun simctl` 목록에서 iPhone 17 Pro)
-- **tmux `friendword-codex-1/2/3`**: codex 워커. **주의: 특별지시로 당분간 워커 위임 없이 Advisor(Fable 5) 단독 진행** (limit은 07-13 00:15 리셋됨)
-- Supabase: hosted `friendword` (ref `oknolcxsvogrhnxnyosr`), `supabase link` 완료, `supabase db push`가 비밀번호 없이 동작
+## IN PROGRESS
 
-## 검증 명령 (모두 현재 그린)
+- 없음 (의도적으로 클린 컷에서 중단)
 
-```bash
-pnpm lint && pnpm typecheck && pnpm test && pnpm format:check
-bash scripts/test-db.sh            # 로컬 PG 하니스 (suite 01~05)
-pnpm --filter @friendword/web build
-cd apps/web && pnpm test:e2e       # Playwright 5개 (dev 서버 필요)
-```
+## TODO
 
-프로덕션 E2E QA 스크립트(scratchpad, 세션 종료로 소실 가능 — 필요시 재작성):
-submit 경로 8단계 / consent 여정 7단계 모두 통과 이력 있음. 패턴: service role로 QA 유저 생성 → anon 클라이언트로 RLS 하 작업 → 정리.
+1. **(사용자) Resend SMTP 입력** — 대시보드 Authentication→Emails→SMTP Settings. 완료 통보 대기 중
+2. **(P1) SMTP 연결 후**: Templates의 Magic Link에 `{{ .Token }}` 반영 + 모바일 OTP 로그인 실검증
+3. **(P1) Slice 5B-1**: 웹 `/consent/[token]` — preview 렌더 → 매직링크 로그인(웹은 SMTP 불필요, `detectSessionInUrl`) → claim → 사진·음성 검토 → approve → `/p/[slug]` 리다이렉트
+4. **(P1) Slice 5B-2**: `/p/[slug]` 실데이터화 — 서버 컴포넌트에서 service role로 published 캠페인 조회 + 미디어 signed URL. fixture는 fallback 유지
+5. **(P2) 모바일**: 제출 시 사진 업로드 추가 (`HybridPitchDraftService.uploadRecording` 옆에), 제출 성공 후 동의 링크 공유 화면 (`draft.server.consentToken` 로컬 보관 중)
+6. **(P2)** verified interest flow (인터레스트 프로필 + accept/decline RPC)
+7. **(P3)** Intro Room 채팅 + 신고·차단 UI
+8. **(P3)** RevenueCat sandbox 연동 (`creator_launch_credit_499` consumable + `campaign_30d_1999`)
+9. **(P3)** analytics 이벤트 파이프라인 (`docs/ANALYTICS_PLAN.md` 퍼널)
+10. **(게이트)** 공식 Rules 게시 시 `docs/HACKATHON_RULES.md` 재확인
 
-## 다음 작업: Slice 5B — 웹 동의 페이지 + 실데이터 공개 피치
+## IMPORTANT DECISIONS
 
-1. **`/consent/[token]` 페이지** (apps/web):
-   - 서버 컴포넌트: `get_consent_preview` RPC(anon)로 미리보기 렌더
-   - 로그인: **웹은 매직링크가 무료 티어로도 동작** (`signInWithOtp` + `emailRedirectTo`, `detectSessionInUrl` 기본 on) — 모바일과 달리 SMTP 불필요
-   - 세션 확보 후 `claim_consent_request` → 사진·음성 검토 UI (signed URL은 storage select 정책상 subject 클레임 후 접근 가능) → `approve_and_publish_pitch` → `/p/[slug]`로 이동
-2. **`/p/[slug]` 실데이터화**: 서버 컴포넌트에서 service role 클라이언트(서버 전용 env)로 published 캠페인 조회 + 미디어 signed URL 발급. fixture(`demo-blair`)는 fallback으로 유지
-3. **모바일 잔여**: 사진 업로드가 아직 미구현 (제출 시 음성만 업로드 — `HybridPitchDraftService.uploadRecording` 참조), 제출 성공 후 동의 링크 공유 UI 없음 (`draft.server.consentToken`은 로컬 저장됨)
-4. 이후: verified interest flow → Intro Room → RevenueCat
+- **워커 운영**: 사용자 특별지시로 codex 위임 중단, Advisor(Fable 5) 단독 구현 모드 (limit 리셋과 무관하게 유지)
+- **보안**: API 키는 사용자가 직접 입력. Claude는 위치만 안내, 값 수신 금지
+- **디자인**: "Hype Mixtape" 확정 (크림+탠저린/핫핑크/선샤인, 스티커 미학, Unbounded+Bricolage). 초기 "촛불" 컨셉은 사용자 거부로 폐기 — 차분한/무디 방향 금지
+- **아키텍처**: 상태 전이·동의·발행은 RPC 전용(클라이언트 GRANT에서 status 제외). 동의 토큰은 raw 1회 반환 + sha256 해시만 저장. 모바일 드래프트는 로컬 작성→제출 시 서버 동기화(하이브리드). `apps/mobile/.env`는 루트 `.env` 심링크
+- **테스트**: Docker 부재로 supabase 로컬 스택 대신 로컬 PG17 + plain-SQL 하니스(`scripts/test-db.sh`), CI는 postgres:17 컨테이너
 
-## 대기 중인 사용자 액션
+## ISSUES / RISKS
 
-- **Resend SMTP**: 상헌 님이 직접 Supabase 대시보드(Authentication → SMTP Settings)에 키 입력 예정. 완료 통보 받으면 Management API로 매직링크 템플릿에 `{{ .Token }}` 추가(무료 티어는 SMTP 연결 후에만 가능) 후 모바일 OTP 로그인 검증
-- API 키류는 **절대 채팅으로 받지 않음** — 위치만 안내 (메모리 `security-api-keys-user-only` 참조)
+- 무료 티어 기본 메일러로는 OTP 코드 발송 불가 → Resend SMTP 대기 (모바일 로그인 실사용 차단 중, 웹 매직링크는 무관)
+- App Review 리스크(데이팅 4.3b + UGC): 7월 말 심사 제출 + 수동 release 계획 준수 필요
+- `database.types.ts`는 수동 부분 타입 — 테이블 추가 시 갱신 누락 주의
+- 시뮬레이터 탭 자동화 불가 → 인터랙션 QA는 사용자 손 테스트 또는 프로덕션 E2E 스크립트(핸드오프의 QA 패턴: service role로 유저 생성→anon으로 RLS 검증→정리)로 대체
+- plpgsql 함정: OUT 파라미터/컬럼 충돌 시 `#variable_conflict use_column`; 캠페인 published insert 전에 consent approved 필요(0001 트리거)
 
-## 함정·주의사항 (이번 세션에서 배운 것)
+## LOG SUMMARY
 
-- **워커 규칙**: 특별지시로 현재 Advisor 단독 모드. 이후 위임 재개 시 `.briefs/` 패턴 사용 (gitignored)
-- pnpm 빌드 스크립트 차단 → `pnpm-workspace.yaml` `allowBuilds`에 추가
-- `apps/mobile/.env`는 루트 `.env`로의 **심링크** (Expo dotenv 로딩용, gitignored). app.config.ts에서 Node fs 사용 시 expo tsconfig에서 타입 에러 남 — process.env 방식 유지할 것
-- plpgsql에서 `RETURNS TABLE` OUT 파라미터와 컬럼명 충돌 시 `#variable_conflict use_column`
-- 0001의 `validate_campaign_publication` 트리거: 캠페인 published insert 전에 consent_requests가 approved여야 함 (순서 중요)
-- RLS 하에서 campaign_memberships는 본인 행만 보임 — 테스트에서 전체 검증은 RESET ROLE로
-- codex 워커에 장문 브리프는 파일로 쓰고 경로만 send-keys; Enter는 별도로 한 번 더
-- 시뮬레이터 화면 이동은 딥링크 `xcrun simctl openurl booted "exp://127.0.0.1:8081/--/<path>"` (탭 자동화는 불가 — 시각 QA만)
-- Metro/dev 서버가 있는 tmux 세션은 죽이지 말 것; next build는 `NEXT_DIST_DIR`로 분리 (`.next*` 전부 gitignore/lint ignore 처리됨)
-
-## 재무·해커톤 게이트 리마인더
-
-- 공식 Rules 게시(≤07/31) 시 `docs/HACKATHON_RULES.md` 재확인 게이트 실행
-- 출시는 8/1 이후만. App Review는 7월 말 제출 + 수동 release
-- 월 클라우드 hard cap $200 (docs/COST_MODEL.md)
+2026-07-12~13 단일 세션에서 빈 repo → 프로덕션 연결 제품 뼈대 완성. 커밋 7개(모두 CI 그린): 스캐폴드/스키마 → 디자인+3표면 병렬 구축(codex 워커 3인) → 워커 limit 소진 후 Advisor 단독으로 모바일 실연결·Flow B 백엔드·프로덕션 E2E까지. 마이그레이션 5개 배포, 테스트 34+ / DB 스위트 5 / Playwright 5 통과.

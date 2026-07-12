@@ -58,6 +58,36 @@ export type CampaignRow = {
   readonly updated_at: string;
 };
 
+export type DatingProfileRow = {
+  readonly user_id: string;
+  readonly bio: string | null;
+  readonly photos: readonly string[];
+  readonly dating_intent: string | null;
+  readonly approximate_location: string | null;
+  readonly profile_updated_at: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+};
+
+export type InterestRow = {
+  readonly id: string;
+  readonly campaign_id: string;
+  readonly sender_user_id: string;
+  readonly status:
+    | 'started'
+    | 'verification_pending'
+    | 'submitted'
+    | 'accepted'
+    | 'declined'
+    | 'withdrawn'
+    | 'blocked';
+  readonly note: string | null;
+  readonly submitted_at: string | null;
+  readonly decided_at: string | null;
+  readonly created_at: string;
+  readonly updated_at: string;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -102,6 +132,30 @@ export type Database = {
           readonly relationship_type?: RelationshipType | null;
           readonly relationship_duration?: RelationshipDuration | null;
         };
+        Relationships: [];
+      };
+      dating_profiles: {
+        Row: DatingProfileRow;
+        Insert: {
+          readonly user_id: string;
+          readonly bio?: string | null;
+          readonly photos?: readonly string[];
+          readonly dating_intent?: string | null;
+          readonly approximate_location?: string | null;
+        };
+        Update: {
+          readonly bio?: string | null;
+          readonly photos?: readonly string[];
+          readonly dating_intent?: string | null;
+          readonly approximate_location?: string | null;
+        };
+        Relationships: [];
+      };
+      interests: {
+        Row: InterestRow;
+        // Writes flow through submit_interest / decide_interest RPCs.
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
         Relationships: [];
       };
       pitch_assets: {
@@ -162,6 +216,34 @@ export type Database = {
         Returns: readonly {
           readonly campaign_id: string;
           readonly campaign_slug: string;
+        }[];
+      };
+      submit_interest: {
+        Args: { readonly target_campaign_id: string; readonly interest_note?: string | null };
+        Returns: readonly {
+          readonly interest_id: string;
+          readonly interest_status: string;
+        }[];
+      };
+      list_campaign_interests: {
+        Args: { readonly target_campaign_id: string };
+        Returns: readonly {
+          readonly interest_id: string;
+          readonly interest_status: string;
+          readonly note: string | null;
+          readonly submitted_at: string | null;
+          readonly sender_display_name: string;
+          readonly sender_age: number | null;
+          readonly sender_bio: string | null;
+          readonly sender_photos: readonly string[] | null;
+          readonly sender_dating_intent: string | null;
+          readonly sender_location: string | null;
+        }[];
+      };
+      decide_interest: {
+        Args: { readonly target_interest_id: string; readonly decision: string };
+        Returns: readonly {
+          readonly intro_room_id: string | null;
         }[];
       };
     };

@@ -123,6 +123,9 @@ importers:
       '@friendword/ui-tokens':
         specifier: workspace:*
         version: link:../../packages/ui-tokens
+      '@supabase/supabase-js':
+        specifier: ^2.0.0
+        version: 2.110.2
       next:
         specifier: ^15.1.0
         version: 15.5.20(@opentelemetry/api@1.9.1)(@playwright/test@1.61.1)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)

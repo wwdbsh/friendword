@@ -39,7 +39,7 @@ test('plays the pitch and opens verified interest when the demo campaign is view
   });
 
   await test.step('When the visitor plays the mock timeline', async () => {
-    const interestButton = page.getByRole('button', { name: "I'm interested" }).first();
+    const interestButton = page.getByRole('link', { name: "I'm interested" }).first();
     await interestButton.hover();
     await waitForAnimations(interestButton);
     await page.evaluate(
@@ -52,29 +52,19 @@ test('plays the pitch and opens verified interest when the demo campaign is view
     await page.getByRole('button', { name: 'Play Maya’s pitch' }).click();
   });
 
-  await test.step('Then progress advances and the verified-interest modal is usable', async () => {
+  await test.step('Then progress advances and interest routes to the verified flow', async () => {
     await expect
       .poll(() => page.locator('[class*="timeRow"] span').first().textContent())
       .not.toBe('0:00');
     await page.screenshot({ path: '/tmp/friendword-pitch-playing.png', fullPage: false });
-    const interestButton = page.getByRole('button', { name: "I'm interested" }).first();
+    const interestButton = page.getByRole('link', { name: "I'm interested" }).first();
     await page.keyboard.press('Tab');
     await expect(interestButton).toBeFocused();
     await page.screenshot({ path: '/tmp/friendword-pitch-interest-focus.png', fullPage: false });
     await interestButton.click();
-    const interestDialog = page.getByRole('dialog', {
-      name: 'Coming soon — verified interest',
-    });
-    await expect(interestDialog).toBeVisible();
-    await expect(interestDialog).toHaveCSS('opacity', '1');
-    await waitForAnimations(interestDialog);
-    await page.screenshot({ path: '/tmp/friendword-pitch-modal.png', fullPage: false });
-    await expect(page.getByRole('button', { name: 'Got it' })).toBeFocused();
-    await page.keyboard.press('Tab');
-    await expect(page.getByRole('button', { name: 'Got it' })).toBeFocused();
-    await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect(interestButton).toBeFocused();
+    await page.waitForURL('**/p/demo-blair/interest');
+    await expect(page.getByRole('heading', { name: 'This one’s just a demo.' })).toBeVisible();
+    await page.screenshot({ path: '/tmp/friendword-pitch-interest-demo.png', fullPage: false });
     expect(pageErrors).toEqual([]);
     expect(failedResponses).toEqual([]);
   });
@@ -122,7 +112,7 @@ for (const viewport of viewports) {
           element.removeAttribute('data-capture-hidden');
           (element as HTMLElement).style.removeProperty('display');
         });
-        const mobileInterestButton = page.getByRole('button', { name: "I'm interested" }).last();
+        const mobileInterestButton = page.getByRole('link', { name: "I'm interested" }).last();
         await expect(mobileInterestButton).toBeVisible();
         const firstVouchCard = page.locator('blockquote').first().locator('..');
         await firstVouchCard.evaluate((card) => {

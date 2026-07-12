@@ -1,0 +1,229 @@
+import { z } from 'zod';
+
+import type { Session } from '@supabase/supabase-js';
+
+import type { BrowserSupabaseClient } from './client';
+import type { DatingProfileRow } from './database.types';
+import { DataLayerError, InvalidStoragePathError, UnauthenticatedError } from './errors';
+
+const uuidSchema = z.string().uuid();
+const fileNameSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
+const birthDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const PROFILE_MEDIA_BUCKET = 'profile-media';
+const SIGNED_URL_TTL_SECONDS = 60 * 60;
+
+export type DatingProfileInput = {
+  readonly bio: string;
+  readonly datingIntent: string;
+  readonly approximateLocation: string | null;
+  readonly photos: readonly string[];
+  /** ISO date (YYYY-MM-DD); stored on profiles for the 18+ gate. */
+  readonly birthDate: string;
+};
+
+export type SubmittedInterest = {
+  readonly interestId: string;
+  readonly interestStatus: string;
+};
+
+export type CampaignInterest = {
+  readonly interestId: string;
+  readonly interestStatus: string;
+  readonly note: string | null;
+  readonly submittedAt: string | null;
+  readonly senderDisplayName: string;
+  readonly senderAge: number | null;
+  readonly senderBio: string | null;
+  readonly senderPhotos: readonly string[];
+  readonly senderDatingIntent: string | null;
+  readonly senderLocation: string | null;
+};
+
+export type InterestDecision = {
+  readonly introRoomId: string | null;
+};
+
+const submitRowSchema = z.array(
+  z.object({ interest_id: z.string().uuid(), interest_status: z.string() }),
+);
+
+const decideRowSchema = z.array(z.object({ intro_room_id: z.string().uuid().nullable() }));
+
+/**
+ * Flow C client surface. Profile writes use the client-writable columns and
+ * RLS; every interest state transition goes through the 0006 SECURITY
+ * DEFINER RPCs. Contact details never travel through this repo.
+ */
+export class InterestRepo {
+  constructor(private readonly client: BrowserSupabaseClient) {}
+
+  async getMyDatingProfile(): Promise<DatingProfileRow | null> {
+    const session = await this.getRequiredSession();
+    const { data, error } = await this.client
+      .from('dating_profiles')
+      .select()
+      .eq('user_id', session.user.id)
+      .maybeSingle();
+    if (error !== null) {
+      throw new DataLayerError('interest.getMyDatingProfile', error);
+    }
+
+    return data;
+  }
+
+  /** Uploads a profile photo into the caller's own folder; returns its path. */
+  async uploadProfilePhoto(fileName: string, body: Blob | ArrayBuffer): Promise<string> {
+    const session = await this.getRequiredSession();
+    const parsedName = fileNameSchema.safeParse(fileName);
+    if (!parsedName.success) {
+      throw new InvalidStoragePathError(fileName);
+    }
+
+    const objectPath = `${session.user.id}/${parsedName.data}`;
+    const { error } = await this.client.storage
+      .from(PROFILE_MEDIA_BUCKET)
+      .upload(objectPath, body, { upsert: true });
+    if (error !== null) {
+      throw new DataLayerError('interest.uploadProfilePhoto', error);
+    }
+
+    return `${PROFILE_MEDIA_BUCKET}/${objectPath}`;
+  }
+
+  /** Signed view URL for a profile photo path ('profile-media/<user>/<file>'). */
+  async createPhotoViewUrl(storagePath: string): Promise<string> {
+    await this.getRequiredSession();
+    const prefix = `${PROFILE_MEDIA_BUCKET}/`;
+    if (!storagePath.startsWith(prefix)) {
+      throw new DataLayerError(
+        'interest.createPhotoViewUrl',
+        new Error(`unexpected storage path: ${storagePath}`),
+      );
+    }
+    const { data, error } = await this.client.storage
+      .from(PROFILE_MEDIA_BUCKET)
+      .createSignedUrl(storagePath.slice(prefix.length), SIGNED_URL_TTL_SECONDS);
+    if (error !== null) {
+      throw new DataLayerError('interest.createPhotoViewUrl', error);
+    }
+
+    return data.signedUrl;
+  }
+
+  /** Saves the verified-interest profile (dating profile + birth date). */
+  async saveDatingProfile(input: DatingProfileInput): Promise<void> {
+    const session = await this.getRequiredSession();
+    const { error: profileError } = await this.client
+      .from('profiles')
+      .update({ birth_date: birthDateSchema.parse(input.birthDate) })
+      .eq('user_id', session.user.id);
+    if (profileError !== null) {
+      throw new DataLayerError('interest.saveBirthDate', profileError);
+    }
+
+    const { error } = await this.client.from('dating_profiles').upsert(
+      {
+        user_id: session.user.id,
+        bio: input.bio,
+        dating_intent: input.datingIntent,
+        approximate_location: input.approximateLocation,
+        photos: input.photos,
+      },
+      { onConflict: 'user_id' },
+    );
+    if (error !== null) {
+      throw new DataLayerError('interest.saveDatingProfile', error);
+    }
+  }
+
+  async submitInterest(campaignId: string, note: string | null): Promise<SubmittedInterest> {
+    await this.getRequiredSession();
+    const { data, error } = await this.client.rpc('submit_interest', {
+      target_campaign_id: uuidSchema.parse(campaignId),
+      interest_note: note,
+    });
+    if (error !== null) {
+      throw new DataLayerError('interest.submit', error);
+    }
+
+    const row = submitRowSchema.parse(data).at(0);
+    if (row === undefined) {
+      throw new DataLayerError('interest.submit', new Error('RPC returned no interest'));
+    }
+
+    return { interestId: row.interest_id, interestStatus: row.interest_status };
+  }
+
+  /** The dater's inbox for one campaign (owner-only RPC). */
+  async listCampaignInterests(campaignId: string): Promise<readonly CampaignInterest[]> {
+    await this.getRequiredSession();
+    const { data, error } = await this.client.rpc('list_campaign_interests', {
+      target_campaign_id: uuidSchema.parse(campaignId),
+    });
+    if (error !== null) {
+      throw new DataLayerError('interest.listCampaignInterests', error);
+    }
+
+    return data.map((row) => ({
+      interestId: row.interest_id,
+      interestStatus: row.interest_status,
+      note: row.note,
+      submittedAt: row.submitted_at,
+      senderDisplayName: row.sender_display_name,
+      senderAge: row.sender_age,
+      senderBio: row.sender_bio,
+      senderPhotos: row.sender_photos ?? [],
+      senderDatingIntent: row.sender_dating_intent,
+      senderLocation: row.sender_location,
+    }));
+  }
+
+  async decideInterest(
+    interestId: string,
+    decision: 'accepted' | 'declined',
+  ): Promise<InterestDecision> {
+    await this.getRequiredSession();
+    const { data, error } = await this.client.rpc('decide_interest', {
+      target_interest_id: uuidSchema.parse(interestId),
+      decision,
+    });
+    if (error !== null) {
+      throw new DataLayerError('interest.decide', error);
+    }
+
+    const row = decideRowSchema.parse(data).at(0);
+    return { introRoomId: row?.intro_room_id ?? null };
+  }
+
+  /** Campaigns the signed-in user owns (their inbox scope). */
+  async listMyOwnedCampaigns(): Promise<
+    readonly { readonly id: string; readonly slug: string | null; readonly status: string }[]
+  > {
+    const session = await this.getRequiredSession();
+    const { data, error } = await this.client
+      .from('campaigns')
+      .select()
+      .eq('owner_user_id', session.user.id);
+    if (error !== null) {
+      throw new DataLayerError('interest.listMyOwnedCampaigns', error);
+    }
+
+    return data.map((row) => ({ id: row.id, slug: row.slug, status: row.status }));
+  }
+
+  private async getRequiredSession(): Promise<Session> {
+    const { data, error } = await this.client.auth.getSession();
+    if (error !== null) {
+      throw new DataLayerError('interest.getSession', error);
+    }
+    if (data.session === null) {
+      throw new UnauthenticatedError();
+    }
+
+    return data.session;
+  }
+}

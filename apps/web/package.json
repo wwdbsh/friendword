@@ -12,6 +12,7 @@
   "dependencies": {
     "@friendword/contracts": "workspace:*",
     "@friendword/data": "workspace:*",
+    "@supabase/supabase-js": "^2.0.0",
     "@friendword/ui-tokens": "workspace:*",
     "next": "^15.1.0",
     "react": "^19.0.0",

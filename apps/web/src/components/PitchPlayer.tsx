@@ -1,6 +1,7 @@
 'use client';
 
 import Image from 'next/image';
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
 import type { PitchView } from '@/pitch/view';
@@ -34,13 +35,9 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [durationMs, setDurationMs] = useState(pitch.durationMs);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const [isFooterVisible, setIsFooterVisible] = useState(false);
   const elapsedRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const interestTriggerRef = useRef<HTMLButtonElement>(null);
-  const dialogActionRef = useRef<HTMLButtonElement>(null);
   const hasRealAudio = pitch.audioUrl !== null;
 
   useEffect(() => {
@@ -85,15 +82,6 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
   }, [isPlaying, hasRealAudio]);
 
   useEffect(() => {
-    const dialog = dialogRef.current;
-    if (isModalOpen && dialog !== null && !dialog.open) {
-      dialog.showModal();
-      return;
-    }
-    interestTriggerRef.current?.focus();
-  }, [isModalOpen]);
-
-  useEffect(() => {
     const footer = document.querySelector('[data-pitch-footer]');
     if (footer === null) {
       return;
@@ -131,19 +119,12 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
   };
 
   const interestButton = (className: string | undefined) => (
-    <button
-      className={className}
-      type="button"
-      onClick={(event) => {
-        interestTriggerRef.current = event.currentTarget;
-        setIsModalOpen(true);
-      }}
-    >
+    <Link className={className} href={`/p/${pitch.campaignSlug}/interest`}>
       I&apos;m interested
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M5 12h14m-6-6 6 6-6 6" />
       </svg>
-    </button>
+    </Link>
   );
 
   return (
@@ -260,39 +241,6 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
       >
         {interestButton(styles.interestButton)}
       </div>
-
-      {isModalOpen ? (
-        <dialog
-          ref={dialogRef}
-          className={styles.modal}
-          aria-labelledby="interest-modal-title"
-          onCancel={(event) => {
-            event.preventDefault();
-            setIsModalOpen(false);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Tab') {
-              event.preventDefault();
-              dialogActionRef.current?.focus();
-            }
-          }}
-        >
-          <span className={styles.modalBadge}>Verified interest</span>
-          <h2 id="interest-modal-title">Coming soon — verified interest</h2>
-          <p>
-            You&apos;ll share current photos and a short profile before {pitch.daterName} sees your
-            interest. Your phone number and email stay private.
-          </p>
-          <button
-            ref={dialogActionRef}
-            type="button"
-            autoFocus
-            onClick={() => setIsModalOpen(false)}
-          >
-            Got it
-          </button>
-        </dialog>
-      ) : null}
     </div>
   );
 }

@@ -225,7 +225,7 @@ export type Database = {
       };
       campaigns: {
         Row: CampaignRow;
-        // Clients only hold UPDATE (status, published_at); inserts are RPC/service-only.
+        // All writes are RPC/service-only since 0008 revoked client grants.
         Insert: {
           readonly pitch_draft_id: string;
           readonly owner_user_id: string;
@@ -233,10 +233,7 @@ export type Database = {
           readonly published_at?: string | null;
           readonly slug?: string | null;
         };
-        Update: {
-          readonly status?: CampaignRow['status'];
-          readonly published_at?: string | null;
-        };
+        Update: Record<string, never>;
         Relationships: [];
       };
     };
@@ -313,6 +310,12 @@ export type Database = {
       leave_intro_room: {
         Args: { readonly target_room_id: string };
         Returns: undefined;
+      };
+      set_campaign_status: {
+        Args: { readonly target_campaign_id: string; readonly next_status: string };
+        Returns: readonly {
+          readonly campaign_status: string;
+        }[];
       };
     };
     Enums: {

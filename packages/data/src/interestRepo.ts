@@ -199,6 +199,23 @@ export class InterestRepo {
     return { introRoomId: row?.intro_room_id ?? null };
   }
 
+  /** Dater lifecycle control: published ⇄ paused → archived (0008 RPC). */
+  async setCampaignStatus(
+    campaignId: string,
+    nextStatus: 'published' | 'paused' | 'archived',
+  ): Promise<string> {
+    await this.getRequiredSession();
+    const { data, error } = await this.client.rpc('set_campaign_status', {
+      target_campaign_id: uuidSchema.parse(campaignId),
+      next_status: nextStatus,
+    });
+    if (error !== null) {
+      throw new DataLayerError('interest.setCampaignStatus', error);
+    }
+
+    return data.at(0)?.campaign_status ?? nextStatus;
+  }
+
   /** Campaigns the signed-in user owns (their inbox scope). */
   async listMyOwnedCampaigns(): Promise<
     readonly { readonly id: string; readonly slug: string | null; readonly status: string }[]

@@ -151,6 +151,9 @@ BEGIN
      WHERE id = '20000000-0000-0000-0000-000000000002';
     RAISE EXCEPTION 'owner can publish draft content without approved consent';
   EXCEPTION
+    -- 0008 revokes the client UPDATE grant outright; the 0001 trigger
+    -- remains as defense in depth if that grant ever returns.
+    WHEN insufficient_privilege THEN NULL;
     WHEN raise_exception THEN
       IF SQLERRM <> 'published campaign requires published consented pitch content' THEN
         RAISE;

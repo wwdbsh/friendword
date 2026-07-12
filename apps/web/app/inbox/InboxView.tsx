@@ -16,10 +16,19 @@ type InboxInterest = CampaignInterest & {
   readonly photoUrls: readonly string[];
 };
 
+type OwnedCampaign = {
+  readonly id: string;
+  readonly slug: string | null;
+  readonly status: string;
+};
+
 type InboxState =
   | { readonly step: 'loading' }
-  | { readonly step: 'empty' }
-  | { readonly step: 'list'; readonly interests: readonly InboxInterest[] }
+  | {
+      readonly step: 'ready';
+      readonly campaigns: readonly OwnedCampaign[];
+      readonly interests: readonly InboxInterest[];
+    }
   | { readonly step: 'error' };
 
 const INTENT_LABELS: Record<string, string> = {
@@ -63,7 +72,7 @@ export function InboxView() {
       interests.sort((left, right) =>
         (right.submittedAt ?? '').localeCompare(left.submittedAt ?? ''),
       );
-      setState(interests.length === 0 ? { step: 'empty' } : { step: 'list', interests });
+      setState({ step: 'ready', campaigns, interests });
     } catch {
       setState({ step: 'error' });
     }
@@ -74,6 +83,34 @@ export function InboxView() {
       void loadInbox();
     }
   }, [session, loadInbox]);
+
+  async function changeCampaignStatus(
+    campaignId: string,
+    nextStatus: 'published' | 'paused' | 'archived',
+  ) {
+    if (client === null) {
+      return;
+    }
+    if (
+      nextStatus === 'archived' &&
+      !window.confirm('Take your page down for good? Archived pages cannot be republished.')
+    ) {
+      return;
+    }
+    try {
+      await new InterestRepo(client).setCampaignStatus(campaignId, nextStatus);
+      setDecisionNote(
+        nextStatus === 'published'
+          ? 'Your page is live again.'
+          : nextStatus === 'paused'
+            ? 'Your page is paused — the link shows nothing until you resume.'
+            : 'Your page is permanently down.',
+      );
+      await loadInbox();
+    } catch {
+      setDecisionNote('That change did not go through. Refresh and try again.');
+    }
+  }
 
   async function decide(interestId: string, decision: 'accepted' | 'declined') {
     if (client === null) {
@@ -143,18 +180,7 @@ export function InboxView() {
           </section>
         )}
 
-        {client !== null && session !== null && state.step === 'empty' && (
-          <section className={styles.card}>
-            <span className={styles.badge}>Interest inbox</span>
-            <h1 className={styles.title}>No interest yet.</h1>
-            <p className={styles.muted}>
-              When someone sends verified interest on your page, their profile shows up here for you
-              to accept or decline.
-            </p>
-          </section>
-        )}
-
-        {client !== null && session !== null && state.step === 'list' && (
+        {client !== null && session !== null && state.step === 'ready' && (
           <>
             <section>
               <span className={styles.badge}>Interest inbox</span>
@@ -166,6 +192,76 @@ export function InboxView() {
                 </Link>
               )}
             </section>
+
+            {state.campaigns.map((campaign) => (
+              <section key={campaign.id} className={styles.card}>
+                <span
+                  className={campaign.status === 'published' ? styles.badgeFresh : styles.badge}
+                >
+                  {campaign.status === 'published'
+                    ? 'Live'
+                    : campaign.status === 'paused'
+                      ? 'Paused'
+                      : 'Down'}
+                </span>
+                <h2 className={styles.subTitle}>Your page</h2>
+                <p className={styles.muted}>
+                  {campaign.slug === null
+                    ? 'No public link yet.'
+                    : `friendword — /p/${campaign.slug}`}
+                </p>
+                <div className={styles.actionRow}>
+                  {campaign.slug !== null && campaign.status === 'published' && (
+                    <Link className={styles.secondary} href={`/p/${campaign.slug}`}>
+                      View my page
+                    </Link>
+                  )}
+                  {campaign.status === 'published' && (
+                    <button
+                      className={styles.secondary}
+                      type="button"
+                      onClick={() => {
+                        void changeCampaignStatus(campaign.id, 'paused');
+                      }}
+                    >
+                      Pause my page
+                    </button>
+                  )}
+                  {campaign.status === 'paused' && (
+                    <button
+                      className={styles.primary}
+                      type="button"
+                      onClick={() => {
+                        void changeCampaignStatus(campaign.id, 'published');
+                      }}
+                    >
+                      Resume my page
+                    </button>
+                  )}
+                  {(campaign.status === 'published' || campaign.status === 'paused') && (
+                    <button
+                      className={styles.danger}
+                      type="button"
+                      onClick={() => {
+                        void changeCampaignStatus(campaign.id, 'archived');
+                      }}
+                    >
+                      Take it down for good
+                    </button>
+                  )}
+                </div>
+              </section>
+            ))}
+
+            {state.interests.length === 0 && (
+              <section className={styles.card}>
+                <h2 className={styles.subTitle}>No interest yet.</h2>
+                <p className={styles.muted}>
+                  When someone sends verified interest on your page, their profile shows up here for
+                  you to accept or decline.
+                </p>
+              </section>
+            )}
 
             {state.interests.map((interest) => (
               <section key={interest.interestId} className={styles.card}>

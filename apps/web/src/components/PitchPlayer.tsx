@@ -3,12 +3,12 @@
 import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
 
-import type { PitchFixture } from '@/fixtures/pitch';
+import type { PitchView } from '@/pitch/view';
 
 import styles from './PitchPlayer.module.css';
 
 type PitchPlayerProps = {
-  readonly pitch: PitchFixture;
+  readonly pitch: PitchView;
 };
 
 const TICK_MS = 80;
@@ -32,13 +32,16 @@ function PlayIcon({ paused }: { readonly paused: boolean }) {
 
 export function PitchPlayer({ pitch }: PitchPlayerProps) {
   const [elapsedMs, setElapsedMs] = useState(0);
+  const [durationMs, setDurationMs] = useState(pitch.durationMs);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isFooterVisible, setIsFooterVisible] = useState(false);
   const elapsedRef = useRef(0);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const interestTriggerRef = useRef<HTMLButtonElement>(null);
   const dialogActionRef = useRef<HTMLButtonElement>(null);
+  const hasRealAudio = pitch.audioUrl !== null;
 
   useEffect(() => {
     const source = new URLSearchParams(window.location.search).get('src');
@@ -49,24 +52,37 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
   }, []);
 
   useEffect(() => {
-    if (!isPlaying) {
+    if (!isPlaying || hasRealAudio) {
       return;
     }
 
     const startedAt = window.performance.now() - elapsedRef.current;
     const intervalId = window.setInterval(() => {
-      const nextElapsed = Math.min(pitch.durationMs, window.performance.now() - startedAt);
+      const nextElapsed = Math.min(durationMs, window.performance.now() - startedAt);
       elapsedRef.current = nextElapsed;
       setElapsedMs(nextElapsed);
 
-      if (nextElapsed >= pitch.durationMs) {
+      if (nextElapsed >= durationMs) {
         window.clearInterval(intervalId);
         setIsPlaying(false);
       }
     }, TICK_MS);
 
     return () => window.clearInterval(intervalId);
-  }, [isPlaying, pitch.durationMs]);
+  }, [isPlaying, hasRealAudio, durationMs]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!hasRealAudio || audio === null) {
+      return;
+    }
+
+    if (isPlaying) {
+      void audio.play().catch(() => setIsPlaying(false));
+    } else {
+      audio.pause();
+    }
+  }, [isPlaying, hasRealAudio]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -90,10 +106,11 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
     return () => observer.disconnect();
   }, []);
 
-  const progress = elapsedMs / pitch.durationMs;
-  const activePhotoIndex = pitch.photos.findIndex(
-    (photo) => elapsedMs >= photo.startMs && elapsedMs < photo.endMs,
-  );
+  const progress = durationMs > 0 ? elapsedMs / durationMs : 0;
+  // Real audio has no per-photo timeline yet; spread the photos evenly.
+  const activePhotoIndex = hasRealAudio
+    ? Math.min(Math.floor(progress * pitch.photos.length), pitch.photos.length - 1)
+    : pitch.photos.findIndex((photo) => elapsedMs >= photo.startMs && elapsedMs < photo.endMs);
   const activeCaption =
     pitch.captions.find((caption) => elapsedMs >= caption.startMs && elapsedMs < caption.endMs) ??
     pitch.captions[0];
@@ -103,9 +120,12 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
   const activeWordIndex = Math.floor(captionProgress * captionWords.length);
 
   const togglePlayback = () => {
-    if (elapsedRef.current >= pitch.durationMs) {
+    if (elapsedRef.current >= durationMs && durationMs > 0) {
       elapsedRef.current = 0;
       setElapsedMs(0);
+      if (audioRef.current !== null) {
+        audioRef.current.currentTime = 0;
+      }
     }
     setIsPlaying((current) => !current);
   };
@@ -128,6 +148,25 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
 
   return (
     <div className={styles.playerShell}>
+      {pitch.audioUrl !== null && (
+        <audio
+          ref={audioRef}
+          src={pitch.audioUrl}
+          preload="metadata"
+          onLoadedMetadata={(event) => {
+            const seconds = event.currentTarget.duration;
+            if (Number.isFinite(seconds) && seconds > 0) {
+              setDurationMs(seconds * 1000);
+            }
+          }}
+          onTimeUpdate={(event) => {
+            const nextElapsed = event.currentTarget.currentTime * 1000;
+            elapsedRef.current = nextElapsed;
+            setElapsedMs(nextElapsed);
+          }}
+          onEnded={() => setIsPlaying(false)}
+        />
+      )}
       <article className={styles.stage}>
         <div className={styles.photos}>
           {pitch.photos.map((photo, index) => (
@@ -149,13 +188,13 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
           <p>
             <strong>{pitch.introducerPseudonym}</strong> introduces
           </p>
-          <h1>
-            {pitch.daterName}, {pitch.age}
-          </h1>
+          <h1>{pitch.age === null ? pitch.daterName : `${pitch.daterName}, ${pitch.age}`}</h1>
           <span className={styles.relationshipSticker}>{pitch.relationship}</span>
         </header>
 
-        <div className={styles.location}>{pitch.approximateLocation}</div>
+        {pitch.approximateLocation !== null && (
+          <div className={styles.location}>{pitch.approximateLocation}</div>
+        )}
 
         <div className={styles.caption} aria-live="off">
           {captionWords.map((word, index) => (
@@ -173,7 +212,11 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
             className={styles.playButton}
             type="button"
             onClick={togglePlayback}
-            aria-label={isPlaying ? 'Pause Maya’s pitch' : 'Play Maya’s pitch'}
+            aria-label={
+              isPlaying
+                ? `Pause ${pitch.introducerPseudonym}’s pitch`
+                : `Play ${pitch.introducerPseudonym}’s pitch`
+            }
           >
             <PlayIcon paused={!isPlaying} />
           </button>
@@ -204,7 +247,7 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
             </svg>
             <div className={styles.timeRow}>
               <span>{formatTime(elapsedMs)}</span>
-              <span>{formatTime(pitch.durationMs)}</span>
+              <span>{formatTime(durationMs)}</span>
             </div>
           </div>
         </div>
@@ -237,8 +280,8 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
           <span className={styles.modalBadge}>Verified interest</span>
           <h2 id="interest-modal-title">Coming soon — verified interest</h2>
           <p>
-            You&apos;ll share current photos and a short profile before Blair sees your interest.
-            Your phone number and email stay private.
+            You&apos;ll share current photos and a short profile before {pitch.daterName} sees your
+            interest. Your phone number and email stay private.
           </p>
           <button
             ref={dialogActionRef}

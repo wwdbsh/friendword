@@ -36,6 +36,17 @@ export type PitchDraftRow = {
   readonly updated_at: string;
 };
 
+export type CampaignRow = {
+  readonly id: string;
+  readonly pitch_draft_id: string;
+  readonly owner_user_id: string;
+  readonly status: 'draft' | 'published' | 'paused' | 'expired' | 'archived';
+  readonly published_at: string | null;
+  readonly slug: string | null;
+  readonly created_at: string;
+  readonly updated_at: string;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -79,6 +90,22 @@ export type Database = {
           readonly body?: string | null;
           readonly relationship_type?: RelationshipType | null;
           readonly relationship_duration?: RelationshipDuration | null;
+        };
+        Relationships: [];
+      };
+      campaigns: {
+        Row: CampaignRow;
+        // Clients only hold UPDATE (status, published_at); inserts are RPC/service-only.
+        Insert: {
+          readonly pitch_draft_id: string;
+          readonly owner_user_id: string;
+          readonly status?: CampaignRow['status'];
+          readonly published_at?: string | null;
+          readonly slug?: string | null;
+        };
+        Update: {
+          readonly status?: CampaignRow['status'];
+          readonly published_at?: string | null;
         };
         Relationships: [];
       };

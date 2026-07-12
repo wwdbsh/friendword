@@ -14,6 +14,7 @@ import {
 import { ConsentRepo } from './consentRepo';
 import { InvalidDraftUpdateError, InvalidStoragePathError, UnauthenticatedError } from './errors';
 import { buildPitchMediaPath, PitchDraftRepo } from './pitchDraftRepo';
+import { getPublishedPitchBySlug } from './publishedPitchRepo';
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
@@ -483,6 +484,106 @@ describe('ConsentRepo', () => {
     expect(published).toEqual({
       campaignId: '20000000-0000-0000-0000-000000000001',
       campaignSlug: 'blair-abc123',
+    });
+  });
+});
+
+describe('getPublishedPitchBySlug', () => {
+  const campaignRow = {
+    id: '20000000-0000-0000-0000-000000000001',
+    pitch_draft_id: '10000000-0000-0000-0000-000000000001',
+    owner_user_id: '00000000-0000-0000-0000-000000000002',
+    status: 'published',
+    published_at: '2026-07-13T00:00:00Z',
+    slug: 'blair-abc123',
+  };
+  const draftRow = {
+    id: '10000000-0000-0000-0000-000000000001',
+    created_by_user_id: '00000000-0000-0000-0000-000000000001',
+    subject_user_id: '00000000-0000-0000-0000-000000000002',
+    status: 'published',
+    headline: null,
+    body: null,
+    relationship_type: 'friend',
+    relationship_duration: 'y3to10',
+  };
+  const profileRows = [
+    { user_id: '00000000-0000-0000-0000-000000000001', display_name: 'Maya' },
+    { user_id: '00000000-0000-0000-0000-000000000002', display_name: 'Blair' },
+  ];
+
+  const tableMock = vi.fn();
+
+  function configurePublishedPitchClient(campaign: unknown): void {
+    tableMock.mockImplementation((table: string) => {
+      if (table === 'campaigns') {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({ maybeSingle: async () => ({ data: campaign, error: null }) }),
+            }),
+          }),
+        };
+      }
+      if (table === 'pitch_drafts') {
+        return {
+          select: () => ({ eq: () => ({ single: async () => ({ data: draftRow, error: null }) }) }),
+        };
+      }
+      return {
+        select: () => ({ in: async () => ({ data: profileRows, error: null }) }),
+      };
+    });
+    mocks.createClient.mockReturnValue({
+      auth: {},
+      from: tableMock,
+      storage: {
+        from: () => ({
+          createSignedUrl: async () => ({
+            data: { signedUrl: 'https://storage.example/voice-read' },
+            error: null,
+          }),
+        }),
+      },
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects malformed slugs without querying', async () => {
+    configurePublishedPitchClient(campaignRow);
+    const client = createServiceClient('https://project.example', 'service-key');
+
+    await expect(getPublishedPitchBySlug(client, 'Not A Slug!')).resolves.toBeNull();
+    expect(tableMock).not.toHaveBeenCalled();
+  });
+
+  it('returns null when no published campaign matches', async () => {
+    configurePublishedPitchClient(null);
+    const client = createServiceClient('https://project.example', 'service-key');
+
+    await expect(getPublishedPitchBySlug(client, 'blair-abc123')).resolves.toBeNull();
+  });
+
+  it('maps the campaign, draft, profiles, and signed voice URL', async () => {
+    configurePublishedPitchClient(campaignRow);
+    const client = createServiceClient('https://project.example', 'service-key');
+
+    const pitch = await getPublishedPitchBySlug(client, 'blair-abc123');
+
+    expect(pitch).toEqual({
+      campaignId: campaignRow.id,
+      campaignSlug: 'blair-abc123',
+      publishedAt: '2026-07-13T00:00:00Z',
+      daterDisplayName: 'Blair',
+      introducerDisplayName: 'Maya',
+      relationshipType: 'friend',
+      relationshipDuration: 'y3to10',
+      headline: null,
+      body: null,
+      voiceUrl: 'https://storage.example/voice-read',
     });
   });
 });

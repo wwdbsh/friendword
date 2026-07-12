@@ -4,3 +4,4 @@ export * from './consentRepo';
 export * from './database.types';
 export * from './errors';
 export * from './pitchDraftRepo';
+export * from './publishedPitchRepo';

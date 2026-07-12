@@ -1,0 +1,30 @@
+# Hosted-config surface for `supabase config push`.
+# The CLI diffs EVERY auth key against its local default, so any remote
+# setting we don't mirror here would be silently reset on push. Keys below
+# either mirror the remote value (marked) or are intentionally managed here.
+# SMTP credentials stay dashboard-only — never add [auth.email.smtp].
+project_id = "friendword"
+
+[auth]
+site_url = "http://localhost:3000" # mirror remote
+additional_redirect_urls = [] # mirror remote
+
+[auth.mfa.totp]
+enroll_enabled = true # mirror remote
+verify_enabled = true # mirror remote
+
+[auth.email]
+enable_confirmations = true # mirror remote
+max_frequency = "1m0s" # mirror remote
+otp_length = 8 # mirror remote
+
+# Managed here: both sign-in emails must expose {{ .Token }} for the mobile
+# code path next to the web link. gotrue picks confirmation for first-time
+# emails and magic_link for returning ones — keep the two in sync.
+[auth.email.template.magic_link]
+subject = "Your Friendword sign-in code"
+content_path = "./supabase/templates/magic_link.html"
+
+[auth.email.template.confirmation]
+subject = "Confirm your email — Friendword"
+content_path = "./supabase/templates/confirmation.html"

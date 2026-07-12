@@ -30,7 +30,7 @@
 1. ~~(사용자) Resend SMTP 입력~~ — **완료 (2026-07-13 사용자 확인)**
 2. **(P1) SMTP 연결 후**: Templates의 Magic Link에 `{{ .Token }}` 반영 + 모바일 OTP 로그인 실검증
 3. ~~(P1) Slice 5B-1: 웹 `/consent/[token]`~~ — **완료 (프로덕션 E2E 12/12, Playwright 10/10)**
-4. **(P1) Slice 5B-2**: `/p/[slug]` 실데이터화 — 서버 컴포넌트에서 service role로 published 캠페인 조회 + 미디어 signed URL. fixture는 fallback 유지
+4. ~~(P1) Slice 5B-2: `/p/[slug]` 실데이터화~~ — **완료 (프로덕션 E2E 14/14, 실캠페인 렌더 QA)**
 5. **(P2) 모바일**: 제출 시 사진 업로드 추가 (`HybridPitchDraftService.uploadRecording` 옆에), 제출 성공 후 동의 링크 공유 화면 (`draft.server.consentToken` 로컬 보관 중)
 6. **(P2)** verified interest flow (인터레스트 프로필 + accept/decline RPC)
 7. **(P3)** Intro Room 채팅 + 신고·차단 UI

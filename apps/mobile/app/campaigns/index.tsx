@@ -89,6 +89,15 @@ export default function CampaignsScreen() {
               {draft.photos.length} photo{draft.photos.length === 1 ? '' : 's'} ·{' '}
               {draft.recording ? formatDuration(draft.recording.durationMillis) : 'No voice track'}
             </Text>
+            {draft.server !== null && draft.status === 'consent_pending' ? (
+              <HypeButton
+                label="Share the approval invite"
+                onPress={() =>
+                  router.push({ pathname: '/pitch/share', params: { draftId: draft.id } })
+                }
+                secondary
+              />
+            ) : null}
           </StickerCard>
         ))}
       </ScrollView>
@@ -101,7 +110,7 @@ function formatStatus(status: PitchDraft['status']): string {
     case 'draft':
       return 'Draft';
     case 'consent_pending':
-      return 'Approval queued (mock)';
+      return 'Waiting for approval';
     case 'changes_requested':
       return 'Changes requested';
     case 'approved':

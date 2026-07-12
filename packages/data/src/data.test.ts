@@ -332,6 +332,36 @@ describe('PitchDraftRepo', () => {
     expect(mocks.signedUpload).not.toHaveBeenCalled();
   });
 
+  it('registers an uploaded asset with its canonical storage path', async () => {
+    const draftId = '10000000-0000-0000-0000-000000000001';
+    const row = {
+      id: '40000000-0000-0000-0000-000000000001',
+      pitch_draft_id: draftId,
+      asset_type: 'photo',
+      storage_path: `pitch-media/${draftId}/photo-1.jpg`,
+      sort_order: 0,
+    };
+    mocks.draftInsert.mockReturnValue({
+      select: () => ({ single: async () => ({ data: row, error: null }) }),
+    });
+    const client = createBrowserClient('https://project.example', 'anon-key');
+    const repo = new PitchDraftRepo(client);
+
+    const result = await repo.registerAsset(draftId, 'photo', 'photo-1.jpg', 0);
+
+    expect(mocks.draftInsert).toHaveBeenCalledWith({
+      pitch_draft_id: draftId,
+      uploaded_by_user_id: '00000000-0000-0000-0000-000000000001',
+      asset_type: 'photo',
+      storage_path: `pitch-media/${draftId}/photo-1.jpg`,
+      sort_order: 0,
+    });
+    expect(result).toEqual(row);
+    await expect(repo.registerAsset(draftId, 'photo', '../evil.jpg')).rejects.toBeInstanceOf(
+      InvalidStoragePathError,
+    );
+  });
+
   it('submits a draft for consent through the server RPC and maps the token', async () => {
     const draftId = '10000000-0000-0000-0000-000000000001';
     mocks.rpc.mockResolvedValue({
@@ -512,6 +542,16 @@ describe('getPublishedPitchBySlug', () => {
     { user_id: '00000000-0000-0000-0000-000000000002', display_name: 'Blair' },
   ];
 
+  const assetRows = [
+    {
+      id: '40000000-0000-0000-0000-000000000001',
+      pitch_draft_id: '10000000-0000-0000-0000-000000000001',
+      asset_type: 'photo',
+      storage_path: 'pitch-media/10000000-0000-0000-0000-000000000001/photo-1.jpg',
+      sort_order: 0,
+    },
+  ];
+
   const tableMock = vi.fn();
 
   function configurePublishedPitchClient(campaign: unknown): void {
@@ -530,6 +570,15 @@ describe('getPublishedPitchBySlug', () => {
           select: () => ({ eq: () => ({ single: async () => ({ data: draftRow, error: null }) }) }),
         };
       }
+      if (table === 'pitch_assets') {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({ order: async () => ({ data: assetRows, error: null }) }),
+            }),
+          }),
+        };
+      }
       return {
         select: () => ({ in: async () => ({ data: profileRows, error: null }) }),
       };
@@ -539,8 +588,8 @@ describe('getPublishedPitchBySlug', () => {
       from: tableMock,
       storage: {
         from: () => ({
-          createSignedUrl: async () => ({
-            data: { signedUrl: 'https://storage.example/voice-read' },
+          createSignedUrl: async (path: string) => ({
+            data: { signedUrl: `https://storage.example/${path}` },
             error: null,
           }),
         }),
@@ -583,7 +632,13 @@ describe('getPublishedPitchBySlug', () => {
       relationshipDuration: 'y3to10',
       headline: null,
       body: null,
-      voiceUrl: 'https://storage.example/voice-read',
+      voiceUrl: `https://storage.example/${draftRow.id}/voice.m4a`,
+      photos: [
+        {
+          url: `https://storage.example/${draftRow.id}/photo-1.jpg`,
+          sortOrder: 0,
+        },
+      ],
     });
   });
 });

@@ -4,7 +4,7 @@ import type { DraftInputs } from '@friendword/contracts';
 import type { Session } from '@supabase/supabase-js';
 
 import type { BrowserSupabaseClient } from './client';
-import type { PitchDraftRow } from './database.types';
+import type { PitchAssetRow, PitchDraftRow } from './database.types';
 import {
   DataLayerError,
   InvalidDraftUpdateError,
@@ -122,6 +122,36 @@ export class PitchDraftRepo {
     }
 
     return { storagePath, signedUrl: data.signedUrl, token: data.token };
+  }
+
+  /**
+   * Records an uploaded object in pitch_assets so other surfaces (consent
+   * review, public page) can discover it without guessing storage paths.
+   */
+  async registerAsset(
+    draftId: string,
+    assetType: 'voice' | 'photo',
+    fileName: string,
+    sortOrder = 0,
+  ): Promise<PitchAssetRow> {
+    const session = await this.getRequiredSession();
+    const storagePath = buildPitchMediaPath(draftId, fileName);
+    const { data, error } = await this.client
+      .from('pitch_assets')
+      .insert({
+        pitch_draft_id: uuidSchema.parse(draftId),
+        uploaded_by_user_id: session.user.id,
+        asset_type: assetType,
+        storage_path: storagePath,
+        sort_order: sortOrder,
+      })
+      .select()
+      .single();
+    if (error !== null) {
+      throw new DataLayerError('pitchDraft.registerAsset', error);
+    }
+
+    return data;
   }
 
   /**

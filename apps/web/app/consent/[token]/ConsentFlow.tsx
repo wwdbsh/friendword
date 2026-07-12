@@ -53,6 +53,7 @@ type FlowState =
       readonly preview: ConsentPreview;
       readonly draft: PitchDraftRow;
       readonly voiceUrl: string | null;
+      readonly photoUrls: readonly string[];
     }
   | { readonly step: 'publishing'; readonly preview: ConsentPreview }
   | { readonly step: 'error'; readonly message: string };
@@ -114,7 +115,15 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         const { pitchDraftId } = await repo.claim(token);
         const draft = await repo.getDraftForReview(pitchDraftId);
         const voiceUrl = await repo.createVoicePlaybackUrl(pitchDraftId).catch(() => null);
-        setState({ step: 'review', preview, draft, voiceUrl });
+        const assets = await repo.listAssets(pitchDraftId).catch(() => []);
+        const photoUrls = (
+          await Promise.all(
+            assets
+              .filter((asset) => asset.asset_type === 'photo')
+              .map((asset) => repo.createAssetViewUrl(asset.storage_path).catch(() => null)),
+          )
+        ).filter((url): url is string => url !== null);
+        setState({ step: 'review', preview, draft, voiceUrl, photoUrls });
       } catch (error: unknown) {
         claimStartedRef.current = false;
         setState({ step: 'error', message: claimErrorMessage(error) });
@@ -334,6 +343,26 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                 </audio>
               )}
             </div>
+
+            {state.photoUrls.length > 0 && (
+              <div className={styles.photoBlock}>
+                <h2 className={styles.photoHeading}>The photos they picked</h2>
+                <div className={styles.photoGrid}>
+                  {state.photoUrls.map((url, index) => (
+                    <img
+                      key={url}
+                      className={styles.photo}
+                      src={url}
+                      alt={`Suggested photo ${index + 1}`}
+                    />
+                  ))}
+                </div>
+                <p className={styles.finePrint}>
+                  These only go live if you approve. Photo swaps land in the next update — for now,
+                  ask {state.preview.introducerDisplayName} to resend with different ones.
+                </p>
+              </div>
+            )}
 
             {(state.draft.headline !== null || state.draft.body !== null) && (
               <div className={styles.notes}>

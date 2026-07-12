@@ -83,6 +83,22 @@ export function fromFixture(fixture: PitchFixture): PitchView {
   return { ...fixture, audioUrl: null };
 }
 
+function realPhotos(pitch: PublishedPitch): readonly [PitchPhoto, ...PitchPhoto[]] | null {
+  if (pitch.photos.length === 0) {
+    return null;
+  }
+
+  const windowMs = 60_000 / pitch.photos.length;
+  const mapped = pitch.photos.map((photo, index) => ({
+    src: photo.url,
+    alt: `${pitch.daterDisplayName} — approved photo ${index + 1}`,
+    startMs: Math.round(index * windowMs),
+    endMs: index === pitch.photos.length - 1 ? 60_001 : Math.round((index + 1) * windowMs),
+  }));
+
+  return mapped as unknown as readonly [PitchPhoto, ...PitchPhoto[]];
+}
+
 export function fromPublishedPitch(pitch: PublishedPitch): PitchView {
   const captionText =
     pitch.headline ??
@@ -97,7 +113,7 @@ export function fromPublishedPitch(pitch: PublishedPitch): PitchView {
     relationship: relationshipLabel(pitch),
     durationMs: 60_000,
     description: `Meet ${pitch.daterDisplayName} through ${pitch.introducerDisplayName}'s original voice pitch, shared with ${pitch.daterDisplayName}'s approval.`,
-    photos: PLACEHOLDER_PHOTOS,
+    photos: realPhotos(pitch) ?? PLACEHOLDER_PHOTOS,
     captions: [{ startMs: 0, endMs: Number.MAX_SAFE_INTEGER, text: captionText }],
     waveform: PLACEHOLDER_WAVEFORM,
     vouches: [],

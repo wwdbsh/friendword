@@ -169,9 +169,13 @@ export default function NewPitchScreen() {
     const activeDraftId = requireDraftId(draftId);
     setSubmitting(true);
     try {
-      await pitchDraftService.submitForConsent(activeDraftId);
+      const submitted = await pitchDraftService.submitForConsent(activeDraftId);
       setErrorMessage(null);
-      router.replace('/campaigns');
+      if (submitted.server !== null) {
+        router.replace({ pathname: '/pitch/share', params: { draftId: submitted.id } });
+      } else {
+        router.replace('/campaigns');
+      }
     } catch (error: unknown) {
       if (error instanceof NeedsSignInError) {
         setSignInVisible(true);

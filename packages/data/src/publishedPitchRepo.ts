@@ -15,6 +15,11 @@ const PITCH_MEDIA_BUCKET = 'pitch-media';
 const VOICE_FILE_NAME = 'voice.m4a';
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
 
+export type PublishedPitchPhoto = {
+  readonly url: string;
+  readonly sortOrder: number;
+};
+
 export type PublishedPitch = {
   readonly campaignId: string;
   readonly campaignSlug: string;
@@ -26,6 +31,7 @@ export type PublishedPitch = {
   readonly headline: string | null;
   readonly body: string | null;
   readonly voiceUrl: string | null;
+  readonly photos: readonly PublishedPitchPhoto[];
 };
 
 /**
@@ -84,6 +90,30 @@ export async function getPublishedPitchBySlug(
     .from(PITCH_MEDIA_BUCKET)
     .createSignedUrl(`${draft.id}/${VOICE_FILE_NAME}`, SIGNED_URL_TTL_SECONDS);
 
+  const { data: assets, error: assetsError } = await client
+    .from('pitch_assets')
+    .select()
+    .eq('pitch_draft_id', draft.id)
+    .eq('asset_type', 'photo')
+    .order('sort_order', { ascending: true });
+  if (assetsError !== null) {
+    throw new DataLayerError('publishedPitch.assets', assetsError);
+  }
+
+  const bucketPrefix = `${PITCH_MEDIA_BUCKET}/`;
+  const photos: PublishedPitchPhoto[] = [];
+  for (const asset of assets) {
+    if (!asset.storage_path.startsWith(bucketPrefix)) {
+      continue;
+    }
+    const { data: photoSigned } = await client.storage
+      .from(PITCH_MEDIA_BUCKET)
+      .createSignedUrl(asset.storage_path.slice(bucketPrefix.length), SIGNED_URL_TTL_SECONDS);
+    if (photoSigned !== null) {
+      photos.push({ url: photoSigned.signedUrl, sortOrder: asset.sort_order });
+    }
+  }
+
   return {
     campaignId: campaign.id,
     campaignSlug: parsedSlug.data,
@@ -95,5 +125,6 @@ export async function getPublishedPitchBySlug(
     headline: draft.headline,
     body: draft.body,
     voiceUrl: signed?.signedUrl ?? null,
+    photos,
   };
 }

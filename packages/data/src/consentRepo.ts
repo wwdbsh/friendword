@@ -4,7 +4,7 @@ import type { RelationshipDuration, RelationshipType } from '@friendword/contrac
 import type { Session } from '@supabase/supabase-js';
 
 import type { BrowserSupabaseClient } from './client';
-import type { PitchDraftRow } from './database.types';
+import type { PitchAssetRow, PitchDraftRow } from './database.types';
 import { DataLayerError, UnauthenticatedError } from './errors';
 
 const rawTokenSchema = z
@@ -132,6 +132,41 @@ export class ConsentRepo {
       .createSignedUrl(objectPath, SIGNED_URL_TTL_SECONDS);
     if (error !== null) {
       throw new DataLayerError('consent.createVoicePlaybackUrl', error);
+    }
+
+    return data.signedUrl;
+  }
+
+  /** Registered uploads for the draft, in the introducer's chosen order. */
+  async listAssets(draftId: string): Promise<readonly PitchAssetRow[]> {
+    await this.getRequiredSession();
+    const { data, error } = await this.client
+      .from('pitch_assets')
+      .select()
+      .eq('pitch_draft_id', uuidSchema.parse(draftId))
+      .order('sort_order', { ascending: true });
+    if (error !== null) {
+      throw new DataLayerError('consent.listAssets', error);
+    }
+
+    return data;
+  }
+
+  /** Signed view URL for a registered asset ('pitch-media/<draft>/<file>'). */
+  async createAssetViewUrl(storagePath: string): Promise<string> {
+    await this.getRequiredSession();
+    const prefix = `${PITCH_MEDIA_BUCKET}/`;
+    if (!storagePath.startsWith(prefix)) {
+      throw new DataLayerError(
+        'consent.createAssetViewUrl',
+        new Error(`unexpected storage path: ${storagePath}`),
+      );
+    }
+    const { data, error } = await this.client.storage
+      .from(PITCH_MEDIA_BUCKET)
+      .createSignedUrl(storagePath.slice(prefix.length), SIGNED_URL_TTL_SECONDS);
+    if (error !== null) {
+      throw new DataLayerError('consent.createAssetViewUrl', error);
     }
 
     return data.signedUrl;

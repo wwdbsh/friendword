@@ -46,6 +46,7 @@ const config: ExpoConfig = {
   extra: {
     supabaseUrl: process.env['EXPO_PUBLIC_SUPABASE_URL'] ?? '',
     supabaseAnonKey: process.env['EXPO_PUBLIC_SUPABASE_ANON_KEY'] ?? '',
+    webOrigin: process.env['EXPO_PUBLIC_WEB_ORIGIN'] ?? '',
   },
   experiments: {
     typedRoutes: true,

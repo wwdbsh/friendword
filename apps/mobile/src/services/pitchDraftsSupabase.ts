@@ -101,6 +101,7 @@ export class HybridPitchDraftService implements PitchDraftService {
     try {
       const serverDraft = await repo.createDraft(toDraftInputs(draft.relationship));
       await this.uploadRecording(repo, serverDraft.id, draft.recording);
+      await this.uploadPhotos(repo, serverDraft.id, draft.photos);
       submission = {
         serverDraftId: serverDraft.id,
         ...(await repo.submitForConsent(serverDraft.id)),
@@ -124,17 +125,40 @@ export class HybridPitchDraftService implements PitchDraftService {
     serverDraftId: string,
     recording: PitchRecording,
   ): Promise<void> {
-    const upload = await repo.requestAssetUpload(serverDraftId, 'voice.m4a');
-    const file = await fetch(recording.uri);
+    await this.uploadObject(repo, serverDraftId, 'voice.m4a', recording.uri, 'audio/mp4');
+    await repo.registerAsset(serverDraftId, 'voice', 'voice.m4a');
+  }
+
+  private async uploadPhotos(
+    repo: PitchDraftRepo,
+    serverDraftId: string,
+    photos: readonly PitchPhoto[],
+  ): Promise<void> {
+    for (const [index, photo] of photos.entries()) {
+      const fileName = `photo-${index + 1}.jpg`;
+      await this.uploadObject(repo, serverDraftId, fileName, photo.uri, 'image/jpeg');
+      await repo.registerAsset(serverDraftId, 'photo', fileName, index);
+    }
+  }
+
+  private async uploadObject(
+    repo: PitchDraftRepo,
+    serverDraftId: string,
+    fileName: string,
+    localUri: string,
+    contentType: string,
+  ): Promise<void> {
+    const upload = await repo.requestAssetUpload(serverDraftId, fileName);
+    const file = await fetch(localUri);
     const body = await file.blob();
     const response = await fetch(upload.signedUrl, {
       method: 'PUT',
-      headers: { 'Content-Type': 'audio/mp4', 'x-upsert': 'false' },
+      headers: { 'Content-Type': contentType, 'x-upsert': 'false' },
       body,
     });
     if (!response.ok) {
       throw new PitchDraftSubmissionError(
-        `Voice upload failed (${response.status}). Check your connection and try again.`,
+        `Upload of ${fileName} failed (${response.status}). Check your connection and try again.`,
       );
     }
   }

@@ -36,6 +36,17 @@ export type PitchDraftRow = {
   readonly updated_at: string;
 };
 
+export type PitchAssetRow = {
+  readonly id: string;
+  readonly pitch_draft_id: string;
+  readonly uploaded_by_user_id: string;
+  readonly asset_type: string;
+  readonly storage_path: string;
+  readonly sort_order: number;
+  readonly created_at: string;
+  readonly updated_at: string;
+};
+
 export type CampaignRow = {
   readonly id: string;
   readonly pitch_draft_id: string;
@@ -91,6 +102,18 @@ export type Database = {
           readonly relationship_type?: RelationshipType | null;
           readonly relationship_duration?: RelationshipDuration | null;
         };
+        Relationships: [];
+      };
+      pitch_assets: {
+        Row: PitchAssetRow;
+        Insert: {
+          readonly pitch_draft_id: string;
+          readonly uploaded_by_user_id: string;
+          readonly asset_type: string;
+          readonly storage_path: string;
+          readonly sort_order?: number;
+        };
+        Update: Record<string, never>;
         Relationships: [];
       };
       campaigns: {

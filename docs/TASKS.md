@@ -33,3 +33,9 @@
 | Advisor | `supabase/migrations/0004`, `packages/data`, `apps/mobile`(auth·서비스 계층), `.env` 심링크 | Slice 3 산출물 전부 | 전체 테스트+DB 하니스 그린, hosted Supabase 제출 경로 E2E 통과 | 완료 (프로덕션 E2E 8단계 검증, 커밋 예정) | 2026-07-12 |
 
 알려진 한계: 무료 티어 기본 SMTP로는 OTP 코드 메일 템플릿 수정 불가 → 커스텀 SMTP(Resend 등) 연결 필요. 사용자 결정 대기.
+
+## 2026-07-13 Slice 5A (동의 클레임·승인·발행 백엔드 — Advisor 단독)
+
+| Session | Owned paths                                     | Dependency | Acceptance criteria                                                     | Status                  | Updated    |
+| ------- | ----------------------------------------------- | ---------- | ----------------------------------------------------------------------- | ----------------------- | ---------- |
+| Advisor | `supabase/migrations/0005`, `supabase/tests/05` | Slice 4    | 로컬 하니스 5/5 + 프로덕션 Flow A→B E2E 7단계 통과, campaigns.slug 도입 | 완료 (0005 원격 배포됨) | 2026-07-13 |

@@ -1,6 +1,6 @@
 # PROJECT HANDOFF
 
-> 갱신: 2026-07-13 00:40 KST · 최신 커밋 `5712883` (main, CI 그린)
+> 갱신: 2026-07-13 01:00 KST · 최신 커밋 `5f9406d` (main, CI 그린)
 > 읽는 순서: 이 문서 → `docs/TASKS.md` → 필요 시 `FRIENDWORD_HANDOFF.md`(제품 원본), `docs/DESIGN.md`(디자인), `CLAUDE.md`/`AGENTS.md`(협업 규칙)
 
 ## CURRENT STATE
@@ -9,12 +9,15 @@
 - **모노레포**: `apps/mobile`(Expo SDK 57, expo-router) · `apps/web`(Next.js 15) · `packages/{domain,contracts,config,ui-tokens,data,adapters}` · `supabase/` · `media-worker`(스텁). pnpm, node-linker=hoisted.
 - **백엔드**: hosted Supabase `friendword`(ref `oknolcxsvogrhnxnyosr`, link 완료). 마이그레이션 0001~0005 배포됨. 상태 전이는 전부 SECURITY DEFINER RPC(`submit_pitch_for_consent`, `get_consent_preview`, `claim_consent_request`, `approve_and_publish_pitch`) — 클라이언트에 status/subject 쓰기 권한 없음.
 - **파이프라인 (동작 확인됨)**: 모바일 5트랙 피치 작성(로컬) → 제출 시 서버 draft 생성 + 음성 서명 업로드(`pitch-media` 비공개 버킷) + 동의 토큰 발급 → Dater가 토큰으로 클레임 → 승인·발행(campaign+slug+멤버십 생성). 프로덕션 E2E 통과.
-- **웹**: `/p/demo-blair` fixture 피치 페이지 완성(재생 시뮬레이션·자막·CTA·Playwright 5 테스트). 실데이터 미연결.
+- **웹**: `/consent/[token]` 전체 플로우 동작(anon preview → 매직링크 로그인 → claim → 음성 검토 → approve → `/p/[slug]`). `/p/[slug]`는 실데이터(service role 조회 + 음성 signed URL 실재생) + `demo-blair` fixture fallback. Playwright 10 테스트.
+- **이메일**: Resend SMTP 연결 검증 완료. confirmation/magic_link 템플릿은 `supabase/config.toml` + `supabase/templates/*`로 관리(`supabase config push`), 둘 다 `{{ .Token }}` 노출. OTP 왕복(발송→코드 수신→verifyOtp→세션) 프로덕션 검증됨. 템플릿 전파는 push 후 ~10분 소요.
 - **실행 환경**: tmux `friendword-web`(:3000) · `friendword-mobile`(expo, iPhone 17 Pro 시뮬레이터) · `friendword-codex-1/2/3`(워커, 현재 미사용).
 - **검증**: `pnpm lint && pnpm typecheck && pnpm test && pnpm format:check` · `bash scripts/test-db.sh`(suite 01~05) · `cd apps/web && pnpm test:e2e` — 전부 그린.
 
 ## DONE
 
+- 웹 동의 플로우 `/consent/[token]` + ConsentRepo + Playwright 5 스펙 (`0845a37`)
+- `/p/[slug]` 실데이터화 + PitchPlayer 실오디오 + 이메일 템플릿 브랜딩 (`5f9406d`)
 - 모노레포 스캐폴드 + CI + 코어 스키마 22테이블/RLS/불변식 (`4e37735`)
 - Hype Mixtape 디자인 시스템 + 모바일 피치 플로우 + 데이터/어댑터 레이어 + 웹 피치 페이지 (`b843b96`)
 - 모바일 제출 경로 Supabase 실연결 + 이메일 OTP 로그인 시트 (`a8bcf4b`)
@@ -28,9 +31,10 @@
 ## TODO
 
 1. ~~(사용자) Resend SMTP 입력~~ — **완료 (2026-07-13 사용자 확인)**
-2. **(P1) SMTP 연결 후**: Templates의 Magic Link에 `{{ .Token }}` 반영 + 모바일 OTP 로그인 실검증
+2. ~~(P1) Magic Link `{{ .Token }}` + OTP 실검증~~ — **완료 (템플릿 2종 config push, OTP 왕복 프로덕션 검증)**
 3. ~~(P1) Slice 5B-1: 웹 `/consent/[token]`~~ — **완료 (프로덕션 E2E 12/12, Playwright 10/10)**
 4. ~~(P1) Slice 5B-2: `/p/[slug]` 실데이터화~~ — **완료 (프로덕션 E2E 14/14, 실캠페인 렌더 QA)**
+   4b. **(사용자·출시 게이트) Resend 도메인 인증** — 현재 발신자 `onboarding@resend.dev`(샌드박스)는 계정 소유자 메일로만 발송 가능. 실사용자 로그인하려면 Resend에 도메인 인증 후 대시보드 SMTP sender 교체 필요
 5. **(P2) 모바일**: 제출 시 사진 업로드 추가 (`HybridPitchDraftService.uploadRecording` 옆에), 제출 성공 후 동의 링크 공유 화면 (`draft.server.consentToken` 로컬 보관 중)
 6. **(P2)** verified interest flow (인터레스트 프로필 + accept/decline RPC)
 7. **(P3)** Intro Room 채팅 + 신고·차단 UI
@@ -48,7 +52,8 @@
 
 ## ISSUES / RISKS
 
-- 무료 티어 기본 메일러로는 OTP 코드 발송 불가 → Resend SMTP 대기 (모바일 로그인 실사용 차단 중, 웹 매직링크는 무관)
+- Resend 샌드박스 발신자(`onboarding@resend.dev`)는 소유자 메일 외 발송 시 500 → 도메인 인증 전까지 타인 로그인 불가 (출시 게이트, TODO 4b)
+- 이메일 템플릿 변경은 `supabase config push` 후 auth 서비스 반영까지 ~10분 지연. config.toml에는 원격 값 미러링 필수(미지정 키는 로컬 기본값으로 리셋됨) — SMTP 크리덴셜은 절대 config.toml에 넣지 않음
 - App Review 리스크(데이팅 4.3b + UGC): 7월 말 심사 제출 + 수동 release 계획 준수 필요
 - `database.types.ts`는 수동 부분 타입 — 테이블 추가 시 갱신 누락 주의
 - 시뮬레이터 탭 자동화 불가 → 인터랙션 QA는 사용자 손 테스트 또는 프로덕션 E2E 스크립트(핸드오프의 QA 패턴: service role로 유저 생성→anon으로 RLS 검증→정리)로 대체

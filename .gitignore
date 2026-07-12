@@ -26,7 +26,7 @@ coverage/
 .eslintcache
 
 # Next.js (next-env.d.ts is committed on purpose: CI typechecks without building)
-.next/
+.next*/
 .vercel/
 
 # Expo / React Native (managed workflow; native dirs are generated via prebuild)
@@ -55,3 +55,4 @@ pnpm-debug.log*
 # supabase local
 supabase/.branches/
 supabase/.temp/
+test-results/

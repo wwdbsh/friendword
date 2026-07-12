@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1600" role="img" aria-labelledby="title desc">
+  <title id="title">Blair portrait placeholder three</title>
+  <desc id="desc">A graphic portrait silhouette walking through a sunny city.</desc>
+  <rect width="900" height="1600" fill="#FFC63F"/>
+  <path d="M0 1180h900v420H0z" fill="#FFF6EA"/>
+  <path d="M80 1180V550h210v630M660 1180V410h180v770" fill="#FF5B2E" stroke="#221B15" stroke-width="20"/>
+  <circle cx="475" cy="615" r="235" fill="#8E5B46" stroke="#221B15" stroke-width="22"/>
+  <path d="M255 620c0-245 105-350 265-350 165 0 255 130 210 345-75-100-165-145-275-135-50 80-115 135-200 160z" fill="#221B15"/>
+  <path d="M390 700c65 48 125 48 190 0" fill="none" stroke="#FFF6EA" stroke-width="18" stroke-linecap="round"/>
+  <path d="M180 1540c50-410 145-635 320-635 185 0 310 235 360 635z" fill="#FF3D8A" stroke="#221B15" stroke-width="22"/>
+  <path d="M95 175l35 75 82 10-60 58 15 82-72-40-72 40 15-82-60-58 82-10z" fill="#FFF6EA" stroke="#221B15" stroke-width="14"/>
+</svg>

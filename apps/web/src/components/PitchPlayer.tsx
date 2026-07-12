@@ -1,0 +1,255 @@
+'use client';
+
+import Image from 'next/image';
+import { useEffect, useRef, useState } from 'react';
+
+import type { PitchFixture } from '@/fixtures/pitch';
+
+import styles from './PitchPlayer.module.css';
+
+type PitchPlayerProps = {
+  readonly pitch: PitchFixture;
+};
+
+const TICK_MS = 80;
+
+function formatTime(milliseconds: number): string {
+  const seconds = Math.floor(milliseconds / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function PlayIcon({ paused }: { readonly paused: boolean }) {
+  return paused ? (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m8 5 11 7L8 19z" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 5h4v14H7zm7 0h4v14h-4z" />
+    </svg>
+  );
+}
+
+export function PitchPlayer({ pitch }: PitchPlayerProps) {
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isFooterVisible, setIsFooterVisible] = useState(false);
+  const elapsedRef = useRef(0);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const interestTriggerRef = useRef<HTMLButtonElement>(null);
+  const dialogActionRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const source = new URLSearchParams(window.location.search).get('src');
+    if (source !== null && source.length > 0) {
+      // Preserved for the verified-interest flow to attach after authentication lands.
+      window.sessionStorage.setItem('fw_attribution', source);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isPlaying) {
+      return;
+    }
+
+    const startedAt = window.performance.now() - elapsedRef.current;
+    const intervalId = window.setInterval(() => {
+      const nextElapsed = Math.min(pitch.durationMs, window.performance.now() - startedAt);
+      elapsedRef.current = nextElapsed;
+      setElapsedMs(nextElapsed);
+
+      if (nextElapsed >= pitch.durationMs) {
+        window.clearInterval(intervalId);
+        setIsPlaying(false);
+      }
+    }, TICK_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [isPlaying, pitch.durationMs]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (isModalOpen && dialog !== null && !dialog.open) {
+      dialog.showModal();
+      return;
+    }
+    interestTriggerRef.current?.focus();
+  }, [isModalOpen]);
+
+  useEffect(() => {
+    const footer = document.querySelector('[data-pitch-footer]');
+    if (footer === null) {
+      return;
+    }
+
+    const observer = new IntersectionObserver((entries) =>
+      setIsFooterVisible(entries[0]?.isIntersecting ?? false),
+    );
+    observer.observe(footer);
+    return () => observer.disconnect();
+  }, []);
+
+  const progress = elapsedMs / pitch.durationMs;
+  const activePhotoIndex = pitch.photos.findIndex(
+    (photo) => elapsedMs >= photo.startMs && elapsedMs < photo.endMs,
+  );
+  const activeCaption =
+    pitch.captions.find((caption) => elapsedMs >= caption.startMs && elapsedMs < caption.endMs) ??
+    pitch.captions[0];
+  const captionWords = activeCaption.text.split(' ');
+  const captionProgress =
+    (elapsedMs - activeCaption.startMs) / (activeCaption.endMs - activeCaption.startMs);
+  const activeWordIndex = Math.floor(captionProgress * captionWords.length);
+
+  const togglePlayback = () => {
+    if (elapsedRef.current >= pitch.durationMs) {
+      elapsedRef.current = 0;
+      setElapsedMs(0);
+    }
+    setIsPlaying((current) => !current);
+  };
+
+  const interestButton = (className: string | undefined) => (
+    <button
+      className={className}
+      type="button"
+      onClick={(event) => {
+        interestTriggerRef.current = event.currentTarget;
+        setIsModalOpen(true);
+      }}
+    >
+      I&apos;m interested
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 12h14m-6-6 6 6-6 6" />
+      </svg>
+    </button>
+  );
+
+  return (
+    <div className={styles.playerShell}>
+      <article className={styles.stage}>
+        <div className={styles.photos}>
+          {pitch.photos.map((photo, index) => (
+            <Image
+              className={`${styles.photo} ${index === activePhotoIndex || (activePhotoIndex < 0 && index === 0) ? styles.photoActive : ''}`}
+              key={photo.src}
+              src={photo.src}
+              alt={photo.alt}
+              aria-hidden={index !== activePhotoIndex && !(activePhotoIndex < 0 && index === 0)}
+              fill
+              priority={index === 0}
+              sizes="(max-width: 700px) 100vw, 506px"
+            />
+          ))}
+          <div className={styles.photoWash} />
+        </div>
+
+        <header className={styles.pitchHeader}>
+          <p>
+            <strong>{pitch.introducerPseudonym}</strong> introduces
+          </p>
+          <h1>
+            {pitch.daterName}, {pitch.age}
+          </h1>
+          <span className={styles.relationshipSticker}>{pitch.relationship}</span>
+        </header>
+
+        <div className={styles.location}>{pitch.approximateLocation}</div>
+
+        <div className={styles.caption} aria-live="off">
+          {captionWords.map((word, index) => (
+            <span
+              className={index <= activeWordIndex ? styles.wordActive : undefined}
+              key={`${word}-${index}`}
+            >
+              {word}{' '}
+            </span>
+          ))}
+        </div>
+
+        <div className={styles.controls}>
+          <button
+            className={styles.playButton}
+            type="button"
+            onClick={togglePlayback}
+            aria-label={isPlaying ? 'Pause Maya’s pitch' : 'Play Maya’s pitch'}
+          >
+            <PlayIcon paused={!isPlaying} />
+          </button>
+
+          <div className={styles.timeline}>
+            <svg
+              className={`${styles.waveform} ${isPlaying ? styles.waveformPlaying : ''}`}
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              role="img"
+              aria-label={`Pitch progress ${Math.round(progress * 100)} percent`}
+            >
+              {pitch.waveform.map((level, index) => {
+                const barWidth = 100 / pitch.waveform.length;
+                const played = (index + 1) / pitch.waveform.length <= progress;
+                return (
+                  <rect
+                    className={played ? styles.barPlayed : styles.barWaiting}
+                    key={`${level}-${index}`}
+                    x={index * barWidth}
+                    y={100 - level}
+                    width={barWidth * 0.56}
+                    height={level}
+                    rx={barWidth * 0.28}
+                  />
+                );
+              })}
+            </svg>
+            <div className={styles.timeRow}>
+              <span>{formatTime(elapsedMs)}</span>
+              <span>{formatTime(pitch.durationMs)}</span>
+            </div>
+          </div>
+        </div>
+
+        {interestButton(styles.desktopInterest)}
+      </article>
+
+      <div
+        className={`${styles.mobileInterest} ${isFooterVisible ? styles.mobileInterestHidden : ''}`}
+      >
+        {interestButton(styles.interestButton)}
+      </div>
+
+      {isModalOpen ? (
+        <dialog
+          ref={dialogRef}
+          className={styles.modal}
+          aria-labelledby="interest-modal-title"
+          onCancel={(event) => {
+            event.preventDefault();
+            setIsModalOpen(false);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Tab') {
+              event.preventDefault();
+              dialogActionRef.current?.focus();
+            }
+          }}
+        >
+          <span className={styles.modalBadge}>Verified interest</span>
+          <h2 id="interest-modal-title">Coming soon — verified interest</h2>
+          <p>
+            You&apos;ll share current photos and a short profile before Blair sees your interest.
+            Your phone number and email stay private.
+          </p>
+          <button
+            ref={dialogActionRef}
+            type="button"
+            autoFocus
+            onClick={() => setIsModalOpen(false)}
+          >
+            Got it
+          </button>
+        </dialog>
+      ) : null}
+    </div>
+  );
+}

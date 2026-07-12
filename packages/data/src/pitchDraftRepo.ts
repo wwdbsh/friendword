@@ -1,0 +1,126 @@
+import { z } from 'zod';
+
+import type { DraftInputs } from '@friendword/contracts';
+import type { Session } from '@supabase/supabase-js';
+
+import type { BrowserSupabaseClient } from './client';
+import type { PitchDraftRow } from './database.types';
+import {
+  DataLayerError,
+  InvalidDraftUpdateError,
+  InvalidStoragePathError,
+  UnauthenticatedError,
+} from './errors';
+
+const uuidSchema = z.string().uuid();
+const fileNameSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
+const PITCH_MEDIA_BUCKET = 'pitch-media';
+
+export type UpdatePitchDraftInput = {
+  readonly headline?: string | null;
+  readonly body?: string | null;
+};
+
+export type SignedAssetUpload = {
+  readonly storagePath: string;
+  readonly signedUrl: string;
+  readonly token: string;
+};
+
+export function buildPitchMediaPath(draftId: string, fileName: string): string {
+  const parsedDraftId = uuidSchema.safeParse(draftId);
+  const parsedFileName = fileNameSchema.safeParse(fileName);
+  if (!parsedDraftId.success) {
+    throw new InvalidStoragePathError(draftId);
+  }
+  if (!parsedFileName.success) {
+    throw new InvalidStoragePathError(fileName);
+  }
+
+  return `${PITCH_MEDIA_BUCKET}/${parsedDraftId.data}/${parsedFileName.data}`;
+}
+
+export class PitchDraftRepo {
+  constructor(private readonly client: BrowserSupabaseClient) {}
+
+  async createDraft(context: DraftInputs): Promise<PitchDraftRow> {
+    const session = await this.getRequiredSession();
+    const { data, error } = await this.client
+      .from('pitch_drafts')
+      .insert({
+        created_by_user_id: session.user.id,
+        relationship_type: context.relationshipType,
+        relationship_duration: context.relationshipDuration,
+      })
+      .select()
+      .single();
+    if (error !== null) {
+      throw new DataLayerError('pitchDraft.create', error);
+    }
+
+    return data;
+  }
+
+  async updateDraft(draftId: string, input: UpdatePitchDraftInput): Promise<PitchDraftRow> {
+    const updates = {
+      ...(input.headline === undefined ? {} : { headline: input.headline }),
+      ...(input.body === undefined ? {} : { body: input.body }),
+    };
+    if (Object.keys(updates).length === 0) {
+      throw new InvalidDraftUpdateError();
+    }
+    const { data, error } = await this.client
+      .from('pitch_drafts')
+      .update(updates)
+      .eq('id', uuidSchema.parse(draftId))
+      .select()
+      .single();
+    if (error !== null) {
+      throw new DataLayerError('pitchDraft.update', error);
+    }
+
+    return data;
+  }
+
+  async listMyDrafts(): Promise<readonly PitchDraftRow[]> {
+    await this.getRequiredSession();
+    const { data, error } = await this.client
+      .from('pitch_drafts')
+      .select()
+      .order('created_at', { ascending: false });
+    if (error !== null) {
+      throw new DataLayerError('pitchDraft.listMine', error);
+    }
+
+    return data;
+  }
+
+  async requestAssetUpload(draftId: string, fileName: string): Promise<SignedAssetUpload> {
+    const storagePath = buildPitchMediaPath(draftId, fileName);
+    const objectPath = storagePath.slice(`${PITCH_MEDIA_BUCKET}/`.length);
+    const { data, error } = await this.client.storage
+      .from(PITCH_MEDIA_BUCKET)
+      .createSignedUploadUrl(objectPath, { upsert: false });
+    if (error !== null) {
+      throw new DataLayerError('pitchDraft.requestAssetUpload', error);
+    }
+
+    return { storagePath, signedUrl: data.signedUrl, token: data.token };
+  }
+
+  private async getRequiredSession(): Promise<Session> {
+    const { data, error } = await this.client.auth.getSession();
+    if (error !== null) {
+      throw new DataLayerError('pitchDraft.getSession', error);
+    }
+    if (data.session === null) {
+      throw new UnauthenticatedError();
+    }
+
+    return data.session;
+  }
+}

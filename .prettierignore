@@ -1,9 +1,10 @@
 node_modules
 dist
 .expo
-.next
+.next*
 coverage
 pnpm-lock.yaml
 supabase/migrations
 .briefs
 FRIENDWORD_HANDOFF.md
+test-results

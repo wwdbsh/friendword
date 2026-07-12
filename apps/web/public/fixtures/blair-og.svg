@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Blair, introduced by a friend</title>
+  <desc id="desc">Friendword Hype Mixtape social preview for Blair.</desc>
+  <rect width="1200" height="630" fill="#FFF6EA"/>
+  <rect x="66" y="62" width="1068" height="506" rx="32" fill="#201914" stroke="#221B15" stroke-width="8"/>
+  <rect x="86" y="82" width="1068" height="506" rx="32" fill="none" stroke="#FF5B2E" stroke-width="10"/>
+  <path d="M120 470c70-115 140 115 210 0s140 115 210 0 140 115 210 0 140 115 210 0" fill="none" stroke="#FF3D8A" stroke-width="24" stroke-linecap="round"/>
+  <text x="126" y="190" fill="#FFC63F" font-family="sans-serif" font-size="34" font-weight="700">MAYA INTRODUCES</text>
+  <text x="118" y="340" fill="#FFF6EA" font-family="sans-serif" font-size="116" font-weight="900">BLAIR, 29</text>
+  <text x="126" y="535" fill="#FFF6EA" font-family="sans-serif" font-size="30">Dating, in your friends' words.</text>
+</svg>

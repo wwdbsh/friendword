@@ -7,7 +7,7 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/dist/**',
       '**/.expo/**',
-      '**/.next/**',
+      '**/.next*/**',
       '**/coverage/**',
       'supabase/**',
       '.briefs/**',

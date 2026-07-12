@@ -1,4 +1,4 @@
-import { colors, spacing } from '@friendword/ui-tokens';
+import { colors, fonts, fontSizes, spacing } from '@friendword/ui-tokens';
 import { StyleSheet, Text, View } from 'react-native';
 
 type PlaceholderScreenProps = {
@@ -26,20 +26,21 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   eyebrow: {
-    color: colors.accent,
-    fontSize: 14,
-    fontWeight: '700',
+    color: colors.pop,
+    fontFamily: 'BricolageGrotesqueBold',
+    fontSize: fontSizes.sm,
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
   title: {
-    color: colors.textPrimary,
-    fontSize: 30,
-    fontWeight: '700',
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: fontSizes.xl,
   },
   description: {
     color: colors.textSecondary,
-    fontSize: 16,
+    fontFamily: fonts.body,
+    fontSize: fontSizes.md,
     lineHeight: 24,
   },
 });

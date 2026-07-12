@@ -1,0 +1,44 @@
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--color-background);
+  color: var(--color-ink);
+  overflow-x: hidden;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100dvh;
+  margin: 0;
+  overflow-x: hidden;
+  background: var(--color-background);
+  color: var(--color-ink);
+  font-family: var(--font-body), sans-serif;
+  font-size: var(--font-size-md);
+  line-height: var(--line-normal);
+}
+
+button,
+a {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+::selection {
+  background: var(--color-hype);
+  color: var(--color-on-hype);
+}
+
+:focus-visible {
+  outline: var(--stroke-sticker) solid var(--color-flirt);
+  outline-offset: var(--space-xs);
+}

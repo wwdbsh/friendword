@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1600" role="img" aria-labelledby="title desc">
+  <title id="title">Blair portrait placeholder two</title>
+  <desc id="desc">A graphic portrait silhouette holding a record on a teal backdrop.</desc>
+  <rect width="900" height="1600" fill="#17B89B"/>
+  <path d="M-40 230C180 70 330 350 520 180s350-10 430 70" fill="none" stroke="#FFF6EA" stroke-width="45"/>
+  <circle cx="465" cy="630" r="255" fill="#8E5B46" stroke="#221B15" stroke-width="22"/>
+  <path d="M225 615c-5-215 95-350 280-350 175 0 270 125 225 360-70-120-165-170-295-150-45 80-110 130-210 155z" fill="#221B15"/>
+  <path d="M350 705c75 55 145 55 220 0" fill="none" stroke="#FFF6EA" stroke-width="18" stroke-linecap="round"/>
+  <path d="M130 1570c40-430 155-650 355-650 210 0 345 240 390 650z" fill="#FFF6EA" stroke="#221B15" stroke-width="22"/>
+  <circle cx="690" cy="1210" r="185" fill="#221B15" stroke="#FF3D8A" stroke-width="24"/>
+  <circle cx="690" cy="1210" r="62" fill="#FFC63F" stroke="#221B15" stroke-width="12"/>
+  <path d="M80 250h170M165 165v170" stroke="#FFC63F" stroke-width="28" stroke-linecap="round"/>
+</svg>

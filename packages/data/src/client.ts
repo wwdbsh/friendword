@@ -16,6 +16,25 @@ export function createBrowserClient(url: string, anonKey: string): BrowserSupaba
   return Object.assign(createClient<Database>(url, anonKey), { [clientScope]: 'browser' as const });
 }
 
+/**
+ * Web (Next.js) client: magic-link sessions are detected from the URL and
+ * persisted under a stable storage key so the web surface (and its tests)
+ * never depend on the project ref embedded in the Supabase URL.
+ */
+export function createWebClient(url: string, anonKey: string): BrowserSupabaseClient {
+  return Object.assign(
+    createClient<Database>(url, anonKey, {
+      auth: {
+        storageKey: 'friendword-web-auth',
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true,
+      },
+    }),
+    { [clientScope]: 'browser' as const },
+  );
+}
+
 /** Minimal async storage contract (matches @react-native-async-storage). */
 export type AuthSessionStorage = {
   getItem(key: string): Promise<string | null>;

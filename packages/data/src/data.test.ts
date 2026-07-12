@@ -7,9 +7,11 @@ import {
   createBrowserClient,
   createMobileClient,
   createServiceClient,
+  createWebClient,
   type BrowserSupabaseClient,
   type ServiceSupabaseClient,
 } from './client';
+import { ConsentRepo } from './consentRepo';
 import { InvalidDraftUpdateError, InvalidStoragePathError, UnauthenticatedError } from './errors';
 import { buildPitchMediaPath, PitchDraftRepo } from './pitchDraftRepo';
 
@@ -24,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   draftUpdate: vi.fn(),
   draftSelect: vi.fn(),
   signedUpload: vi.fn(),
+  signedUrl: vi.fn(),
   rpc: vi.fn(),
 }));
 
@@ -52,7 +55,10 @@ function configureMockClient(): void {
       };
     },
     storage: {
-      from: () => ({ createSignedUploadUrl: mocks.signedUpload }),
+      from: () => ({
+        createSignedUploadUrl: mocks.signedUpload,
+        createSignedUrl: mocks.signedUrl,
+      }),
     },
     rpc: mocks.rpc,
   });
@@ -93,6 +99,19 @@ describe('Supabase clients and auth', () => {
     });
   });
 
+  it('detects URL sessions under a stable storage key for the web client', () => {
+    createWebClient('https://project.example', 'anon-key');
+
+    expect(vi.mocked(createClient)).toHaveBeenCalledWith('https://project.example', 'anon-key', {
+      auth: {
+        storageKey: 'friendword-web-auth',
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true,
+      },
+    });
+  });
+
   it('disables persisted auth when creating a service client', () => {
     createServiceClient('https://project.example', 'service-key');
 
@@ -123,6 +142,19 @@ describe('Supabase clients and auth', () => {
       email: 'person@example.com',
       token: '123456',
       type: 'email',
+    });
+  });
+
+  it('passes the magic-link redirect through only when provided', async () => {
+    const client = createBrowserClient('https://project.example', 'anon-key');
+
+    await signInWithOtp(client, 'person@example.com', {
+      emailRedirectTo: 'https://friendword.example/consent/abc',
+    });
+
+    expect(mocks.signInWithOtp).toHaveBeenCalledWith({
+      email: 'person@example.com',
+      options: { emailRedirectTo: 'https://friendword.example/consent/abc' },
     });
   });
 
@@ -329,5 +361,128 @@ describe('PitchDraftRepo', () => {
       repo.submitForConsent('10000000-0000-0000-0000-000000000001'),
     ).rejects.toBeInstanceOf(UnauthenticatedError);
     expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe('ConsentRepo', () => {
+  const rawToken = 'A-b_1'.repeat(6);
+  const draftId = '10000000-0000-0000-0000-000000000001';
+
+  function signedInSession(): void {
+    mocks.getSession.mockResolvedValue({
+      data: {
+        session: {
+          user: { id: '00000000-0000-0000-0000-000000000002' },
+        },
+      },
+      error: null,
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    configureMockClient();
+  });
+
+  it('previews anonymously and maps the RPC row', async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [
+        {
+          introducer_display_name: 'Maya',
+          relationship_type: 'friend',
+          relationship_duration: 'y3to10',
+          request_status: 'pending',
+        },
+      ],
+      error: null,
+    });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    const preview = await repo.getPreview(rawToken);
+
+    expect(mocks.rpc).toHaveBeenCalledWith('get_consent_preview', { raw_token: rawToken });
+    expect(mocks.getSession).not.toHaveBeenCalled();
+    expect(preview).toEqual({
+      introducerDisplayName: 'Maya',
+      relationshipType: 'friend',
+      relationshipDuration: 'y3to10',
+      requestStatus: 'pending',
+    });
+  });
+
+  it('returns null for unknown tokens and rejects malformed ones without a query', async () => {
+    mocks.rpc.mockResolvedValue({ data: [], error: null });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await expect(repo.getPreview(rawToken)).resolves.toBeNull();
+    await expect(repo.getPreview('short')).resolves.toBeNull();
+    await expect(repo.getPreview('!'.repeat(32))).resolves.toBeNull();
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it('claims only with a session and maps the draft id', async () => {
+    signedInSession();
+    mocks.rpc.mockResolvedValue({ data: [{ pitch_draft_id: draftId }], error: null });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    const claim = await repo.claim(rawToken);
+
+    expect(mocks.rpc).toHaveBeenCalledWith('claim_consent_request', { raw_token: rawToken });
+    expect(claim).toEqual({ pitchDraftId: draftId });
+  });
+
+  it('rejects a claim when signed out', async () => {
+    mocks.getSession.mockResolvedValue({ data: { session: null }, error: null });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await expect(repo.claim(rawToken)).rejects.toBeInstanceOf(UnauthenticatedError);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it('reads the claimed draft row for review', async () => {
+    signedInSession();
+    const row = { id: draftId, status: 'consent_pending' };
+    mocks.draftSelect.mockReturnValue({
+      eq: () => ({ single: async () => ({ data: row, error: null }) }),
+    });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await expect(repo.getDraftForReview(draftId)).resolves.toEqual(row);
+  });
+
+  it('creates a scoped signed playback URL for the voice note', async () => {
+    signedInSession();
+    mocks.signedUrl.mockResolvedValue({
+      data: { signedUrl: 'https://storage.example/signed-read' },
+      error: null,
+    });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    const url = await repo.createVoicePlaybackUrl(draftId);
+
+    expect(mocks.signedUrl).toHaveBeenCalledWith(`${draftId}/voice.m4a`, 3600);
+    expect(url).toBe('https://storage.example/signed-read');
+  });
+
+  it('approves through the publish RPC and returns the campaign slug', async () => {
+    signedInSession();
+    mocks.rpc.mockResolvedValue({
+      data: [
+        {
+          campaign_id: '20000000-0000-0000-0000-000000000001',
+          campaign_slug: 'blair-abc123',
+        },
+      ],
+      error: null,
+    });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    const published = await repo.approveAndPublish(draftId);
+
+    expect(mocks.rpc).toHaveBeenCalledWith('approve_and_publish_pitch', { draft_id: draftId });
+    expect(published).toEqual({
+      campaignId: '20000000-0000-0000-0000-000000000001',
+      campaignSlug: 'blair-abc123',
+    });
   });
 });

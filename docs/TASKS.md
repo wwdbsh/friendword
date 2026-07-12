@@ -39,3 +39,9 @@
 | Session | Owned paths                                     | Dependency | Acceptance criteria                                                     | Status                  | Updated    |
 | ------- | ----------------------------------------------- | ---------- | ----------------------------------------------------------------------- | ----------------------- | ---------- |
 | Advisor | `supabase/migrations/0005`, `supabase/tests/05` | Slice 4    | 로컬 하니스 5/5 + 프로덕션 Flow A→B E2E 7단계 통과, campaigns.slug 도입 | 완료 (0005 원격 배포됨) | 2026-07-13 |
+
+## 2026-07-13 Slice 5B-1 (웹 /consent/[token] 동의·발행 플로우 — Advisor 단독)
+
+| Session | Owned paths                                                                          | Dependency | Acceptance criteria                                                                                              | Status                                     | Updated    |
+| ------- | ------------------------------------------------------------------------------------ | ---------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ---------- |
+| Advisor | `packages/data`(consentRepo·web client), `apps/web/app/consent/**`, `apps/web/tests` | Slice 5A   | anon preview → 매직링크 로그인 → claim → 음성 검토 → approve → `/p/[slug]` 리다이렉트, Playwright 10/10 + 프로덕션 E2E 12단계 | 완료 (프로덕션 E2E 12/12, Playwright 그린) | 2026-07-13 |

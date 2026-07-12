@@ -92,6 +92,28 @@ export type Database = {
           readonly consent_token: string;
         }[];
       };
+      get_consent_preview: {
+        Args: { readonly raw_token: string };
+        Returns: readonly {
+          readonly introducer_display_name: string;
+          readonly relationship_type: RelationshipType | null;
+          readonly relationship_duration: RelationshipDuration | null;
+          readonly request_status: string;
+        }[];
+      };
+      claim_consent_request: {
+        Args: { readonly raw_token: string };
+        Returns: readonly {
+          readonly pitch_draft_id: string;
+        }[];
+      };
+      approve_and_publish_pitch: {
+        Args: { readonly draft_id: string };
+        Returns: readonly {
+          readonly campaign_id: string;
+          readonly campaign_slug: string;
+        }[];
+      };
     };
     Enums: {
       account_status: 'active' | 'suspended' | 'deleted';

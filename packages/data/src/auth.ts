@@ -14,9 +14,23 @@ export type EnsureUserRowResult = {
   readonly profileDisplayName: string;
 };
 
-export async function signInWithOtp(client: BrowserSupabaseClient, email: string): Promise<void> {
+export type SignInWithOtpOptions = {
+  /** Web magic-link flows: where the emailed link should land (must be an allowed redirect URL). */
+  readonly emailRedirectTo?: string;
+};
+
+export async function signInWithOtp(
+  client: BrowserSupabaseClient,
+  email: string,
+  options?: SignInWithOtpOptions,
+): Promise<void> {
   const parsedEmail = emailSchema.parse(email);
-  const { error } = await client.auth.signInWithOtp({ email: parsedEmail });
+  const { error } = await client.auth.signInWithOtp({
+    email: parsedEmail,
+    ...(options?.emailRedirectTo === undefined
+      ? {}
+      : { options: { emailRedirectTo: options.emailRedirectTo } }),
+  });
   if (error !== null) {
     throw new DataLayerError('signInWithOtp', error);
   }

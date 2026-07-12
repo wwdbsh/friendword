@@ -4,8 +4,11 @@ import { useEffect, useState } from 'react';
 import { ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { trackEvent } from '@friendword/data';
+
 import { HypeButton, StickerCard } from '../../src/components';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
+import { getSupabaseClient } from '../../src/services/supabaseClient';
 import type { PitchDraft } from '../../src/services/types';
 import { buildConsentUrl } from '../../src/services/webOrigin';
 
@@ -47,6 +50,10 @@ export default function SharePitchScreen() {
     if (consentUrl === null) {
       return;
     }
+    trackEvent(getSupabaseClient(), 'campaign_shared', {
+      platform: 'mobile',
+      pitch_draft_id: draft?.server?.draftId ?? null,
+    });
     await Share.share({
       message: `I recorded a Friendword pitch about you — it only goes live if you approve it. Take a listen: ${consentUrl}`,
     });

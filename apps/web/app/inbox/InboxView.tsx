@@ -3,7 +3,12 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { InterestRepo, type BrowserSupabaseClient, type CampaignInterest } from '@friendword/data';
+import {
+  InterestRepo,
+  trackEvent,
+  type BrowserSupabaseClient,
+  type CampaignInterest,
+} from '@friendword/data';
 
 import { EmailSignIn } from '@/components/EmailSignIn';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
@@ -99,6 +104,9 @@ export function InboxView() {
     }
     try {
       await new InterestRepo(client).setCampaignStatus(campaignId, nextStatus);
+      if (nextStatus === 'paused') {
+        trackEvent(client, 'campaign_paused', { campaign_id: campaignId });
+      }
       setDecisionNote(
         nextStatus === 'published'
           ? 'Your page is live again.'
@@ -121,6 +129,12 @@ export function InboxView() {
     try {
       const repo = new InterestRepo(client);
       const { introRoomId } = await repo.decideInterest(interestId, decision);
+      if (decision === 'accepted') {
+        trackEvent(client, 'interest_accepted', { interest_id: interestId });
+        if (introRoomId !== null) {
+          trackEvent(client, 'intro_room_created', { intro_room_id: introRoomId });
+        }
+      }
       setOpenedRoomId(decision === 'accepted' ? introRoomId : null);
       setDecisionNote(
         decision === 'accepted'

@@ -4,6 +4,9 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
+import { trackEvent } from '@friendword/data';
+
+import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import type { PitchView } from '@/pitch/view';
 
 import styles from './PitchPlayer.module.css';
@@ -46,7 +49,16 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
       // Preserved for the verified-interest flow to attach after authentication lands.
       window.sessionStorage.setItem('fw_attribution', source);
     }
-  }, []);
+
+    const viewedKey = `fw_viewed_${pitch.campaignSlug}`;
+    if (window.sessionStorage.getItem(viewedKey) === null) {
+      window.sessionStorage.setItem(viewedKey, '1');
+      trackEvent(getSupabaseBrowserClient(), 'pitch_viewed_unique', {
+        campaign_slug: pitch.campaignSlug,
+        source: source ?? window.sessionStorage.getItem('fw_attribution'),
+      });
+    }
+  }, [pitch.campaignSlug]);
 
   useEffect(() => {
     if (!isPlaying || hasRealAudio) {

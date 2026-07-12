@@ -18,9 +18,12 @@ import {
   requireRecording,
   requireReviewData,
 } from '../../src/features/pitch/pitchFlowState';
+import { trackEvent } from '@friendword/data';
+
 import { SignInSheet } from '../../src/features/auth/SignInSheet';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
 import { NeedsSignInError } from '../../src/services/pitchDraftsSupabase';
+import { getSupabaseClient } from '../../src/services/supabaseClient';
 import type {
   InvitationContact,
   PitchDraftId,
@@ -85,6 +88,10 @@ export default function NewPitchScreen() {
     });
     return () => subscription.remove();
   }, [goBack]);
+
+  useEffect(() => {
+    trackEvent(getSupabaseClient(), 'introducer_started', { platform: 'mobile' });
+  }, []);
 
   const saveDetails = async (): Promise<void> => {
     if (savingRef.current) {
@@ -155,6 +162,10 @@ export default function NewPitchScreen() {
       savingRef.current = true;
       setSaving(true);
       await pitchDraftService.saveRecording(activeDraftId, activeRecording);
+      trackEvent(getSupabaseClient(), 'voice_recorded', {
+        platform: 'mobile',
+        duration_ms: activeRecording.durationMillis,
+      });
       setErrorMessage(null);
       setTrack(5);
     } catch (error: unknown) {
@@ -170,6 +181,10 @@ export default function NewPitchScreen() {
     setSubmitting(true);
     try {
       const submitted = await pitchDraftService.submitForConsent(activeDraftId);
+      trackEvent(getSupabaseClient(), 'consent_sent', {
+        platform: 'mobile',
+        pitch_draft_id: submitted.server?.draftId ?? null,
+      });
       setErrorMessage(null);
       if (submitted.server !== null) {
         router.replace({ pathname: '/pitch/share', params: { draftId: submitted.id } });

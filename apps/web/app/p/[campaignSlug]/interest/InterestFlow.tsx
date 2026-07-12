@@ -3,7 +3,12 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 
-import { DataLayerError, InterestRepo, type BrowserSupabaseClient } from '@friendword/data';
+import {
+  DataLayerError,
+  InterestRepo,
+  trackEvent,
+  type BrowserSupabaseClient,
+} from '@friendword/data';
 
 import { EmailSignIn } from '@/components/EmailSignIn';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
@@ -79,6 +84,11 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
     if (client === null || session === null || prefillDone) {
       return;
     }
+
+    trackEvent(client, 'interest_started', {
+      campaign_id: campaignId,
+      source: window.sessionStorage.getItem('fw_attribution'),
+    });
 
     let cancelled = false;
     const repo = new InterestRepo(client);
@@ -158,6 +168,10 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
         birthDate,
       });
       await repo.submitInterest(campaignId, note.trim() === '' ? null : note.trim());
+      trackEvent(client, 'interest_submitted', {
+        campaign_id: campaignId,
+        source: window.sessionStorage.getItem('fw_attribution'),
+      });
       setSubmitted(true);
     } catch (submitError: unknown) {
       setError(errorCopy(submitError));

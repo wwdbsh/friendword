@@ -7,6 +7,7 @@ import {
   ConsentRepo,
   DataLayerError,
   signInWithOtp,
+  trackEvent,
   type BrowserSupabaseClient,
   type ConsentPreview,
   type PitchDraftRow,
@@ -113,6 +114,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
       const repo = new ConsentRepo(activeClient);
       try {
         const { pitchDraftId } = await repo.claim(token);
+        trackEvent(activeClient, 'dater_verified', { pitch_draft_id: pitchDraftId });
         const draft = await repo.getDraftForReview(pitchDraftId);
         const voiceUrl = await repo.createVoicePlaybackUrl(pitchDraftId).catch(() => null);
         const assets = await repo.listAssets(pitchDraftId).catch(() => []);
@@ -213,7 +215,9 @@ export function ConsentFlow({ token }: { readonly token: string }) {
     setState({ step: 'publishing', preview });
     try {
       const repo = new ConsentRepo(client);
-      const { campaignSlug } = await repo.approveAndPublish(draft.id);
+      const { campaignId, campaignSlug } = await repo.approveAndPublish(draft.id);
+      trackEvent(client, 'pitch_approved', { pitch_draft_id: draft.id });
+      trackEvent(client, 'campaign_published', { campaign_id: campaignId });
       router.push(`/p/${campaignSlug}`);
     } catch (error: unknown) {
       setState({ step: 'error', message: claimErrorMessage(error) });

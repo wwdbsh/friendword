@@ -311,6 +311,10 @@ export type Database = {
         Args: { readonly target_room_id: string };
         Returns: undefined;
       };
+      track_event: {
+        Args: { readonly event_name: string; readonly properties?: Json };
+        Returns: undefined;
+      };
       set_campaign_status: {
         Args: { readonly target_campaign_id: string; readonly next_status: string };
         Returns: readonly {

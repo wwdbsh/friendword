@@ -194,6 +194,68 @@
   transform: rotate(1.2deg);
 }
 
+.photoToggle {
+  position: relative;
+  display: block;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.photoToggle .photo {
+  width: 100%;
+  transition: opacity var(--motion-fast) var(--motion-ease-out);
+}
+
+.photoExcluded .photo {
+  opacity: 0.35;
+  filter: grayscale(1);
+}
+
+.photoState {
+  position: absolute;
+  bottom: var(--space-xs);
+  left: 50%;
+  transform: translateX(-50%) rotate(-2deg);
+  padding: 2px var(--space-sm);
+  border: var(--stroke-sticker) solid var(--color-ink);
+  border-radius: var(--radius-pill);
+  background: var(--color-fresh);
+  font-size: var(--font-size-xs);
+  font-weight: 800;
+}
+
+.photoExcluded .photoState {
+  background: var(--color-danger);
+  color: var(--color-surface);
+}
+
+.windowBlock {
+  margin: 0 0 var(--space-lg);
+}
+
+.chipRow {
+  display: flex;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.chip {
+  padding: var(--space-xs) var(--space-md);
+  border: var(--stroke-sticker) solid var(--color-ink);
+  border-radius: var(--radius-pill);
+  background: var(--color-background);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chipActive {
+  background: var(--color-hype);
+  color: var(--color-on-hype);
+  transform: rotate(-1.5deg);
+}
+
 .notes {
   margin: 0 0 var(--space-lg);
 }

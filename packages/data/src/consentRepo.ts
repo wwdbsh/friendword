@@ -172,11 +172,26 @@ export class ConsentRepo {
     return data.signedUrl;
   }
 
+  /** The claimed subject removes a suggested photo before approving. */
+  async excludeAsset(assetId: string): Promise<void> {
+    await this.getRequiredSession();
+    const { error } = await this.client.rpc('exclude_pitch_asset', {
+      target_asset_id: uuidSchema.parse(assetId),
+    });
+    if (error !== null) {
+      throw new DataLayerError('consent.excludeAsset', error);
+    }
+  }
+
   /** Approve and publish in one server transaction; returns the public slug. */
-  async approveAndPublish(draftId: string): Promise<PublishedCampaign> {
+  async approveAndPublish(
+    draftId: string,
+    campaignDays: 7 | 30 | 90 = 30,
+  ): Promise<PublishedCampaign> {
     await this.getRequiredSession();
     const { data, error } = await this.client.rpc('approve_and_publish_pitch', {
       draft_id: uuidSchema.parse(draftId),
+      campaign_days: campaignDays,
     });
     if (error !== null) {
       throw new DataLayerError('consent.approveAndPublish', error);

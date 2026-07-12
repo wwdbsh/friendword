@@ -21,6 +21,7 @@ import {
 import { trackEvent } from '@friendword/data';
 
 import { SignInSheet } from '../../src/features/auth/SignInSheet';
+import { requestDraftGeneration } from '../../src/services/draftGeneration';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
 import { NeedsSignInError } from '../../src/services/pitchDraftsSupabase';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
@@ -185,6 +186,9 @@ export default function NewPitchScreen() {
         platform: 'mobile',
         pitch_draft_id: submitted.server?.draftId ?? null,
       });
+      if (submitted.server !== null) {
+        void requestDraftGeneration(submitted.server.draftId);
+      }
       setErrorMessage(null);
       if (submitted.server !== null) {
         router.replace({ pathname: '/pitch/share', params: { draftId: submitted.id } });

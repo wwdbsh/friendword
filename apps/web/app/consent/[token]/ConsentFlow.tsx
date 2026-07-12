@@ -54,7 +54,7 @@ type FlowState =
       readonly preview: ConsentPreview;
       readonly draft: PitchDraftRow;
       readonly voiceUrl: string | null;
-      readonly photoUrls: readonly string[];
+      readonly photos: readonly { readonly assetId: string; readonly url: string }[];
     }
   | { readonly step: 'publishing'; readonly preview: ConsentPreview }
   | { readonly step: 'error'; readonly message: string };
@@ -101,6 +101,8 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   const [state, setState] = useState<FlowState>({ step: 'loading' });
   const [email, setEmail] = useState('');
   const [sendingLink, setSendingLink] = useState(false);
+  const [excludedIds, setExcludedIds] = useState<readonly string[]>([]);
+  const [campaignDays, setCampaignDays] = useState<7 | 30 | 90>(30);
   const claimStartedRef = useRef(false);
 
   const enterReview = useCallback(
@@ -118,14 +120,19 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         const draft = await repo.getDraftForReview(pitchDraftId);
         const voiceUrl = await repo.createVoicePlaybackUrl(pitchDraftId).catch(() => null);
         const assets = await repo.listAssets(pitchDraftId).catch(() => []);
-        const photoUrls = (
+        const photos = (
           await Promise.all(
             assets
               .filter((asset) => asset.asset_type === 'photo')
-              .map((asset) => repo.createAssetViewUrl(asset.storage_path).catch(() => null)),
+              .map((asset) =>
+                repo
+                  .createAssetViewUrl(asset.storage_path)
+                  .then((url) => ({ assetId: asset.id, url }))
+                  .catch(() => null),
+              ),
           )
-        ).filter((url): url is string => url !== null);
-        setState({ step: 'review', preview, draft, voiceUrl, photoUrls });
+        ).filter((photo): photo is { assetId: string; url: string } => photo !== null);
+        setState({ step: 'review', preview, draft, voiceUrl, photos });
       } catch (error: unknown) {
         claimStartedRef.current = false;
         setState({ step: 'error', message: claimErrorMessage(error) });
@@ -215,7 +222,10 @@ export function ConsentFlow({ token }: { readonly token: string }) {
     setState({ step: 'publishing', preview });
     try {
       const repo = new ConsentRepo(client);
-      const { campaignId, campaignSlug } = await repo.approveAndPublish(draft.id);
+      for (const assetId of excludedIds) {
+        await repo.excludeAsset(assetId);
+      }
+      const { campaignId, campaignSlug } = await repo.approveAndPublish(draft.id, campaignDays);
       trackEvent(client, 'pitch_approved', { pitch_draft_id: draft.id });
       trackEvent(client, 'campaign_published', { campaign_id: campaignId });
       router.push(`/p/${campaignSlug}`);
@@ -348,25 +358,66 @@ export function ConsentFlow({ token }: { readonly token: string }) {
               )}
             </div>
 
-            {state.photoUrls.length > 0 && (
+            {state.photos.length > 0 && (
               <div className={styles.photoBlock}>
                 <h2 className={styles.photoHeading}>The photos they picked</h2>
                 <div className={styles.photoGrid}>
-                  {state.photoUrls.map((url, index) => (
-                    <img
-                      key={url}
-                      className={styles.photo}
-                      src={url}
-                      alt={`Suggested photo ${index + 1}`}
-                    />
-                  ))}
+                  {state.photos.map((photo, index) => {
+                    const excluded = excludedIds.includes(photo.assetId);
+                    return (
+                      <button
+                        key={photo.assetId}
+                        type="button"
+                        className={`${styles.photoToggle} ${excluded ? styles.photoExcluded : ''}`}
+                        aria-pressed={excluded}
+                        aria-label={
+                          excluded
+                            ? `Keep suggested photo ${index + 1}`
+                            : `Remove suggested photo ${index + 1}`
+                        }
+                        onClick={() =>
+                          setExcludedIds((current) =>
+                            excluded
+                              ? current.filter((id) => id !== photo.assetId)
+                              : [...current, photo.assetId],
+                          )
+                        }
+                      >
+                        <img
+                          className={styles.photo}
+                          src={photo.url}
+                          alt={`Suggested photo ${index + 1}`}
+                        />
+                        <span className={styles.photoState}>
+                          {excluded ? 'Removed' : 'Keeping'}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
                 <p className={styles.finePrint}>
-                  These only go live if you approve. Photo swaps land in the next update — for now,
-                  ask {state.preview.introducerDisplayName} to resend with different ones.
+                  Tap a photo to remove it — only what you keep goes live.
                 </p>
               </div>
             )}
+
+            <div className={styles.windowBlock}>
+              <h2 className={styles.photoHeading}>How long should your page stay up?</h2>
+              <div className={styles.chipRow} role="radiogroup" aria-label="Visibility window">
+                {([7, 30, 90] as const).map((days) => (
+                  <button
+                    key={days}
+                    type="button"
+                    role="radio"
+                    aria-checked={campaignDays === days}
+                    className={`${styles.chip} ${campaignDays === days ? styles.chipActive : ''}`}
+                    onClick={() => setCampaignDays(days)}
+                  >
+                    {days} days
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {(state.draft.headline !== null || state.draft.body !== null) && (
               <div className={styles.notes}>

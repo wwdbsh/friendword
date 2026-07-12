@@ -54,6 +54,7 @@ export async function getPublishedPitchBySlug(
     .select()
     .eq('slug', parsedSlug.data)
     .eq('status', 'published')
+    .or(`ends_at.is.null,ends_at.gt.${new Date().toISOString()}`)
     .maybeSingle();
   if (campaignError !== null) {
     throw new DataLayerError('publishedPitch.campaign', campaignError);

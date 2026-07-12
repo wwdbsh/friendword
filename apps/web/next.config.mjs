@@ -7,6 +7,7 @@ const nextConfig = {
     remotePatterns: [{ protocol: 'https', hostname: '**.supabase.co' }],
   },
   transpilePackages: [
+    '@friendword/adapters',
     '@friendword/contracts',
     '@friendword/data',
     '@friendword/domain',

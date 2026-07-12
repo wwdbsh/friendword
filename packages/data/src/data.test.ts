@@ -510,7 +510,10 @@ describe('ConsentRepo', () => {
 
     const published = await repo.approveAndPublish(draftId);
 
-    expect(mocks.rpc).toHaveBeenCalledWith('approve_and_publish_pitch', { draft_id: draftId });
+    expect(mocks.rpc).toHaveBeenCalledWith('approve_and_publish_pitch', {
+      draft_id: draftId,
+      campaign_days: 30,
+    });
     expect(published).toEqual({
       campaignId: '20000000-0000-0000-0000-000000000001',
       campaignSlug: 'blair-abc123',
@@ -560,7 +563,9 @@ describe('getPublishedPitchBySlug', () => {
         return {
           select: () => ({
             eq: () => ({
-              eq: () => ({ maybeSingle: async () => ({ data: campaign, error: null }) }),
+              eq: () => ({
+                or: () => ({ maybeSingle: async () => ({ data: campaign, error: null }) }),
+              }),
             }),
           }),
         };

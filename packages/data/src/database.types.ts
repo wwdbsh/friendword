@@ -54,6 +54,7 @@ export type CampaignRow = {
   readonly status: 'draft' | 'published' | 'paused' | 'expired' | 'archived';
   readonly published_at: string | null;
   readonly slug: string | null;
+  readonly ends_at: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 };
@@ -211,6 +212,23 @@ export type Database = {
         Update: Record<string, never>;
         Relationships: [];
       };
+      analytics_events: {
+        Row: {
+          readonly id: string;
+          readonly user_id: string | null;
+          readonly event_name: string;
+          readonly properties: Json;
+          readonly created_at: string;
+        };
+        // Clients write via track_event; direct inserts are service-only.
+        Insert: {
+          readonly user_id?: string | null;
+          readonly event_name: string;
+          readonly properties?: Json;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
       pitch_assets: {
         Row: PitchAssetRow;
         Insert: {
@@ -262,11 +280,15 @@ export type Database = {
         }[];
       };
       approve_and_publish_pitch: {
-        Args: { readonly draft_id: string };
+        Args: { readonly draft_id: string; readonly campaign_days?: number };
         Returns: readonly {
           readonly campaign_id: string;
           readonly campaign_slug: string;
         }[];
+      };
+      exclude_pitch_asset: {
+        Args: { readonly target_asset_id: string };
+        Returns: undefined;
       };
       submit_interest: {
         Args: { readonly target_campaign_id: string; readonly interest_note?: string | null };

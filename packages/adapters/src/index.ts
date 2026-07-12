@@ -3,4 +3,5 @@ export * from './mockIdentityVerification';
 export * from './mockModeration';
 export * from './mockPitchStructure';
 export * from './mockTranscription';
+export * from './openAi';
 export * from './types';

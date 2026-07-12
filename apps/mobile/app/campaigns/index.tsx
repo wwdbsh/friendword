@@ -98,6 +98,18 @@ export default function CampaignsScreen() {
                 secondary
               />
             ) : null}
+            {draft.server !== null ? (
+              <HypeButton
+                label="Boost this pitch"
+                onPress={() =>
+                  router.push({
+                    pathname: '/paywall',
+                    params: { pitchDraftId: draft.server?.draftId ?? '' },
+                  })
+                }
+                secondary
+              />
+            ) : null}
           </StickerCard>
         ))}
       </ScrollView>

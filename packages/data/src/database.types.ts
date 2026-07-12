@@ -212,6 +212,77 @@ export type Database = {
         Update: Record<string, never>;
         Relationships: [];
       };
+      purchase_events: {
+        Row: {
+          readonly id: string;
+          readonly purchaser_user_id: string;
+          readonly product_id: string;
+          readonly scope_type: 'PITCH_DRAFT' | 'CAMPAIGN';
+          readonly scope_id: string;
+          readonly provider_event_id: string;
+          readonly purchased_at: string;
+          readonly created_at: string;
+          readonly updated_at: string;
+        };
+        // Service-only (RevenueCat webhook); clients hold no write grants.
+        Insert: {
+          readonly purchaser_user_id: string;
+          readonly product_id: string;
+          readonly scope_type: 'PITCH_DRAFT' | 'CAMPAIGN';
+          readonly scope_id: string;
+          readonly provider_event_id: string;
+          readonly purchased_at?: string;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      purchase_credit_ledger: {
+        Row: {
+          readonly id: string;
+          readonly user_id: string;
+          readonly credit_state: 'available' | 'reserved' | 'consumed' | 'refunded';
+          readonly product_id: string;
+          readonly pitch_draft_id: string | null;
+          readonly campaign_id: string | null;
+          readonly idempotency_key: string;
+          readonly created_at: string;
+          readonly updated_at: string;
+        };
+        Insert: {
+          readonly user_id: string;
+          readonly credit_state?: 'available' | 'reserved' | 'consumed' | 'refunded';
+          readonly product_id: string;
+          readonly pitch_draft_id?: string | null;
+          readonly campaign_id?: string | null;
+          readonly idempotency_key: string;
+        };
+        Update: {
+          readonly credit_state?: 'available' | 'reserved' | 'consumed' | 'refunded';
+        };
+        Relationships: [];
+      };
+      campaign_entitlements: {
+        Row: {
+          readonly id: string;
+          readonly campaign_id: string;
+          readonly product_id: string;
+          readonly active: boolean;
+          readonly expires_at: string | null;
+          readonly created_at: string;
+          readonly updated_at: string;
+        };
+        Insert: {
+          readonly campaign_id: string;
+          readonly product_id: string;
+          readonly active?: boolean;
+          readonly expires_at?: string | null;
+        };
+        Update: {
+          readonly active?: boolean;
+          readonly expires_at?: string | null;
+        };
+        Relationships: [];
+      };
       analytics_events: {
         Row: {
           readonly id: string;

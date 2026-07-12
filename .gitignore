@@ -1,0 +1,57 @@
+# deps
+node_modules/
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# signing credentials & keys (never commit)
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.pem
+*.mobileprovision
+google-services.json
+GoogleService-Info.plist
+
+# build outputs
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+.eslintcache
+
+# Next.js (next-env.d.ts is committed on purpose: CI typechecks without building)
+.next/
+.vercel/
+
+# Expo / React Native (managed workflow; native dirs are generated via prebuild)
+.expo/
+expo-env.d.ts
+apps/mobile/ios/
+apps/mobile/android/
+*.orig.*
+web-build/
+.metro-health-check*
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# worker briefs (session-local coordination)
+.briefs/
+
+# OS/editor
+.DS_Store
+*.local
+.idea/
+.vscode/
+
+# supabase local
+supabase/.branches/
+supabase/.temp/

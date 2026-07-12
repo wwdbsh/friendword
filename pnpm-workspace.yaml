@@ -1,0 +1,7 @@
+packages:
+  - apps/*
+  - packages/*
+  - media-worker
+allowBuilds:
+  esbuild: true
+  sharp: true

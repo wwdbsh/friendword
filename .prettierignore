@@ -1,0 +1,9 @@
+node_modules
+dist
+.expo
+.next
+coverage
+pnpm-lock.yaml
+supabase/migrations
+.briefs
+FRIENDWORD_HANDOFF.md

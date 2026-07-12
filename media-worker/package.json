@@ -1,0 +1,13 @@
+{
+  "name": "@friendword/media-worker",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Server-side pitch renderer (FFmpeg/Remotion decision pending — docs/DECISIONS.md). Renders happen once, after dater approval.",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

@@ -18,7 +18,9 @@ import {
   requireRecording,
   requireReviewData,
 } from '../../src/features/pitch/pitchFlowState';
-import { pitchDraftService } from '../../src/services/pitchDrafts';
+import { SignInSheet } from '../../src/features/auth/SignInSheet';
+import { pitchDraftService } from '../../src/services/draftServiceInstance';
+import { NeedsSignInError } from '../../src/services/pitchDraftsSupabase';
 import type {
   InvitationContact,
   PitchDraftId,
@@ -48,6 +50,7 @@ export default function NewPitchScreen() {
   const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [signInVisible, setSignInVisible] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const goBack = useCallback((): void => {
@@ -170,6 +173,10 @@ export default function NewPitchScreen() {
       setErrorMessage(null);
       router.replace('/campaigns');
     } catch (error: unknown) {
+      if (error instanceof NeedsSignInError) {
+        setSignInVisible(true);
+        return;
+      }
       handleSubmitError(error, setErrorMessage);
     } finally {
       setSubmitting(false);
@@ -234,18 +241,28 @@ export default function NewPitchScreen() {
     case 5: {
       const review = requireReviewData(savedRelationship, recording);
       return (
-        <ReviewStep
-          errorMessage={errorMessage}
-          onBack={goBack}
-          onRerecord={() => setTrack(4)}
-          onSubmit={() => {
-            void submit();
-          }}
-          photos={photos}
-          recording={review.recording}
-          relationship={review.relationship}
-          submitting={submitting}
-        />
+        <>
+          <ReviewStep
+            errorMessage={errorMessage}
+            onBack={goBack}
+            onRerecord={() => setTrack(4)}
+            onSubmit={() => {
+              void submit();
+            }}
+            photos={photos}
+            recording={review.recording}
+            relationship={review.relationship}
+            submitting={submitting}
+          />
+          <SignInSheet
+            visible={signInVisible}
+            onClose={() => setSignInVisible(false)}
+            onSignedIn={() => {
+              setSignInVisible(false);
+              void submit();
+            }}
+          />
+        </>
       );
     }
     default:

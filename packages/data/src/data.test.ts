@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { ensureUserRow, signInWithOtp, verifyOtp } from './auth';
 import {
   createBrowserClient,
+  createMobileClient,
   createServiceClient,
   type BrowserSupabaseClient,
   type ServiceSupabaseClient,
@@ -23,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   draftUpdate: vi.fn(),
   draftSelect: vi.fn(),
   signedUpload: vi.fn(),
+  rpc: vi.fn(),
 }));
 
 vi.mock('@supabase/supabase-js', () => ({
@@ -52,6 +54,7 @@ function configureMockClient(): void {
     storage: {
       from: () => ({ createSignedUploadUrl: mocks.signedUpload }),
     },
+    rpc: mocks.rpc,
   });
 }
 
@@ -69,6 +72,25 @@ describe('Supabase clients and auth', () => {
     createBrowserClient('https://project.example', 'anon-key');
 
     expect(vi.mocked(createClient)).toHaveBeenCalledWith('https://project.example', 'anon-key');
+  });
+
+  it('persists mobile sessions in the provided async storage without URL detection', () => {
+    const storage = {
+      getItem: vi.fn().mockResolvedValue(null),
+      setItem: vi.fn().mockResolvedValue(undefined),
+      removeItem: vi.fn().mockResolvedValue(undefined),
+    };
+
+    createMobileClient('https://project.example', 'anon-key', storage);
+
+    expect(vi.mocked(createClient)).toHaveBeenCalledWith('https://project.example', 'anon-key', {
+      auth: {
+        storage,
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: false,
+      },
+    });
   });
 
   it('disables persisted auth when creating a service client', () => {
@@ -275,5 +297,37 @@ describe('PitchDraftRepo', () => {
       InvalidStoragePathError,
     );
     expect(mocks.signedUpload).not.toHaveBeenCalled();
+  });
+
+  it('submits a draft for consent through the server RPC and maps the token', async () => {
+    const draftId = '10000000-0000-0000-0000-000000000001';
+    mocks.rpc.mockResolvedValue({
+      data: [
+        {
+          consent_request_id: '30000000-0000-0000-0000-000000000001',
+          consent_token: 'a'.repeat(32),
+        },
+      ],
+      error: null,
+    });
+    const client = createBrowserClient('https://project.example', 'anon-key');
+    const repo = new PitchDraftRepo(client);
+
+    const result = await repo.submitForConsent(draftId);
+
+    expect(mocks.rpc).toHaveBeenCalledWith('submit_pitch_for_consent', { draft_id: draftId });
+    expect(result.consentRequestId).toBe('30000000-0000-0000-0000-000000000001');
+    expect(result.consentToken).toBe('a'.repeat(32));
+  });
+
+  it('rejects a consent submission when no session exists', async () => {
+    mocks.getSession.mockResolvedValue({ data: { session: null }, error: null });
+    const client = createBrowserClient('https://project.example', 'anon-key');
+    const repo = new PitchDraftRepo(client);
+
+    await expect(
+      repo.submitForConsent('10000000-0000-0000-0000-000000000001'),
+    ).rejects.toBeInstanceOf(UnauthenticatedError);
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 });

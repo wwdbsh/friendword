@@ -39,6 +39,17 @@ const PitchRecordingSchema = z.object({
   caption: z.string().min(1),
 });
 
+/**
+ * Filled in once the draft is synced to Supabase on submit. The raw consent
+ * token lives only on the introducer's device so they can share the approval
+ * link; the server stores just its hash.
+ */
+const PitchServerSyncSchema = z.object({
+  draftId: z.uuid(),
+  consentRequestId: z.uuid(),
+  consentToken: z.string().min(24),
+});
+
 export const PitchDraftSchema = z.object({
   id: PitchDraftIdSchema,
   status: PitchDraftStatusSchema,
@@ -46,12 +57,14 @@ export const PitchDraftSchema = z.object({
   relationship: PitchRelationshipSchema.nullable(),
   photos: z.array(PitchPhotoSchema).max(4),
   recording: PitchRecordingSchema.nullable(),
+  server: PitchServerSyncSchema.nullable().default(null),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
 
 export const PitchDraftListSchema = z.array(PitchDraftSchema);
 
+export type PitchServerSync = z.infer<typeof PitchServerSyncSchema>;
 export type PitchDraftId = z.infer<typeof PitchDraftIdSchema>;
 export type InvitationContact = z.infer<typeof InvitationContactSchema>;
 export type PitchRelationship = z.infer<typeof PitchRelationshipSchema>;

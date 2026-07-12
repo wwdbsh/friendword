@@ -5,7 +5,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { HypeButton, StickerCard } from '../../src/components';
-import { pitchDraftService } from '../../src/services/pitchDrafts';
+import { pitchDraftService } from '../../src/services/draftServiceInstance';
 import type { PitchDraft } from '../../src/services/types';
 
 export default function CampaignsScreen() {

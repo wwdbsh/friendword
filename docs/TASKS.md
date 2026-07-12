@@ -25,3 +25,11 @@
 | `friendword-codex-2` | `packages/data\|adapters\|contracts/**`, `supabase/migrations/0003`, `scripts/test-db.sh` | `.briefs/05-data-layer.md`                   | 전체 테스트 + DB 하니스 통과                                        | 승인 (Advisor 재검증 + 원격 배포 완료)                         | 2026-07-12 |
 | `friendword-codex-3` | `apps/web/**`                                                                             | `.briefs/06-web-pitch-page.md`, ui-tokens    | `/p/demo-blair` 완전 동작, build/E2E 통과                           | 승인 (usage limit로 최종 보고 누락 — Advisor가 직접 검증 완료) | 2026-07-12 |
 | Advisor              | `packages/ui-tokens`, `docs/DESIGN.md`, `.env`, Supabase 링크·배포, ignore 정리           | 사용자 디자인 피드백(액티브·펑키)            | 디자인 시스템 확정, 원격 스키마 0001~0003 배포, 전체 그린           | 완료                                                           | 2026-07-12 |
+
+## 2026-07-12 Slice 4 (모바일 실데이터 연결 — Advisor 단독, codex usage limit 폴백)
+
+| Session | Owned paths                                                                                 | Dependency          | Acceptance criteria                                            | Status                                    | Updated    |
+| ------- | ------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------------------------------- | ----------------------------------------- | ---------- |
+| Advisor | `supabase/migrations/0004`, `packages/data`, `apps/mobile`(auth·서비스 계층), `.env` 심링크 | Slice 3 산출물 전부 | 전체 테스트+DB 하니스 그린, hosted Supabase 제출 경로 E2E 통과 | 완료 (프로덕션 E2E 8단계 검증, 커밋 예정) | 2026-07-12 |
+
+알려진 한계: 무료 티어 기본 SMTP로는 OTP 코드 메일 템플릿 수정 불가 → 커스텀 SMTP(Resend 등) 연결 필요. 사용자 결정 대기.

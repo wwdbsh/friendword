@@ -31,6 +31,18 @@ export type SignedAssetUpload = {
   readonly token: string;
 };
 
+export type ConsentSubmission = {
+  readonly consentRequestId: string;
+  readonly consentToken: string;
+};
+
+const consentSubmissionRowSchema = z.array(
+  z.object({
+    consent_request_id: z.string().uuid(),
+    consent_token: z.string().min(24),
+  }),
+);
+
 export function buildPitchMediaPath(draftId: string, fileName: string): string {
   const parsedDraftId = uuidSchema.safeParse(draftId);
   const parsedFileName = fileNameSchema.safeParse(fileName);
@@ -110,6 +122,31 @@ export class PitchDraftRepo {
     }
 
     return { storagePath, signedUrl: data.signedUrl, token: data.token };
+  }
+
+  /**
+   * Server-validated transition draft → consent_pending (0004 RPC).
+   * Returns the raw consent token exactly once — only its hash is stored,
+   * so the caller must hand it to the introducer's share flow immediately.
+   */
+  async submitForConsent(draftId: string): Promise<ConsentSubmission> {
+    await this.getRequiredSession();
+    const { data, error } = await this.client.rpc('submit_pitch_for_consent', {
+      draft_id: uuidSchema.parse(draftId),
+    });
+    if (error !== null) {
+      throw new DataLayerError('pitchDraft.submitForConsent', error);
+    }
+
+    const row = consentSubmissionRowSchema.parse(data).at(0);
+    if (row === undefined) {
+      throw new DataLayerError(
+        'pitchDraft.submitForConsent',
+        new Error('RPC returned no consent request'),
+      );
+    }
+
+    return { consentRequestId: row.consent_request_id, consentToken: row.consent_token };
   }
 
   private async getRequiredSession(): Promise<Session> {

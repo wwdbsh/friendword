@@ -84,7 +84,15 @@ export type Database = {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      submit_pitch_for_consent: {
+        Args: { readonly draft_id: string };
+        Returns: readonly {
+          readonly consent_request_id: string;
+          readonly consent_token: string;
+        }[];
+      };
+    };
     Enums: {
       account_status: 'active' | 'suspended' | 'deleted';
       pitch_draft_status: PitchDraftStatus;

@@ -8,6 +8,7 @@ import {
   type PitchPhoto,
   type PitchRecording,
   type PitchRelationship,
+  type PitchServerSync,
 } from './types';
 
 const STORAGE_KEY = '@friendword/pitch-drafts';
@@ -99,6 +100,19 @@ export class MockPitchDraftService implements PitchDraftService {
     });
   }
 
+  /**
+   * Records a completed server submission: the draft leaves local-only life
+   * and keeps the consent share info (raw token stays on-device only).
+   */
+  async attachServerSync(id: PitchDraftId, server: PitchServerSync): Promise<PitchDraft> {
+    return this.updateDraft(id, (draft) => {
+      if (!canTransitionPitchDraft(draft.status, 'consent_pending')) {
+        throw new PitchDraftSubmissionError('This pitch has already been sent for approval.');
+      }
+      return { ...draft, status: 'consent_pending', server };
+    });
+  }
+
   private async updateDraft(
     id: PitchDraftId,
     update: (draft: PitchDraft) => PitchDraft,
@@ -147,5 +161,3 @@ export class MockPitchDraftService implements PitchDraftService {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(drafts));
   }
 }
-
-export const pitchDraftService: PitchDraftService = new MockPitchDraftService();

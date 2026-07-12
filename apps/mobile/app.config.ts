@@ -1,5 +1,11 @@
 import type { ExpoConfig } from 'expo/config';
 
+/**
+ * apps/mobile/.env is a symlink to the repo-root .env, so Expo's standard
+ * dotenv loading provides EXPO_PUBLIC_* here and to the bundle. We mirror
+ * the two client-safe values into `extra` (read via expo-constants); when
+ * they are absent the app falls back to the local mock draft service.
+ */
 const config: ExpoConfig = {
   name: 'Friendword',
   slug: 'friendword',
@@ -37,6 +43,10 @@ const config: ExpoConfig = {
     'expo-font',
     'expo-splash-screen',
   ],
+  extra: {
+    supabaseUrl: process.env['EXPO_PUBLIC_SUPABASE_URL'] ?? '',
+    supabaseAnonKey: process.env['EXPO_PUBLIC_SUPABASE_ANON_KEY'] ?? '',
+  },
   experiments: {
     typedRoutes: true,
   },

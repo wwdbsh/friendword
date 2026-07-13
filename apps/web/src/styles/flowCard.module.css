@@ -60,7 +60,7 @@
 
 .badgeDanger {
   background: var(--color-danger);
-  color: var(--color-surface);
+  color: var(--color-on-danger);
 }
 
 .badgeFresh {
@@ -164,7 +164,7 @@
 
 .finePrint {
   margin: var(--space-xs) 0 0;
-  color: var(--color-text-faint);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
 }
 

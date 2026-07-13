@@ -42,3 +42,16 @@ a {
   outline: var(--stroke-sticker) solid var(--color-flirt);
   outline-offset: var(--space-xs);
 }
+
+/* Audit D-P1: every animation and transition collapses under the system
+   reduce-motion setting; spatial reveals become plain appearances. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0s !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -21,7 +21,10 @@ export const colors = {
   ink: '#221B15',
   /** Secondary text on cream. */
   textSecondary: '#6E6259',
-  /** Tertiary/disabled on cream. */
+  /**
+   * Placeholder/disabled ONLY (2.72:1 on cream — below AA). Never use for
+   * readable copy or fine print; use textSecondary instead (audit D-P0).
+   */
   textFaint: '#A2958A',
   /** Text on the ink stage. */
   stageText: '#FFF6EA',
@@ -30,20 +33,28 @@ export const colors = {
 
   /** Tangerine — primary action, energy. */
   pop: '#FF5B2E',
-  /** Pressed tangerine. */
-  popPressed: '#E24417',
+  /** Pressed tangerine (ink text stays >=4.5:1 in the pressed state too). */
+  popPressed: '#E8501F',
   /** Hot pink — romance, flirt moments, waveforms. */
   flirt: '#FF3D8A',
   /** Sunshine yellow — hype badges, vouch highlights. */
   hype: '#FFC63F',
   /** Teal — verified, safety, success. */
   fresh: '#17B89B',
-  /** Danger/report. */
-  danger: '#E5484D',
-  /** Text on pop/flirt fills. */
-  onPop: '#FFF9F2',
+  /**
+   * Danger/report. Dark enough that cream text passes 4.5:1 as a fill and
+   * the color itself passes as text on cream (audit D-P0 correction).
+   */
+  danger: '#C63838',
+  /**
+   * Text on pop/flirt fills — ink, per the audit D-P0 decision: the old
+   * cream-on-tangerine pair measured 2.96:1. Never put cream text on pop.
+   */
+  onPop: '#221B15',
   /** Text on hype (yellow) fills. */
   onHype: '#221B15',
+  /** Text on danger fills (measured 4.99:1 on #C63838). */
+  onDanger: '#FFF9F2',
 } as const;
 
 /** Signature gradients — use boldly but on one hero element per screen. */

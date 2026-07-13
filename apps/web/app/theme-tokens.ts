@@ -26,6 +26,7 @@ export const themeCss = `
   --color-fresh: ${colors.fresh};
   --color-danger: ${colors.danger};
   --color-on-pop: ${colors.onPop};
+  --color-on-danger: ${colors.onDanger};
   --color-on-hype: ${colors.onHype};
   --font-size-xs: ${fontSizes.xs}px;
   --font-size-sm: ${fontSizes.sm}px;

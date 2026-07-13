@@ -130,3 +130,10 @@
 - **이유**: 2차 감사 P0-7(직접 RPC의 token-possession claim)·P0-8(만료·종류·사진 무결성 없는 pass row).
 - **검토 대안**: submit RPC 전면 재정의(재정의 소실 위험 — 트리거 채택), legacy 자동 hash 백필(원본 contact 미보유로 불가능 — 해시만 저장하는 프라이버시 설계의 의도된 결과).
 - **영향**: audit2 b05·b06 그린. 구계약 픽스처 정리: 스위트 04/05/10/12/13/16·a01~~a04·a08~~a10이 contact-bound 제출과 typed evidence로 이행, 12의 "legacy claim 성공" 단언은 "재발급 요구"로 반전. 실 provider 연동·sandbox 증명은 여전히 사용자 게이트(identity 벤더 선정) 뒤이며 enforcement 스위치는 off 유지.
+
+## 2026-07-13: Provider 비용 reserve/reconcile 원장과 외부 AI 동의 (Slice 6, P0-9·P0-10·H-2)
+
+- **결정**: (1) 모든 provider 호출은 사용자 컨텍스트(auth.uid())의 `reserve_provider_usage`로 선예약된다 — kill switch·월간 hard cap($200=20000센트, `provider_monthly_cap_cents`)·사용자 시간당 quota(60)·비활성/삭제요청 계정·draft-scoped AI 작업의 사전 동의(`ai_processing_consents`)를 원자적으로 강제하고, 같은 request_ref replay는 같은 예약을 반환한다(실패 예약은 re-arm). 호출 후 actual_cents로 reconcile. (2) request_ref는 작업 내용에 결합된다: 전사는 voice object 버전, 텍스트 moderation은 content hash, 이미지 검증은 object 이름 — 같은 콘텐츠 재시도는 재과금되지 않는다. (3) 외부 AI 동의는 introducer의 affirmative action으로 `record_ai_processing_consent(draft, revision)`에 기록되고(`AI_PROCESSING_CONSENT_REVISION` 상수), 서버 reserve가 동의 없는 draft-scoped 작업을 차단한다. (4) H-2: 삭제 처리에서 share_kits를 credit ledger보다 먼저 제거(restrict FK). (5) 정기 운영은 `run-scheduled-ops.mjs` 단일 진입점으로 통합하되, 실제 스케줄러 연결은 배포 환경 확정 후로 명시(자동화 완료 주장 금지).
+- **이유**: 2차 감사 P0-9(비용 hard cap 부재)·P0-10(외부 AI 동의 부재)·H-2(paid 계정 삭제 FK 실패).
+- **검토 대안**: route별 개별 rate limit(전역 cap 불가), 동의를 클라이언트 플래그로만 기록(서버 권위 위반), GH Actions 스케줄 즉시 연결(hosted service key를 CI 시크릿에 넣는 결정은 사용자 몫).
+- **영향**: audit2 b07·b08 그린(11/12). transcribe/moderate-text/media-validate 라우트가 reserve→호출→reconcile로 재배선. 모바일 disclosure UI는 codex-1이 구현. 비용 추정치는 보수적 근사(전사 3센트, moderation 1센트)로 COST_MODEL 재검토 대상.

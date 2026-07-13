@@ -20,3 +20,8 @@ export const CAMPAIGN_PASS_MAX_VOUCHES = 5;
 
 /** Monthly hard cap for total cloud/API spend in USD (docs/COST_MODEL.md). */
 export const MONTHLY_CLOUD_SPEND_HARD_CAP_USD = 200;
+
+// Second audit P0-10: version tag of the external-AI processing
+// disclosure the introducer affirms before any provider work runs on
+// their draft. Bump when the disclosure copy changes materially.
+export const AI_PROCESSING_CONSENT_REVISION = '2026-07-13.v1';

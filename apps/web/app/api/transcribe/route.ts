@@ -5,6 +5,7 @@ import { createProviders, ProviderNotImplementedError } from '@friendword/adapte
 import { createBrowserClient, isTranscriptionEditableStatus } from '@friendword/data';
 
 import { isActiveAccount } from '@/lib/accountStatus';
+import { reconcileProviderUsage, reserveProviderUsage } from '@/lib/providerBudget';
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
 
 export const dynamic = 'force-dynamic';
@@ -79,6 +80,28 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'voice note not found' }, { status: 404 });
   }
 
+  // Cost + consent gate (second audit P0-9/P0-10): reserve before any
+  // provider byte moves. The request ref is bound to the exact voice
+  // object version, so replays of the same recording never pay twice.
+  const { data: voiceObjects } = await serviceClient.storage
+    .from(PITCH_MEDIA_BUCKET)
+    .list(draftId, { search: 'voice.m4a' });
+  const voiceVersion = voiceObjects?.[0]?.updated_at ?? 'unknown';
+  const reservation = await reserveProviderUsage(
+    serviceClient,
+    accessToken,
+    'transcribe',
+    `transcribe:${draftId}:${voiceVersion}`,
+    3,
+    draftId,
+  );
+  if (!reservation.ok) {
+    return NextResponse.json({ error: reservation.message }, { status: reservation.httpStatus });
+  }
+  if (reservation.status === 'succeeded') {
+    return NextResponse.json({ error: 'this recording was already transcribed' }, { status: 409 });
+  }
+
   try {
     const transcript = await providers.transcription.transcribe({
       uri: signed.signedUrl,
@@ -104,6 +127,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       .select('moderation_status')
       .maybeSingle();
     if (!voiceVerdict.allowed) {
+      // The provider work still happened and still cost money.
+      await reconcileProviderUsage(serviceClient, reservation.reservationId, 3, 'succeeded');
       return NextResponse.json(
         { error: 'the voice recording did not pass moderation' },
         { status: 422 },
@@ -126,9 +151,17 @@ export async function POST(request: Request): Promise<NextResponse> {
       .filter((part) => part.trim() !== '')
       .join('\n\n');
 
+    // CP-2: persist the real transcript (text + segment timestamps) so the
+    // consent revision snapshots it and the public pitch can render true
+    // captions and an accessible transcript.
+    const transcriptRecord = {
+      text: transcript.text,
+      language: transcript.language,
+      segments: transcript.segments ?? [],
+    };
     const { data: updatedDraft, error: updateError } = await serviceClient
       .from('pitch_drafts')
-      .update({ headline: structure.hook, body, structure })
+      .update({ headline: structure.hook, body, structure, transcript: transcriptRecord })
       .eq('id', draftId)
       .in('status', ['draft', 'changes_requested'])
       .select('id')
@@ -149,11 +182,13 @@ export async function POST(request: Request): Promise<NextResponse> {
       },
     });
 
+    await reconcileProviderUsage(serviceClient, reservation.reservationId, 3, 'succeeded');
     return NextResponse.json({
       headline: structure.hook,
       hardClaims: structure.hard_claims_requiring_confirmation,
     });
   } catch {
+    await reconcileProviderUsage(serviceClient, reservation.reservationId, 0, 'failed');
     return NextResponse.json({ error: 'transcription failed' }, { status: 502 });
   }
 }

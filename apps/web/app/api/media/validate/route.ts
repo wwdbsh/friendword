@@ -11,6 +11,7 @@ import {
 import { createBrowserClient } from '@friendword/data';
 
 import { isActiveAccount } from '@/lib/accountStatus';
+import { reconcileProviderUsage, reserveProviderUsage } from '@/lib/providerBudget';
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
 
 export const dynamic = 'force-dynamic';
@@ -132,9 +133,29 @@ export async function POST(request: Request): Promise<NextResponse> {
       if (signError !== null || signed === null) {
         return NextResponse.json({ error: 'object not found' }, { status: 404 });
       }
-      const verdict = await providers.moderation.checkImage(signed.signedUrl);
-      moderationStatus = verdict.allowed ? 'passed' : 'flagged';
-      moderationRef = verdict.allowed ? null : verdict.categories.join(',').slice(0, 200);
+      // Cost gate (P0-9): reserve per object before the moderation call.
+      const reservation = await reserveProviderUsage(
+        serviceClient,
+        accessToken,
+        'media_validate',
+        `media-validate:${bucket}:${objectName}`,
+        1,
+      );
+      if (!reservation.ok) {
+        return NextResponse.json(
+          { error: reservation.message },
+          { status: reservation.httpStatus },
+        );
+      }
+      try {
+        const verdict = await providers.moderation.checkImage(signed.signedUrl);
+        moderationStatus = verdict.allowed ? 'passed' : 'flagged';
+        moderationRef = verdict.allowed ? null : verdict.categories.join(',').slice(0, 200);
+        await reconcileProviderUsage(serviceClient, reservation.reservationId, 1, 'succeeded');
+      } catch (moderationError: unknown) {
+        await reconcileProviderUsage(serviceClient, reservation.reservationId, 0, 'failed');
+        throw moderationError;
+      }
     } catch (error: unknown) {
       if (!(error instanceof ProviderNotImplementedError)) {
         console.warn('media validation: moderation call failed');

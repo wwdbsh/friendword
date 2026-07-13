@@ -268,6 +268,11 @@ async function deleteAccountData(admin, userId, scope) {
     }
   });
   await runStage('purchase reference cleanup', async () => {
+    // share_kits.credit_ledger_id is a RESTRICT FK (second audit H-2):
+    // paid accounts with an unlocked kit must drop the kit rows before
+    // any credit-ledger row can go.
+    await removeRowsByIds(admin, 'share_kits', 'pitch_draft_id', scope.draftIds);
+    await removeRows(admin, 'share_kits', (query) => query.eq('unlocked_by_user_id', userId));
     await removeRowsByIds(admin, 'purchase_credit_ledger', 'campaign_id', scope.campaignIds);
     await removeRowsByIds(admin, 'purchase_credit_ledger', 'pitch_draft_id', scope.draftIds);
   });

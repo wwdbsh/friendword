@@ -152,3 +152,29 @@ SELECT provider_event_id, event_type, reason, created_at
 
 - claimable 상태(pending/claimed)의 consent 요청은 verified contact 바인딩 없이는 존재할 수 없고, 바인딩 없는 legacy 요청은 claim 시 "reissued with a verified contact" 오류로 거부됩니다.
 - 구제 절차: introducer가 draft를 다시 제출하며 접점을 입력하거나(기존 요청이 rebind됨 — 단 무접점 요청은 재제출도 거부되므로), 실질적으로는 **draft 삭제 후 재생성** 또는 ops가 확인된 접점으로 hash를 직접 세팅하는 방법뿐입니다. raw contact는 저장하지 않으므로 자동 백필은 불가능합니다(의도된 설계).
+
+## Provider 비용 원장과 kill switch (0031 이후)
+
+- 모든 provider 호출(전사·구조화·텍스트/이미지 moderation)은 호출 전 `reserve_provider_usage`로 예약되고 호출 후 reconcile됩니다. 동일 request_ref replay는 재과금되지 않습니다.
+- 강제 경계: `provider_kill_switch`(on이면 즉시 전면 차단), `provider_monthly_cap_cents`(기본 20000 = $200), `provider_user_hourly_limit`(기본 60건/시간/사용자), suspended/deletion-requested 계정 차단, draft-scoped AI 작업의 사전 동의(`ai_processing_consents`).
+- 현재 burn 조회:
+
+```sql
+SELECT date_trunc('month', now()) AS month,
+       sum(coalesce(actual_cents, estimated_cents, 0)) AS spent_cents,
+       (SELECT value FROM app_config WHERE key = 'provider_monthly_cap_cents') AS cap_cents
+  FROM provider_usage_events
+ WHERE created_at >= date_trunc('month', now())
+   AND status <> 'released';
+```
+
+- 긴급 차단: `UPDATE app_config SET value = 'on' WHERE key = 'provider_kill_switch';`
+
+## 정기 운영 실행 (수동 스케줄 — 자동화는 배포 환경 결정 대기)
+
+```bash
+node scripts/run-scheduled-ops.mjs          # 삭제 처리 + orphan dry-run
+node scripts/run-scheduled-ops.mjs --apply  # orphan 실제 삭제 포함
+```
+
+- 권장 주기: 최소 일 1회. 실제 cron/스케줄러 연결은 배포 환경(호스팅·시크릿) 확정 후 설정하고 이 문서에 기록합니다. "account deletion automated"는 스케줄러가 실제로 물릴 때까지 주장하지 않습니다.

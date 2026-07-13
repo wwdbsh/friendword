@@ -21,19 +21,26 @@ The end-to-end flow is:
 3. Anyone can view the pitch without an account. A viewer who selects **I'm interested** must sign in and provide current photos, a short bio, age, approximate location, dating intent, phone verification, and the required identity check.
 4. The Dater accepts, declines, or reports the interest. Acceptance opens a private text-only Intro Room; contact details are shared only if both people later choose to do so.
 
-## Local development
+## Repository layout and current state
 
-The repository scaffold is being assembled in parallel. Use the following root commands as each script becomes available:
+pnpm monorepo: `apps/mobile` (Expo), `apps/web` (Next.js 15), `packages/{domain,contracts,config,ui-tokens,data,adapters}`, `supabase/` (migrations 0001–0022, all state transitions behind SECURITY DEFINER RPCs). Web surfaces: the acquisition landing `/`, public pitch `/p/[slug]` (+ `/api/og` campaign image), interest flow, consent flow `/consent/[token]`, inbox with campaign management and Campaign Pass funnel, intro rooms, the Creator Launch kit `/kit/[draftId]`, and the APIs `/api/transcribe`, `/api/revenuecat`, `/api/media/validate`, `/api/report`.
+
+Working status lives in [`docs/SESSION_HANDOFF.md`](docs/SESSION_HANDOFF.md); the 2026-07-13 full audit and its resolution are recorded in [`docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md`](docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md) and [`docs/TASKS.md`](docs/TASKS.md).
+
+## Local development
 
 ```bash
 pnpm install
-pnpm lint
-pnpm typecheck
-pnpm test
-bash scripts/test-db.sh
+pnpm lint && pnpm typecheck && pnpm test && pnpm format:check
+bash scripts/test-db.sh          # migrations + DB/RLS suites 01–17 on local PostgreSQL 17
+bash scripts/test-db-audit.sh    # audit regression suite (7 files)
+pnpm test:audit                  # DB audit runner + webhook contract suite
+pnpm --filter @friendword/web test:e2e   # Playwright (reuses :3000, boots a dev server otherwise)
+node scripts/e2e-production.mjs  # full-funnel E2E against hosted Supabase (mutating — advisor-run)
+node scripts/export-growth-evidence.mjs  # anonymized aggregate metrics
 ```
 
-The command definitions in the root scaffold are authoritative. A command that has not landed yet is planned, not evidence that its check has passed.
+CI runs lint/type/unit/format, the web production build, the webhook audit suite, the Playwright suite against a mocked-network dev server, and both DB harnesses on every push.
 
 ## Environment and secrets
 
@@ -55,9 +62,11 @@ Never commit real credentials or user data. Keep client-safe identifiers separat
 
 Configure the `starter`, `creator_launch`, and `campaign_30d` offerings against sandbox products. `creator_launch_credit_499` is a repeatable consumable tracked by the server credit ledger, while `campaign_30d_1999` grants 30-day non-renewing campaign access and synchronizes its expiration through customer state and webhooks. Test purchase, webhook idempotency/replay, restore, expiration, and refund paths. Restore must not reissue an already-consumed Creator Launch credit. Production credentials and products must remain separate from sandbox configuration.
 
-## Provider adapters and local mocks
+## Provider adapters and staged enforcement
 
-Identity verification and text/image/audio moderation are designed behind provider adapters. Their local mock implementations are **not implemented yet**. When they land, select the documented mock adapter through `.env.example` for local-only flows; never treat a mock result as production verification or moderation, and never mark privacy, consent, moderation, identity, or payment work complete with mocks alone.
+Transcription, pitch structuring, and moderation run through provider adapters: with `OPENAI_API_KEY` set they call OpenAI for real; without it the affected endpoint answers 501 or records a `skipped` moderation verdict — nothing is ever faked into production data. Identity verification is deliberately `Unconfigured` and fails loudly until a liveness/face-match vendor is selected.
+
+Two service-role switches in `app_config` stage the launch boundaries: `identity_enforcement` (when `on`, publish and interest submission require a passed `verification_checks` row plus a verified phone) and `media_validation_enforcement` (when `on`, only server-validated, moderation-passed media can finalize or submit). Both default to `off` until their provider keys exist; the regression suites already assert the enforced behavior. Never mark privacy, consent, moderation, identity, or payment work complete with mocks alone.
 
 ## Cost guardrail
 

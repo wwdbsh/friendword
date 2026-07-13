@@ -1,95 +1,80 @@
 # PROJECT HANDOFF
 
-> 갱신: 2026-07-13 16:10 KST · 최신 커밋 기준 main (origin push·CI 그린)
+> 갱신: 2026-07-13 저녁 KST · main `941ef55` 이후 (origin push·CI 3잡 그린)
+> 읽는 순서: 이 문서 → `docs/TASKS.md`(작업 원장) → 필요 시 `docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md`(1차 감사·해소 완료), `FRIENDWORD_HANDOFF.md`(제품 원본), `docs/DESIGN.md`, `docs/OPS.md`, `docs/REVENUECAT_SETUP.md`, `CLAUDE.md`/`AGENTS.md`(협업 규칙)
 
-## 감사 대응 진행 현황 (2026-07-13 저녁 — A~J 완주)
+## 다음 세션 시작 방식 (사용자 확정, 2026-07-13)
 
-| 감사 항목                       | 상태                                                                                                                                                                                                                                  |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P0-1 웹 사용자 bootstrap        | **해소** — 0011 트리거+백필, 이름 확정 UI, 프로덕션 E2E 실증                                                                                                                                                                          |
-| P0-2 claim 바인딩·verified 실증 | **해소(코어)** — 이메일 해시 바인딩(0012), verified 카피·이벤트 전면 제거, identity_enforcement 스위치(벤더 선정 시 on)                                                                                                               |
-| P0-3 동의 불변성·AI 순서        | **해소** — consent_revisions(0013), introducer 동결, 5인자 원자 approve, 모바일 AI 검토 플로우                                                                                                                                        |
-| P0-4 결제 원장·효익             | **해소** — purchase intent+원자 RPC(0014, 0022), 웹훅 어댑터, 모바일 페이월 intent+pending 확정, 14일 고정+Pass 30일 연장, Pass 게이트 분석, Creator 킷(unlock+9:16 카드+캡션팩). 잔여: RevenueCat sandbox 실검증(사용자 셋업 게이트) |
-| P0-5 moderation·신고·삭제       | **해소** — report 전 표면(0016)+공개 피치 무가입 신고, 삭제 큐+프로세서, media_validations+웹·모바일 검증 배선. 잔여: moderation enforcement on(OPENAI 키 게이트)                                                                     |
-| P0-6 OG·CTA·growth              | **해소** — campaign별 OG, Trust Layer 랜딩, CTA 분리, growth evidence export                                                                                                                                                          |
-| P0-7 환경·CI                    | **해소(자동화분)** — CI에 build·format·감사 스위트·Playwright(34) 편입, 3잡 그린. 잔여: EXPO_PUBLIC_WEB_ORIGIN(사용자), 18+·법적 문서 표면(스토어 준비 보류와 일괄)                                                                   |
-| P0-8 interest 서버 증거         | **해소** — storage 실증+MIME(0012), phone/identity는 enforcement 스위치                                                                                                                                                               |
-| P0-9 fixture 오용               | **해소** — publish 사진 ≥1 강제(0017) + 실캠페인 인물 fallback 제거                                                                                                                                                                   |
-| **회귀 스위트**                 | **DB 7/7 PASS · 웹훅 11/11 PASS** (모두 CI 게이트)                                                                                                                                                                                    |
-| 프로덕션 E2E                    | **전 기능 체크 PASS** (hosted, B~E 계약 반영판)                                                                                                                                                                                       |
+- **대기 후 감사 문서 수령**: 다음 세션의 Claude는 이 문서로 현황만 파악하고 **작업을 시작하지 말고 대기**한다. 사용자가 **추가 감사(2차) 문서**를 제공하면 그것을 읽고 그 문서를 기준으로 작업을 시작한다.
+- 이 핸드오프에는 의도적으로 **다음 단계 작업 지시가 없다.** 우선순위·범위는 2차 감사 문서가 정의한다.
+- 작업 체제는 아래 "작업 방식" 그대로: **Advisor(Claude, 직접 구현 병행) + `friendword-codex-1` 2인**. codex-2/3는 대기 상태이며 추가 지시 없이는 사용하지 않는다.
 
-사용자 게이트(변동 없음): Resend 도메인, OPENAI_API_KEY, RevenueCat 셋업, identity 벤더 선정, EXPO_PUBLIC_WEB_ORIGIN. — 이들이 열리면 스위치(identity/media enforcement)를 켜고 sandbox 검증을 완료한다.
+## 이번 세션에서 한 것 (2026-07-13, 커밋 32개)
 
-> 읽는 순서: 이 문서 → **`docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md`(감사·현행 작업의 source of truth)** → `docs/TASKS.md` → 필요 시 `FRIENDWORD_HANDOFF.md`(제품 원본), `docs/DESIGN.md`(디자인), `docs/OPS.md`(운영), `docs/REVENUECAT_SETUP.md`(결제 셋업), `CLAUDE.md`/`AGENTS.md`(협업 규칙)
+1차 전수 감사(`docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md`)를 source of truth로 채택하고, §7의 실행 순서 A→J를 그대로 완주해 **출시 차단 P0 9건과 D-P0(대비)를 전부 해소**했다.
 
-## 현행 목표 (사용자 확정, 2026-07-13)
+| 감사 항목                | 해소 내용                                                                                                                                                                                                                                                                                                                          |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0-1 웹 사용자 bootstrap | `auth.users` 트리거+백필(0011), `display_name_confirmed` 온보딩(웹 이름 승인 UI), E2E의 수동 upsert 제거                                                                                                                                                                                                                           |
+| P0-2 claim 바인딩        | invite contact의 canonicalized SHA-256 해시 저장, 이메일 claim 바인딩, phone 채널 fail-closed(0012), "verified" 카피·이벤트 전면 제거, `identity_enforcement` 스위치                                                                                                                                                               |
+| P0-3 동의 불변성         | 불변 `consent_revisions` 스냅샷+content hash(0013), consent_pending 중 introducer copy/media 동결(RLS+storage), 변경요청/거절 RPC, 5인자 원자 approve(revision+포함 사진+hard claims 결속), 모바일 "AI 초안 검토·편집 후 발송" 플로우(501 시 정직한 직접 작성 폴백)                                                                |
+| P0-4 결제                | 서버 발급 purchase intent(0014·0022), 단일 트랜잭션 웹훅 RPC(이중 멱등성·refund 회수·restore 재발급 방지·TRANSFER 검토 플래그), 웹훅 라우트는 얇은 어댑터로 재작성, 모바일 페이월 intent 강제+구매 후 서버 benefit 확정까지 pending UI(0021로 소유자 읽기), 무료 14일 고정·Pass 구매 시 30일 연장                                  |
+| P0-4 효익                | Campaign Pass = Pass-게이트 캠페인 퍼널 분석(`get_campaign_analytics`)+인박스 Pass 섹션; Creator Launch = `/kit/[draftId]` 킷(크레딧 1회 소비 unlock → 9:16 share card 렌더+캡션팩), 발행된 share 화면에서 킷/페이월 진입(0020·0022)                                                                                               |
+| P0-5 safety              | 4개 표면 `report_content` RPC+공개 피치 무가입 신고(IP 해시 rate limit, 0016·0019), high-severity 2건 자동 pause+ops alert, 계정 삭제 큐+`process-deletions.mjs`(lease fencing·소유권 이관·신고 익명화), `media_validations` 원장+`/api/media/validate`(매직바이트·크기·구조·moderation)+웹·모바일 업로드 배선, erasure 경로(0018) |
+| P0-6 growth              | 캠페인별 OG 이미지(`/api/og`, pause/archive 즉시 404), Trust Layer 톤의 루트 랜딩, CTA 2개 실동선 분리, `export-growth-evidence.mjs` 실구현(익명 집계)                                                                                                                                                                             |
+| P0-7 CI                  | CI에 format·web production build·웹훅 감사·DB 감사 러너·Playwright(모의 네트워크 dev 서버) 편입 — 3잡 그린                                                                                                                                                                                                                         |
+| P0-8 interest 증거       | 사진의 실제 storage object·본인 prefix·MIME 서버 검증(0012)                                                                                                                                                                                                                                                                        |
+| P0-9 fixture             | 발행 시 포함 사진 ≥1 강제(0017)+실캠페인 인물 fallback 제거                                                                                                                                                                                                                                                                        |
+| D-P0 대비                | onPop→ink, danger `#C63838`+onDanger, textFaint 용도 제한, ui-tokens에 WCAG 대비 자동 테스트(CI), 전 웹 reduced-motion 글로벌 규칙                                                                                                                                                                                                 |
+| Trust Layer(모바일)      | TrustCard/QuietNavAction/SafetyAction 분리, 홈 40%·페이월 0~10% 강도 적용                                                                                                                                                                                                                                                          |
 
-- **감사 문서(`docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md`)의 P0 전부 해소 — 다음 감사 all-pass.**
-- 실행 순서는 감사 §7 고정: A(문서 truth reset+회귀 테스트) → B(web bootstrap) → C(identity 게이트) → D(immutable consent) → E(결제 원장) → F(유료 효익) → G(safety) → H(growth) → I(Trust Layer) → J(release 게이트). 순서 변경 금지.
-- codex 워커 협업 재개 (`friendword-codex-1/2/3`). Advisor가 분해·brief·통합 검증 소유, 워커 결과는 diff·테스트·manual QA 직접 재검증 전까지 미완료.
-- App Store 심사 준비는 보류(출시 창구 8/1~9/30). 단, 7월 중하순 착수 시점 재판단.
+**증거 수치(사실 그대로)**: DB 감사 회귀 **7/7 PASS** · 웹훅 회귀 **11/11 PASS** · DB 스위트 01~17 그린 · 유닛 105 · Playwright 34 · 프로덕션 E2E(hosted) 전 체크 PASS · GitHub CI 3잡 success. 마이그레이션 **0001~0022** hosted 배포 완료.
+
+**미해소로 명시된 것(작업 지시 아님 — 상태 기록)**
+
+- 사용자 키 게이트: identity 벤더(→`identity_enforcement` on), OPENAI_API_KEY(→moderation·`media_validation_enforcement` on), RevenueCat 셋업+dev build(→sandbox 구매 실검증), Resend 도메인, `EXPO_PUBLIC_WEB_ORIGIN`
+- 사용자 결정 보류: 18+ 온보딩·법적 문서 표면·App Store 메타데이터(스토어 준비와 일괄, 7월 중하순 재판단)
+- 코드성 잔여: 모바일 손 QA 일괄(D~I 변경분 — 워커 시뮬레이터 QA는 완료, Advisor 손 QA는 미실시), MP4 모션 export(킷 v2), seed-demo 스크립트(placeholder 유지), 자막 타임스탬프/실파형
+
+## 작업 방식 (이번 세션에서 확립 — 다음 세션도 동일)
+
+- **체제**: Advisor(Claude)가 분해·설계 결정·검증·커밋·원격 배포·문서를 소유하고 **구현도 절반을 직접** 한다. 나머지 절반은 `friendword-codex-1`(tmux)에 brief 단위로 위임한다. 작업 비중은 Advisor:codex-1 = 동등(사용자 지시).
+- **brief 패턴**: `.briefs/NN-이름.md`(gitignore됨)에 TASK / WHY·컨텍스트(정확한 파일 경로·라인) / SCOPE·OUT OF SCOPE / 설계 지시(Advisor 결정은 "변경 금지" 명시) / KNOWN TRAPS / 관찰 가능한 ACCEPTANCE / 감사 §7 반환 형식. 워커에는 `tmux send-keys`로 brief 경로+상황 업데이트를 전달한다(텍스트 후 Enter는 별도 send, 1초 지연).
+- **검증 규칙(CLAUDE.md 4·5)**: 워커 보고를 믿지 않고 diff 정독+동일 게이트 재실행+표면 QA 후에만 커밋. 워커의 SCOPE 확장 요청은 "단언 약화 금지" 조건부로 승인한 사례 다수. 워커가 발견한 계약 결함(예: published draft의 creator intent 거부)은 Advisor가 후속 마이그레이션으로 즉시 수정.
+- **회귀 스위트 운용**: 감사 acceptance를 **수정 완료 후 기대 동작**으로 먼저 인코딩(초기 FAIL 정상) → 슬라이스가 그린으로 전환 → 전부 그린이 된 뒤 CI 편입. `supabase/tests/audit/`+`scripts/test-db-audit.sh`, `apps/web/tests-audit/`+`pnpm test:audit`.
+- **스위치 패턴**: 벤더 없는 강제는 `app_config`(service_role 전용) 스위치로 단계화하고, 테스트는 스위치를 켜서 강제 동작을 검증한다. mock으로 완료 처리 금지 원칙 유지.
+- **워커 모니터링**: `tmux capture-pane` 폴링 백그라운드 스크립트(화면 하단 "Worked for" 마커가 ~48초 안정 시 유휴 판정). 상태줄이 잘리므로 "esc to interrupt" 부재만으로 판정하지 말 것.
+- **DB push 규칙**: `supabase db push`는 `git status supabase/migrations/`가 깨끗할 때만(미커밋 WIP가 딸려 배포된 사고 1회 — 0015 재조정 마이그레이션으로 수렴시킴).
+- **codex 토큰**: `~/.codex/config.toml`의 OmO 플러그인(`omo@sisyphuslabs`)이 도구 호출마다 훅 3종을 실행해 토큰을 과소모했음 → 사용자 승인 하에 비활성화. 이후 워커 속도 4배 개선. 새 codex 세션을 띄우면 훅이 없는지 확인할 것.
+- **환경**: tmux `friendword-web`(:3000 dev — apps/web 디렉토리에서 `pnpm dev`), `friendword-mobile`(expo), `friendword-codex-1/2/3`(codex CLI, 2·3는 대기). dev 서버는 **하나만**: 여러 dev 서버가 같은 `.next`를 공유하면 CSS 청크가 오염된다(발생 시 단일 서버로 `rm -rf .next` 후 재시작).
 
 ## CURRENT STATE
 
-- **제품**: Shipaton 2026 참가작 friend-led dating campaign 앱. 8/1 이후 App Store 최초 출시 필수, RevenueCat IAP 필수.
-- **정확한 상태 (2026-07-13 전수 감사 판정)**: **핵심 루프의 UI·데이터 골격 완성 — 신원·동의 불변성·결제 효익·운영의 출시 경계 미완성.** 브랜드가 분명하고 데이터 모델·RLS·공개 피치·동의·관심·채팅의 골격이 연결된 기능성 알파이며, 실사용자 출시 가능한 1.0이 아니다. 이전 핸드오프의 "핵심 루프 완성" 표현은 과대 기술이었음. 상세 판정·점수표·P0 목록은 감사 문서 §1·§5.
-- **골격이 연결된 범위**: Flow A(모바일 피치: 관계→사진→음성→제출+미디어 업로드+동의 링크 공유 화면) → Flow B(웹 동의: preview→매직링크→claim→음성·사진 검토(개별 제외)→공개 기간 선택→발행) → 공개 페이지(실사진·실오디오) → Flow C(interest: 프로필 게이트→제출→Dater 인박스 accept/decline) → Intro Room(1:1 채팅+신고·차단·나가기) → 캠페인 pause/resume/archive. 프로덕션 E2E 39체크 그린 — 단, 이 E2E는 admin 사전 프로비저닝으로 P0-1(신규 웹 사용자 bootstrap 부재)을 우회하며, identity·moderation·결제 sandbox는 검증하지 않는다(감사 §2).
-- **모노레포**: `apps/mobile`(Expo SDK 57) · `apps/web`(Next.js 15) · `packages/{domain,contracts,config,ui-tokens,data,adapters}` · `supabase/`. pnpm hoisted.
-- **백엔드**: hosted Supabase(ref `oknolcxsvogrhnxnyosr`). 마이그레이션 **0001~0010** 배포. 모든 상태 전이는 SECURITY DEFINER RPC — submit/preview/claim/approve(+공개기간)/exclude_pitch_asset/submit_interest/list_campaign_interests/decide_interest/list_my_intro_rooms/leave_intro_room/set_campaign_status/track_event. 클라이언트 campaigns 쓰기 그랜트 전면 회수.
-- **웹 표면**: `/p/[slug]`(실데이터+fixture fallback), `/p/[slug]/interest`, `/consent/[token]`, `/inbox`(관심 인박스+캠페인 관리), `/rooms`·`/rooms/[id]`(채팅), API `/api/transcribe`(OpenAI 전사→구조화 초안, 키 없으면 501), `/api/revenuecat`(웹훅, 토큰 없으면 501).
-- **어댑터**: `FRIENDWORD_PROVIDER_MODE=real` + OPENAI_API_KEY → 실 OpenAI 전사/구조화/모더레이션. identity는 Unconfigured(호출 시 명시적 실패 — 절대 fake 안 함).
-- **이메일**: Resend SMTP 검증 완료, confirmation/magic_link 템플릿 코드 관리(`supabase config push`, 반영 ~10분), OTP 왕복 프로덕션 검증.
-- **RevenueCat**: SDK·페이월(`/paywall`)·웹훅·크레딧 원장·엔타이틀먼트 코드 완성. 활성화는 사용자 셋업 대기(`docs/REVENUECAT_SETUP.md`).
-- **analytics**: `track_event` RPC(화이트리스트·2KB 캡·서버 스탬프) + 퍼널 전 구간 이벤트 배선.
-- **실행 환경**: tmux `friendword-web`(:3000) · `friendword-mobile`(expo). `apps/web/.env`·`apps/mobile/.env`는 루트 `.env` 심링크.
-- **검증 명령**: `pnpm lint && pnpm typecheck && pnpm test && pnpm format:check` · `bash scripts/test-db.sh`(suite 01~10) · `cd apps/web && pnpm test:e2e`(10) · `node scripts/e2e-production.mjs`(39, dev 서버 필요) — 전부 그린.
+- **제품**: Shipaton 2026 참가작 friend-led dating campaign 앱. 8/1~9/30 App Store 최초 출시 필수, RevenueCat IAP 필수.
+- **상태 판정**: 1차 감사의 출시 차단 P0는 코드 레벨에서 전부 해소. 실사용자 수용은 여전히 사용자 키 게이트(identity 벤더·Resend 도메인 등) 뒤에 있다. "1.0 complete" 표현은 감사 §8 체크리스트 전부(특히 sandbox 결제·enforcement on) 충족 전 금지.
+- **백엔드**: hosted Supabase(ref `oknolcxsvogrhnxnyosr`), 마이그레이션 0001~0022. 상태 전이는 전부 SECURITY DEFINER RPC. 주요 신규 RPC: `claim_consent_request`(contact 바인딩), `submit_pitch_for_consent`(finalize+revision), `respond_consent_request`, `approve_and_publish_pitch`(5인자), `issue_purchase_intent`, `record_revenuecat_event`, `report_content`, `request_account_deletion`, `erase_pitch_draft`, `get_campaign_pass_state`/`get_campaign_analytics`, `unlock_share_kit`, credit reserve/release/consume.
+- **웹**: `/`(랜딩), `/p/[slug]`(+`/api/og`), `/p/[slug]/interest`, `/consent/[token]`(revision 검토·사진 선택·hard claims·변경요청/거절), `/inbox`(관리+Pass 퍼널+신고+계정 삭제), `/rooms/**`, `/kit/[draftId]`, API `/api/transcribe`·`/api/revenuecat`·`/api/media/validate`·`/api/report`·`/api/kit-image`.
+- **모바일**: 피치 플로우(이메일 invite 전달·공유 후 연락처 purge), AI 초안 검토·편집 화면, 페이월(intent 강제·pending 확정), Trust Layer primitive, 업로드 서버 검증 호출. 유닛 테스트 28개가 `pnpm test`에 편입됨.
+- **검증 명령**: README "Local development" 블록이 최신이다. 전부 그린 상태로 인계.
+- **실행 환경 참고**: `.env`는 루트(웹·모바일은 심링크). `pnpm check:env`는 `EXPO_PUBLIC_WEB_ORIGIN` 미설정으로 실패(사용자 게이트).
 
-## DONE (이번 세션, 2026-07-13)
+## IMPORTANT DECISIONS (이번 세션 추가분 — 상세는 docs/DECISIONS.md)
 
-- Slice 5B-1/5B-2: 웹 동의 플로우 + `/p/[slug]` 실데이터 (`0845a37`, `5f9406d`)
-- TODO 2: 이메일 템플릿 {{ .Token }} + OTP 왕복 실검증 (`fee2096`)
-- Slice 6A/6B: 모바일 사진 업로드+`pitch_assets`+공유 화면, 동의·공개 페이지 사진 (`52e00c9`)
-- Slice 7: verified interest 전체(0006) + `/p/[slug]/interest` + `/inbox` (`dd5f072`)
-- Slice 8: Intro Room 채팅·신고·차단·나가기(0007) + `/rooms` (`259eaac`)
-- Slice 9: 캠페인 라이프사이클(0008) + `docs/OPS.md` 운영 런북 (`919b0f9`)
-- Slice 11: analytics 파이프라인(0009) + 전 표면 이벤트 (`7667cad`)
-- Slice 12: OpenAI 어댑터+`/api/transcribe`, 사진 제외·공개 기간(0010), E2E 스크립트 repo 편입 (`5000951`)
-- Slice 10: RevenueCat SDK·페이월·웹훅 (`2eb67e7`)
-
-## TODO (감사 대응이 최우선 — 상세는 감사 문서 §5~§8)
-
-1. **(진행 중) 감사 Slice A~J 실행** — 현재 진행 상황은 `docs/TASKS.md`의 2026-07-13 감사 대응 표 참조. 출시 차단 P0: ① 웹 사용자 bootstrap ② claim/verified 실증 ③ 동의 snapshot 불변화+AI 순서 ④ 유료 상품 효익+웹훅 정합성 ⑤ moderation/report/delete ⑥ OG/CTA/growth ⑦ 환경·CI 게이트 ⑧ Verified Interest 서버 증거 ⑨ 실캠페인 fixture 오용
-2. **(사용자·출시 게이트) Resend 도메인 인증** — 도메인 인증 + SMTP sender 교체 전엔 실사용자 로그인 불가
-3. **(사용자) OPENAI_API_KEY 입력** — 넣는 즉시 `/api/transcribe`가 실전사·구조화 초안 생성 (지금은 501)
-4. **(사용자) RevenueCat 셋업** — `docs/REVENUECAT_SETUP.md` 체크리스트. Shipaton 필수. Slice E/F 완료 전에는 "결제 완료" 주장 금지
-5. **(사용자+Advisor·출시 게이트) 신원 확인 공급자 선정** — Slice C의 하드 게이트. selfie liveness/face match 벤더 결정 + 키 입력 → `UnconfiguredIdentityVerificationProvider` 교체
-6. **(사용자) `EXPO_PUBLIC_WEB_ORIGIN` 설정** — `pnpm check:env` 현재 실패, 실기기 공유 링크가 localhost로 fallback (감사 P0-7)
-7. **(P2·Slice F와 연동) 9:16 모션 피치 MP4 export** (media-worker) — Creator Launch 효익의 핵심이므로 P2가 아닌 Slice F 범위로 승격됨
-8. **(보류·7월 중하순 재판단) App Store 출시 준비** — 18+ 나이 게이트, dev build, EAS, 심사 메타데이터. 데이팅 4.3(b)+UGC 리스크 대응 포함
-9. **(게이트)** Devpost 공식 Rules 게시 시 `docs/HACKATHON_RULES.md` 재확인
-
-## IMPORTANT DECISIONS
-
-- **감사 채택 (2026-07-13)**: `docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md`를 현행 작업의 source of truth로 채택. 실행 순서 A→J 고정, 회귀 스위트(`supabase/tests/audit/`, `pnpm test:audit`)는 기대 동작을 인코딩하며 초기 FAIL이 정상, Slice J에서 CI 편입. 상세는 `docs/DECISIONS.md` 2026-07-13 항목
-- **워커 운영**: 2026-07-13부터 codex 워커 협업 재개 (`friendword-codex-1/2/3`). 단독 모드는 2026-07-12~13 코어 루프 구축 구간의 한시 조치였음
-- **출시 일정**: App Store 심사 준비는 보류(출시 창구 8/1~9/30, 아직 여유). 개발·보완 우선 (2026-07-13 사용자 결정)
-- **보안**: API 키·토큰 값은 사용자가 직접 입력. Claude는 위치만 안내
-- **디자인**: "Hype Mixtape" (크림+탠저린/핫핑크/선샤인, 스티커 미학, Unbounded+Bricolage). 웹 공용 스타일 `apps/web/src/styles/flowCard.module.css`
-- **아키텍처**: 상태 전이는 전부 RPC. 동의 토큰 raw 1회+sha256. 스토리지 버킷 `pitch-media`(draft 폴더)·`profile-media`(user 폴더, 관심 수신 Dater만 열람). 웹 세션 storageKey `friendword-web-auth`. 채팅은 4초 폴링(텍스트 전용)
-- **정직성 원칙(무mock)**: 미설정 기능은 501/명시 안내로 노출 — 전사(키 대기), 결제(셋업 대기), 신원(벤더 대기). fake 완료 경로 없음
-- **테스트**: 로컬 PG17 하니스(suite 01~10), CI postgres:17, 프로덕션 풀퍼널 E2E `scripts/e2e-production.mjs`
+- 1차 감사 채택·A→J 순서 고정 / 회귀 스위트는 기대 동작 인코딩(초기 FAIL 정상, Slice J에서 CI 편입 완료)
+- 웹 bootstrap 표준은 DB 트리거 / 무료 공개 기간 14일 고정·90일 폐지(Pass 구매가 30일 연장)
+- 워커 운용 2인 체제(토큰 과소모) + OmO 플러그인 비활성화
+- Trust Layer 3레이어·표면별 강도 표(docs/DESIGN.md), saturated fill 위 텍스트는 ink
+- raw invite contact는 DB에 저장하지 않음(해시만) / consent revision은 UPDATE 불가·삭제는 erasure 플래그 경로만
 
 ## ISSUES / RISKS
 
-- Resend 샌드박스 → 도메인 인증 전 타 사용자 이메일 발송 500 (출시 게이트 1)
-- 이메일 템플릿 config push 후 auth 서비스 반영 ~10분. config.toml에 원격 값 미러링 필수, SMTP 크리덴셜 금지
-- App Review 리스크(데이팅 4.3b + UGC): 심사 준비는 보류 상태지만 8/1~9/30 창구를 놓치면 참가 자격 상실 — 7월 중하순에 준비 착수 시점을 다시 판단할 것
-- `database.types.ts` 수동 부분 타입 — 테이블·RPC 추가 시 갱신 필수
-- 시뮬레이터 인터랙션 QA는 사용자 손 테스트(모바일 사진 업로드→공유 화면 경로는 코드 검증만 됨, 손 QA 권장)
-- plpgsql 함정: `#variable_conflict use_column`; publish 전 consent approved 트리거(0001); RPC 시그니처 변경은 DROP 후 CREATE(기본값으로 하위 호환)
-- 만료 캠페인은 읽기 필터로만 처리(status는 published 유지) — 자동 전이는 TODO 8
+- identity/media enforcement가 off인 동안 "signed in" 수준의 보증만 존재 — 카피는 이미 정직화됨. 스위치 on 전 실사용자 수용 금지.
+- RevenueCat sandbox 실경로(구매·restore·webhook 왕복)는 대시보드 셋업+dev build 전까지 미검증. 코드 경로는 회귀 스위트가 고정.
+- App Review 리스크(데이팅 4.3b+UGC): 8/1~9/30 창구 — 스토어 준비 착수 시점은 7월 중하순 재판단(사용자 결정).
+- `database.types.ts`는 수동 부분 타입 — 테이블·RPC 추가 시 갱신 필수.
+- OG 캐시 최대 1시간: pause 직후 소셜 미리보기 잔존 가능(주석으로 명시된 수용 리스크).
+- plpgsql 함정: `#variable_conflict use_column`, RPC 시그니처 변경은 DROP 후 CREATE, 0001 publish 트리거(consent approved 선행).
 
 ## LOG SUMMARY
 
-2026-07-12~13 연속 세션. 빈 repo → 코어 루프의 UI·데이터 골격 구축(커밋 9개, CI 그린): 웹 동의/실데이터 → 이메일 검증 → 사진 파이프라인 → interest → Intro Room → 라이프사이클+운영 → analytics → 전사+동의 심화 → RevenueCat scaffold. 마이그레이션 10개 배포, DB 스위트 10, Playwright 10, 프로덕션 E2E 39체크.
-2026-07-13 오전: 1차 전수 감사 수행(외부 감사, `5c367ff` 기준) — 판정 "기능성 알파, 출시 경계 미완성". 감사 대응 세션 시작: Slice A(문서 truth reset + 회귀 스위트) 착수, codex 워커 3기 재가동.
+2026-07-12~13: 빈 repo → 코어 루프 골격(커밋 9) → **1차 전수 감사 수령 → 감사 대응 세션(커밋 32)으로 P0 전부 해소**. 워커 3기→2인 체제 전환, OmO 훅 비활성화, WIP push 사고 1회 재조정. 최종: audit DB 7/7·웹훅 11/11·CI 3잡 그린·프로덕션 E2E 전 체크 PASS. 다음 세션은 사용자가 제공할 **2차 감사 문서 대기**로 시작한다.

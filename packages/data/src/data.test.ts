@@ -44,6 +44,9 @@ const mocks = vi.hoisted(() => ({
   draftInsert: vi.fn(),
   draftUpdate: vi.fn(),
   draftSelect: vi.fn(),
+  consentRequestSelect: vi.fn(),
+  consentRevisionSelect: vi.fn(),
+  consentAssetSelect: vi.fn(),
   signedUpload: vi.fn(),
   signedUrl: vi.fn(),
   rpc: vi.fn(),
@@ -69,6 +72,18 @@ function configureMockClient(): void {
           upsert: mocks.profilesUpsert,
           select: mocks.profilesSelect,
           update: mocks.profilesUpdate,
+        };
+      }
+      if (table === 'consent_requests') {
+        return { select: mocks.consentRequestSelect };
+      }
+      if (table === 'consent_revisions') {
+        return { select: mocks.consentRevisionSelect };
+      }
+      if (table === 'pitch_assets') {
+        return {
+          insert: mocks.draftInsert,
+          select: mocks.consentAssetSelect,
         };
       }
       return {
@@ -520,6 +535,9 @@ describe('PitchDraftRepo', () => {
 describe('ConsentRepo', () => {
   const rawToken = 'A-b_1'.repeat(6);
   const draftId = '10000000-0000-0000-0000-000000000001';
+  const revisionId = '30000000-0000-0000-0000-000000000001';
+  const firstPhotoId = '40000000-0000-0000-0000-000000000001';
+  const secondPhotoId = '40000000-0000-0000-0000-000000000002';
 
   function signedInSession(): void {
     mocks.getSession.mockResolvedValue({
@@ -592,18 +610,134 @@ describe('ConsentRepo', () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
-  it('reads the claimed draft row for review', async () => {
+  it('reads the immutable consent revision and only its snapshotted assets', async () => {
     signedInSession();
-    const row = { id: draftId, status: 'consent_pending' };
-    mocks.draftSelect.mockReturnValue({
-      eq: () => ({ single: async () => ({ data: row, error: null }) }),
+    mocks.consentRequestSelect.mockReturnValue({
+      eq: () => ({ single: async () => ({ data: { revision_id: revisionId }, error: null }) }),
+    });
+    const revision = {
+      id: revisionId,
+      pitch_draft_id: draftId,
+      revision_number: 2,
+      headline: 'Revision headline',
+      body: 'Revision body',
+      structure: { hard_claims_requiring_confirmation: ['Owns a home'] },
+      asset_ids: [firstPhotoId, secondPhotoId],
+      voice_asset_path: null,
+      content_hash: 'hash',
+      created_at: '2026-07-13T00:00:00Z',
+    };
+    mocks.consentRevisionSelect.mockReturnValue({
+      eq: () => ({
+        eq: () => ({ single: async () => ({ data: revision, error: null }) }),
+      }),
+    });
+    const assets = [
+      {
+        id: firstPhotoId,
+        pitch_draft_id: draftId,
+        uploaded_by_user_id: '00000000-0000-0000-0000-000000000003',
+        asset_type: 'photo',
+        storage_path: `pitch-media/${draftId}/one.jpg`,
+        sort_order: 0,
+        created_at: '2026-07-13T00:00:00Z',
+        updated_at: '2026-07-13T00:00:00Z',
+      },
+      {
+        id: secondPhotoId,
+        pitch_draft_id: draftId,
+        uploaded_by_user_id: '00000000-0000-0000-0000-000000000003',
+        asset_type: 'photo',
+        storage_path: `pitch-media/${draftId}/two.jpg`,
+        sort_order: 1,
+        created_at: '2026-07-13T00:00:00Z',
+        updated_at: '2026-07-13T00:00:00Z',
+      },
+    ];
+    const filterByAssetIds = vi.fn(() => ({
+      order: async () => ({ data: assets, error: null }),
+    }));
+    const filterByDraftId = vi.fn(() => ({ in: filterByAssetIds }));
+    mocks.consentAssetSelect.mockReturnValue({ eq: filterByDraftId });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await expect(repo.getConsentReview(draftId)).resolves.toEqual({
+      revision,
+      assets,
+      hardClaims: ['Owns a home'],
+    });
+    expect(filterByDraftId).toHaveBeenCalledWith('pitch_draft_id', draftId);
+    expect(filterByAssetIds).toHaveBeenCalledWith('id', [firstPhotoId, secondPhotoId]);
+  });
+
+  it('fails closed when a revision structure is malformed', async () => {
+    signedInSession();
+    mocks.consentRequestSelect.mockReturnValue({
+      eq: () => ({ single: async () => ({ data: { revision_id: revisionId }, error: null }) }),
+    });
+    mocks.consentRevisionSelect.mockReturnValue({
+      eq: () => ({
+        eq: () => ({
+          single: async () => ({
+            data: {
+              id: revisionId,
+              pitch_draft_id: draftId,
+              revision_number: 2,
+              headline: 'Revision headline',
+              body: 'Revision body',
+              structure: { hard_claims_requiring_confirmation: 'not-an-array' },
+              asset_ids: [],
+              voice_asset_path: null,
+              content_hash: 'hash',
+              created_at: '2026-07-13T00:00:00Z',
+            },
+            error: null,
+          }),
+        }),
+      }),
     });
     const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
 
-    await expect(repo.getDraftForReview(draftId)).resolves.toEqual(row);
+    await expect(repo.getConsentReview(draftId)).rejects.toBeInstanceOf(DataLayerError);
   });
 
-  it('creates a scoped signed playback URL for the voice note', async () => {
+  it('fails closed when a snapshotted asset row is unavailable', async () => {
+    signedInSession();
+    mocks.consentRequestSelect.mockReturnValue({
+      eq: () => ({ single: async () => ({ data: { revision_id: revisionId }, error: null }) }),
+    });
+    mocks.consentRevisionSelect.mockReturnValue({
+      eq: () => ({
+        eq: () => ({
+          single: async () => ({
+            data: {
+              id: revisionId,
+              pitch_draft_id: draftId,
+              revision_number: 2,
+              headline: 'Revision headline',
+              body: 'Revision body',
+              structure: null,
+              asset_ids: [firstPhotoId],
+              voice_asset_path: null,
+              content_hash: 'hash',
+              created_at: '2026-07-13T00:00:00Z',
+            },
+            error: null,
+          }),
+        }),
+      }),
+    });
+    mocks.consentAssetSelect.mockReturnValue({
+      eq: () => ({
+        in: () => ({ order: async () => ({ data: [], error: null }) }),
+      }),
+    });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await expect(repo.getConsentReview(draftId)).rejects.toBeInstanceOf(DataLayerError);
+  });
+
+  it('creates a scoped signed URL for a snapshotted asset path', async () => {
     signedInSession();
     mocks.signedUrl.mockResolvedValue({
       data: { signedUrl: 'https://storage.example/signed-read' },
@@ -611,10 +745,13 @@ describe('ConsentRepo', () => {
     });
     const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
 
-    const url = await repo.createVoicePlaybackUrl(draftId);
+    const bucketRelativeUrl = await repo.createAssetViewUrl(`${draftId}/voice.m4a`);
+    const bucketPrefixedUrl = await repo.createAssetViewUrl(`pitch-media/${draftId}/voice.m4a`);
 
-    expect(mocks.signedUrl).toHaveBeenCalledWith(`${draftId}/voice.m4a`, 3600);
-    expect(url).toBe('https://storage.example/signed-read');
+    expect(mocks.signedUrl).toHaveBeenNthCalledWith(1, `${draftId}/voice.m4a`, 3600);
+    expect(mocks.signedUrl).toHaveBeenNthCalledWith(2, `${draftId}/voice.m4a`, 3600);
+    expect(bucketRelativeUrl).toBe('https://storage.example/signed-read');
+    expect(bucketPrefixedUrl).toBe('https://storage.example/signed-read');
   });
 
   it('approves through the publish RPC and returns the campaign slug', async () => {
@@ -630,15 +767,44 @@ describe('ConsentRepo', () => {
     });
     const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
 
-    const published = await repo.approveAndPublish(draftId);
+    const published = await repo.approveAndPublish({
+      draftId,
+      campaignDays: 14,
+      revisionId,
+      includedAssetIds: [secondPhotoId],
+      hardClaimsConfirmed: true,
+    });
 
     expect(mocks.rpc).toHaveBeenCalledWith('approve_and_publish_pitch', {
       draft_id: draftId,
-      campaign_days: 30,
+      campaign_days: 14,
+      revision_id: revisionId,
+      included_asset_ids: [secondPhotoId],
+      hard_claims_confirmed: true,
     });
     expect(published).toEqual({
       campaignId: '20000000-0000-0000-0000-000000000001',
       campaignSlug: 'blair-abc123',
+    });
+  });
+
+  it('sends request-changes and decline responses through the consent response RPC', async () => {
+    signedInSession();
+    mocks.rpc.mockResolvedValue({ data: undefined, error: null });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await repo.respondToConsent(draftId, 'request_changes', 'Please remove the hard claim.');
+    await repo.respondToConsent(draftId, 'decline', 'I do not consent to publication.');
+
+    expect(mocks.rpc).toHaveBeenNthCalledWith(1, 'respond_consent_request', {
+      draft_id: draftId,
+      action: 'request_changes',
+      note: 'Please remove the hard claim.',
+    });
+    expect(mocks.rpc).toHaveBeenNthCalledWith(2, 'respond_consent_request', {
+      draft_id: draftId,
+      action: 'decline',
+      note: 'I do not consent to publication.',
     });
   });
 });

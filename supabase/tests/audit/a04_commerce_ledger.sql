@@ -1,7 +1,25 @@
 -- AUDIT REGRESSION: P0-4, 감사 문서 §5 "두 유료 상품과 원자 원장".
--- 현재 실패 이유: record_revenuecat_event RPC와 transaction 식별 컬럼이 없고 기간 정책이 7/30/90일이다.
-
 BEGIN;
+
+CREATE FUNCTION pg_temp.revenuecat_payload(legacy_payload JSONB)
+RETURNS JSONB
+LANGUAGE sql
+AS $$
+  SELECT jsonb_build_object(
+    'id', legacy_payload -> 'provider_event_id',
+    'type', legacy_payload -> 'event_type',
+    'app_user_id', legacy_payload -> 'app_user_id',
+    'product_id', legacy_payload -> 'product_id',
+    'transaction_id', legacy_payload -> 'transaction_id',
+    'original_transaction_id', legacy_payload -> 'original_transaction_id',
+    'aliases', '[]'::JSONB,
+    'subscriber_attributes', jsonb_build_object(
+      'purchase_intent_id', jsonb_build_object(
+        'value', legacy_payload -> 'purchase_intent_id'
+      )
+    )
+  );
+$$;
 
 DO $$
 DECLARE
@@ -76,7 +94,7 @@ DECLARE
   unauthorized_call_rejected BOOLEAN := false;
 BEGIN
   BEGIN
-    PERFORM record_revenuecat_event(jsonb_build_object(
+    PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(jsonb_build_object(
       'provider_event_id', 'audit-p04-unauthorized',
       'event_type', 'NON_RENEWING_PURCHASE',
       'app_user_id', '00000000-0000-0000-0000-000000000004',
@@ -84,7 +102,7 @@ BEGIN
       'purchase_intent_id', 'a0400000-0000-0000-0000-000000000101',
       'transaction_id', 'audit-p04-unauthorized-transaction',
       'original_transaction_id', 'audit-p04-unauthorized-original'
-    ));
+    )));
     RAISE EXCEPTION 'audit_authenticated_webhook_call_was_accepted';
   EXCEPTION
     WHEN insufficient_privilege THEN
@@ -107,11 +125,12 @@ SET LOCAL ROLE service_role;
 
 DO $$
 DECLARE
-  purchase_count, ledger_count INTEGER;
+  purchase_count INTEGER;
+  ledger_count INTEGER;
   unknown_product_rejected BOOLEAN := false;
   revoked_count INTEGER;
 BEGIN
-  PERFORM record_revenuecat_event(jsonb_build_object(
+  PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(jsonb_build_object(
     'provider_event_id', 'audit-p04-purchase',
     'event_type', 'NON_RENEWING_PURCHASE',
     'app_user_id', '00000000-0000-0000-0000-000000000004',
@@ -119,8 +138,8 @@ BEGIN
     'purchase_intent_id', 'a0400000-0000-0000-0000-000000000101',
     'transaction_id', 'audit-p04-transaction',
     'original_transaction_id', 'audit-p04-original-transaction'
-  ));
-  PERFORM record_revenuecat_event(jsonb_build_object(
+  )));
+  PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(jsonb_build_object(
     'provider_event_id', 'audit-p04-purchase',
     'event_type', 'NON_RENEWING_PURCHASE',
     'app_user_id', '00000000-0000-0000-0000-000000000004',
@@ -128,7 +147,7 @@ BEGIN
     'purchase_intent_id', 'a0400000-0000-0000-0000-000000000101',
     'transaction_id', 'audit-p04-transaction',
     'original_transaction_id', 'audit-p04-original-transaction'
-  ));
+  )));
 
   SELECT count(*) INTO purchase_count
     FROM purchase_events
@@ -143,7 +162,7 @@ BEGIN
   END IF;
 
   BEGIN
-    PERFORM record_revenuecat_event(jsonb_build_object(
+    PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(jsonb_build_object(
       'provider_event_id', 'audit-p04-unknown-product',
       'event_type', 'INITIAL_PURCHASE',
       'app_user_id', '00000000-0000-0000-0000-000000000004',
@@ -151,7 +170,7 @@ BEGIN
       'purchase_intent_id', 'a0400000-0000-0000-0000-000000000101',
       'transaction_id', 'audit-p04-unknown-transaction',
       'original_transaction_id', 'audit-p04-unknown-original'
-    ));
+    )));
     RAISE EXCEPTION 'audit_unknown_product_was_accepted';
   EXCEPTION
     WHEN raise_exception THEN
@@ -167,7 +186,7 @@ BEGIN
     RAISE EXCEPTION 'AUDIT-P04: unknown product_id was accepted';
   END IF;
 
-  PERFORM record_revenuecat_event(jsonb_build_object(
+  PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(jsonb_build_object(
     'provider_event_id', 'audit-p04-cancellation',
     'event_type', 'CANCELLATION',
     'app_user_id', '00000000-0000-0000-0000-000000000004',
@@ -175,7 +194,7 @@ BEGIN
     'purchase_intent_id', 'a0400000-0000-0000-0000-000000000101',
     'transaction_id', 'audit-p04-transaction',
     'original_transaction_id', 'audit-p04-original-transaction'
-  ));
+  )));
 
   SELECT count(*) INTO revoked_count
     FROM purchase_credit_ledger
@@ -185,7 +204,7 @@ BEGIN
     RAISE EXCEPTION 'AUDIT-P04: cancellation did not revoke available credit';
   END IF;
 
-  PERFORM record_revenuecat_event(jsonb_build_object(
+  PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(jsonb_build_object(
     'provider_event_id', 'audit-p04-refund-purchase',
     'event_type', 'NON_RENEWING_PURCHASE',
     'app_user_id', '00000000-0000-0000-0000-000000000004',
@@ -193,8 +212,8 @@ BEGIN
     'purchase_intent_id', 'a0400000-0000-0000-0000-000000000102',
     'transaction_id', 'audit-p04-refund-transaction',
     'original_transaction_id', 'audit-p04-refund-original'
-  ));
-  PERFORM record_revenuecat_event(jsonb_build_object(
+  )));
+  PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(jsonb_build_object(
     'provider_event_id', 'audit-p04-refund',
     'event_type', 'REFUND',
     'app_user_id', '00000000-0000-0000-0000-000000000004',
@@ -202,8 +221,8 @@ BEGIN
     'purchase_intent_id', 'a0400000-0000-0000-0000-000000000102',
     'transaction_id', 'audit-p04-refund-transaction',
     'original_transaction_id', 'audit-p04-refund-original'
-  ));
-  PERFORM record_revenuecat_event(jsonb_build_object(
+  )));
+  PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(jsonb_build_object(
     'provider_event_id', 'audit-p04-refund',
     'event_type', 'REFUND',
     'app_user_id', '00000000-0000-0000-0000-000000000004',
@@ -211,7 +230,7 @@ BEGIN
     'purchase_intent_id', 'a0400000-0000-0000-0000-000000000102',
     'transaction_id', 'audit-p04-refund-transaction',
     'original_transaction_id', 'audit-p04-refund-original'
-  ));
+  )));
   SELECT count(*) INTO revoked_count
     FROM purchase_credit_ledger
    WHERE idempotency_key = 'audit-p04-refund-original'
@@ -252,7 +271,7 @@ DECLARE
   atomic_failure_observed BOOLEAN := false;
 BEGIN
   BEGIN
-    PERFORM record_revenuecat_event(jsonb_build_object(
+    PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(jsonb_build_object(
       'provider_event_id', 'audit-p04-atomic-failure',
       'event_type', 'NON_RENEWING_PURCHASE',
       'app_user_id', '00000000-0000-0000-0000-000000000004',
@@ -260,7 +279,7 @@ BEGIN
       'purchase_intent_id', 'a0400000-0000-0000-0000-000000000103',
       'transaction_id', 'audit-p04-atomic-transaction',
       'original_transaction_id', 'audit-p04-atomic-original'
-    ));
+    )));
     RAISE EXCEPTION 'audit_partial_ledger_failure_was_swallowed';
   EXCEPTION
     WHEN raise_exception THEN
@@ -513,7 +532,7 @@ DO $$
 DECLARE
   extended_days NUMERIC;
 BEGIN
-  PERFORM record_revenuecat_event(jsonb_build_object(
+  PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(jsonb_build_object(
     'provider_event_id', 'audit-p04-pass-purchase',
     'event_type', 'INITIAL_PURCHASE',
     'app_user_id', '00000000-0000-0000-0000-000000000001',
@@ -521,7 +540,7 @@ BEGIN
     'purchase_intent_id', 'a0400000-0000-0000-0000-000000000104',
     'transaction_id', 'audit-p04-pass-transaction',
     'original_transaction_id', 'audit-p04-pass-original'
-  ));
+  )));
   SELECT extract(epoch FROM (ends_at - published_at)) / 86400 INTO extended_days
     FROM campaigns
    WHERE pitch_draft_id = 'a0400000-0000-0000-0000-000000000001';

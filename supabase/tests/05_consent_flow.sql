@@ -75,6 +75,8 @@ SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000001';
 DO $$
 DECLARE
   claimed_draft UUID;
+  approved_revision_id UUID;
+  approved_asset_ids UUID[];
   publish RECORD;
   membership_count INTEGER;
   final_status pitch_draft_status;
@@ -85,7 +87,18 @@ BEGIN
     RAISE EXCEPTION 'claim returned the wrong draft';
   END IF;
 
-  SELECT * INTO publish FROM approve_and_publish_pitch(claimed_draft);
+  SELECT r.id, r.asset_ids
+    INTO approved_revision_id, approved_asset_ids
+    FROM consent_requests cr
+    JOIN consent_revisions r ON r.id = cr.revision_id
+   WHERE cr.pitch_draft_id = claimed_draft;
+  SELECT * INTO publish FROM approve_and_publish_pitch(
+    claimed_draft,
+    14,
+    approved_revision_id,
+    approved_asset_ids,
+    true
+  );
   IF publish.campaign_slug IS NULL OR length(publish.campaign_slug) < 8 THEN
     RAISE EXCEPTION 'publish did not produce a usable slug, got %', publish.campaign_slug;
   END IF;
@@ -98,7 +111,13 @@ BEGIN
 
   -- Approving twice must fail (no longer consent_pending).
   BEGIN
-    PERFORM * FROM approve_and_publish_pitch(claimed_draft);
+    PERFORM * FROM approve_and_publish_pitch(
+      claimed_draft,
+      14,
+      approved_revision_id,
+      approved_asset_ids,
+      true
+    );
     RAISE EXCEPTION 'double publish was accepted';
   EXCEPTION
     WHEN raise_exception THEN

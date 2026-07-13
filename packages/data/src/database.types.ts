@@ -31,6 +31,7 @@ export type PitchDraftRow = {
   readonly status: PitchDraftStatus;
   readonly headline: string | null;
   readonly body: string | null;
+  readonly structure: Json | null;
   readonly relationship_type: RelationshipType | null;
   readonly relationship_duration: RelationshipDuration | null;
   readonly created_at: string;
@@ -109,8 +110,35 @@ export type ConsentRequestRow = {
   readonly invite_contact_channel: 'email' | 'phone' | null;
   readonly invite_contact_hash: string | null;
   readonly invite_friend_name: string | null;
+  readonly revision_id: string | null;
+  readonly response_note: string | null;
   readonly created_at: string;
   readonly updated_at: string;
+};
+
+export type ConsentRevisionRow = {
+  readonly id: string;
+  readonly pitch_draft_id: string;
+  readonly revision_number: number;
+  readonly headline: string;
+  readonly body: string;
+  readonly structure: Json | null;
+  readonly asset_ids: readonly string[];
+  readonly voice_asset_path: string | null;
+  readonly content_hash: string;
+  readonly created_at: string;
+};
+
+export type PurchaseIntentRow = {
+  readonly id: string;
+  readonly user_id: string;
+  readonly product_id: string;
+  readonly scope_type: 'PITCH_DRAFT' | 'CAMPAIGN';
+  readonly scope_id: string;
+  readonly original_transaction_id: string | null;
+  readonly status: 'issued' | 'consumed' | 'expired';
+  readonly created_at: string;
+  readonly expires_at: string;
 };
 
 export type AppConfigRow = {
@@ -156,12 +184,14 @@ export type Database = {
           readonly created_by_user_id: string;
           readonly headline?: string | null;
           readonly body?: string | null;
+          readonly structure?: Json | null;
           readonly relationship_type?: RelationshipType | null;
           readonly relationship_duration?: RelationshipDuration | null;
         };
         Update: {
           readonly headline?: string | null;
           readonly body?: string | null;
+          readonly structure?: Json | null;
           readonly relationship_type?: RelationshipType | null;
           readonly relationship_duration?: RelationshipDuration | null;
         };
@@ -204,6 +234,21 @@ export type Database = {
       consent_requests: {
         Row: ConsentRequestRow;
         Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      consent_revisions: {
+        Row: ConsentRevisionRow;
+        Insert: {
+          readonly pitch_draft_id: string;
+          readonly revision_number: number;
+          readonly headline: string;
+          readonly body: string;
+          readonly structure?: Json | null;
+          readonly asset_ids?: readonly string[];
+          readonly voice_asset_path?: string | null;
+          readonly content_hash: string;
+        };
         Update: Record<string, never>;
         Relationships: [];
       };
@@ -261,6 +306,11 @@ export type Database = {
           readonly scope_id: string;
           readonly provider_event_id: string;
           readonly purchased_at: string;
+          readonly transaction_id: string | null;
+          readonly original_transaction_id: string | null;
+          readonly environment: string | null;
+          readonly event_type: string | null;
+          readonly raw_app_user_id: string | null;
           readonly created_at: string;
           readonly updated_at: string;
         };
@@ -272,6 +322,11 @@ export type Database = {
           readonly scope_id: string;
           readonly provider_event_id: string;
           readonly purchased_at?: string;
+          readonly transaction_id?: string | null;
+          readonly original_transaction_id?: string | null;
+          readonly environment?: string | null;
+          readonly event_type?: string | null;
+          readonly raw_app_user_id?: string | null;
         };
         Update: Record<string, never>;
         Relationships: [];
@@ -280,7 +335,7 @@ export type Database = {
         Row: {
           readonly id: string;
           readonly user_id: string;
-          readonly credit_state: 'available' | 'reserved' | 'consumed' | 'refunded';
+          readonly credit_state: 'available' | 'reserved' | 'consumed' | 'refunded' | 'revoked';
           readonly product_id: string;
           readonly pitch_draft_id: string | null;
           readonly campaign_id: string | null;
@@ -290,15 +345,29 @@ export type Database = {
         };
         Insert: {
           readonly user_id: string;
-          readonly credit_state?: 'available' | 'reserved' | 'consumed' | 'refunded';
+          readonly credit_state?: 'available' | 'reserved' | 'consumed' | 'refunded' | 'revoked';
           readonly product_id: string;
           readonly pitch_draft_id?: string | null;
           readonly campaign_id?: string | null;
           readonly idempotency_key: string;
         };
         Update: {
-          readonly credit_state?: 'available' | 'reserved' | 'consumed' | 'refunded';
+          readonly credit_state?: 'available' | 'reserved' | 'consumed' | 'refunded' | 'revoked';
         };
+        Relationships: [];
+      };
+      purchase_intents: {
+        Row: PurchaseIntentRow;
+        Insert: {
+          readonly user_id: string;
+          readonly product_id: string;
+          readonly scope_type: 'PITCH_DRAFT' | 'CAMPAIGN';
+          readonly scope_id: string;
+          readonly original_transaction_id?: string | null;
+          readonly status?: 'issued' | 'consumed' | 'expired';
+          readonly expires_at?: string;
+        };
+        Update: Record<string, never>;
         Relationships: [];
       };
       campaign_entitlements: {
@@ -308,6 +377,7 @@ export type Database = {
           readonly product_id: string;
           readonly active: boolean;
           readonly expires_at: string | null;
+          readonly original_transaction_id: string | null;
           readonly created_at: string;
           readonly updated_at: string;
         };
@@ -316,10 +386,12 @@ export type Database = {
           readonly product_id: string;
           readonly active?: boolean;
           readonly expires_at?: string | null;
+          readonly original_transaction_id?: string | null;
         };
         Update: {
           readonly active?: boolean;
           readonly expires_at?: string | null;
+          readonly original_transaction_id?: string | null;
         };
         Relationships: [];
       };
@@ -377,7 +449,7 @@ export type Database = {
         };
         Returns: readonly {
           readonly consent_request_id: string;
-          readonly consent_token: string;
+          readonly consent_token: string | null;
         }[];
       };
       get_consent_preview: {
@@ -396,14 +468,50 @@ export type Database = {
         }[];
       };
       approve_and_publish_pitch: {
-        Args: { readonly draft_id: string; readonly campaign_days?: number };
+        Args: {
+          readonly draft_id: string;
+          readonly campaign_days: number;
+          readonly revision_id: string;
+          readonly included_asset_ids: readonly string[];
+          readonly hard_claims_confirmed: boolean;
+        };
         Returns: readonly {
           readonly campaign_id: string;
           readonly campaign_slug: string;
         }[];
       };
-      exclude_pitch_asset: {
-        Args: { readonly target_asset_id: string };
+      respond_consent_request: {
+        Args: {
+          readonly draft_id: string;
+          readonly action: 'request_changes' | 'decline';
+          readonly note: string;
+        };
+        Returns: undefined;
+      };
+      issue_purchase_intent: {
+        Args: {
+          readonly product_id: string;
+          readonly scope_id: string;
+        };
+        Returns: readonly {
+          readonly purchase_intent_id: string;
+          readonly expires_at: string;
+        }[];
+      };
+      record_revenuecat_event: {
+        Args: { readonly payload: Json };
+        Returns: Json;
+      };
+      reserve_creator_credit: {
+        Args: { readonly draft_id: string };
+        Returns: string;
+      };
+      release_creator_credit: {
+        Args: { readonly ledger_id: string };
+        Returns: undefined;
+      };
+      consume_creator_credit: {
+        Args: { readonly ledger_id: string };
         Returns: undefined;
       };
       submit_interest: {

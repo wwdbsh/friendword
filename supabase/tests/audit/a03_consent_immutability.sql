@@ -1,5 +1,5 @@
 -- AUDIT REGRESSION: P0-3, 감사 문서 §5 "동의 snapshot 불변성".
--- 현재 실패 이유: consent_pending 문구/미디어 수정이 허용되고 revision 구조가 없다.
+-- 초기 실패 원인은 mutable consent content였고, Slice D 0013으로 PASS한다.
 
 BEGIN;
 

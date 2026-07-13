@@ -13,7 +13,7 @@ import {
   trackEvent,
   type BrowserSupabaseClient,
   type ConsentPreview,
-  type PitchDraftRow,
+  type ConsentReview,
 } from '@friendword/data';
 
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
@@ -44,6 +44,13 @@ const CLAIM_ERROR_COPY: readonly (readonly [string, string])[] = [
   ['no longer claimable', 'This invite has already been answered or is no longer active.'],
 ];
 
+type ReviewContext = {
+  readonly preview: ConsentPreview;
+  readonly review: ConsentReview;
+  readonly voiceUrl: string | null;
+  readonly photos: readonly { readonly assetId: string; readonly url: string }[];
+};
+
 type FlowState =
   | { readonly step: 'loading' }
   | { readonly step: 'setup-missing' }
@@ -53,21 +60,14 @@ type FlowState =
   | { readonly step: 'link-sent'; readonly preview: ConsentPreview; readonly email: string }
   | { readonly step: 'claiming'; readonly preview: ConsentPreview }
   | { readonly step: 'contact-mismatch'; readonly preview: ConsentPreview }
-  | {
-      readonly step: 'name-confirmation';
-      readonly preview: ConsentPreview;
-      readonly draft: PitchDraftRow;
-      readonly voiceUrl: string | null;
-      readonly photos: readonly { readonly assetId: string; readonly url: string }[];
-    }
-  | {
-      readonly step: 'review';
-      readonly preview: ConsentPreview;
-      readonly draft: PitchDraftRow;
-      readonly voiceUrl: string | null;
-      readonly photos: readonly { readonly assetId: string; readonly url: string }[];
-    }
+  | ({ readonly step: 'name-confirmation' } & ReviewContext)
+  | ({ readonly step: 'review' } & ReviewContext)
   | { readonly step: 'publishing'; readonly preview: ConsentPreview }
+  | { readonly step: 'revision-stale'; readonly preview: ConsentPreview }
+  | {
+      readonly step: 'responded';
+      readonly action: 'request_changes' | 'decline';
+    }
   | { readonly step: 'error'; readonly message: string };
 
 function claimErrorDetail(error: unknown): string {
@@ -121,8 +121,13 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   const [displayName, setDisplayName] = useState('');
   const [confirmingName, setConfirmingName] = useState(false);
   const [displayNameError, setDisplayNameError] = useState<string | null>(null);
-  const [excludedIds, setExcludedIds] = useState<readonly string[]>([]);
-  const [campaignDays, setCampaignDays] = useState<7 | 30 | 90>(30);
+  const [includedAssetIds, setIncludedAssetIds] = useState<readonly string[]>([]);
+  const [hardClaimsConfirmed, setHardClaimsConfirmed] = useState(false);
+  const [requestingChanges, setRequestingChanges] = useState(false);
+  const [responseNote, setResponseNote] = useState('');
+  const [responding, setResponding] = useState(false);
+  const [responseError, setResponseError] = useState<string | null>(null);
+  const responseNoteRef = useRef<HTMLTextAreaElement | null>(null);
   const claimStartedRef = useRef(false);
 
   const enterReview = useCallback(
@@ -137,27 +142,29 @@ export function ConsentFlow({ token }: { readonly token: string }) {
       try {
         await ensureUserRow(activeClient);
         const { pitchDraftId } = await repo.claim(token);
-        const draft = await repo.getDraftForReview(pitchDraftId);
-        const voiceUrl = await repo.createVoicePlaybackUrl(pitchDraftId).catch(() => null);
-        const assets = await repo.listAssets(pitchDraftId).catch(() => []);
-        const photos = (
-          await Promise.all(
-            assets
-              .filter((asset) => asset.asset_type === 'photo')
-              .map((asset) =>
-                repo
-                  .createAssetViewUrl(asset.storage_path)
-                  .then((url) => ({ assetId: asset.id, url }))
-                  .catch(() => null),
-              ),
-          )
-        ).filter((photo): photo is { assetId: string; url: string } => photo !== null);
+        const review = await repo.getConsentReview(pitchDraftId);
+        const voiceUrl =
+          review.revision.voice_asset_path === null
+            ? null
+            : await repo.createAssetViewUrl(review.revision.voice_asset_path);
+        const photoAssets = review.assets.filter((asset) => asset.asset_type === 'photo');
+        const photos = await Promise.all(
+          photoAssets.map(async (asset) => ({
+            assetId: asset.id,
+            url: await repo.createAssetViewUrl(asset.storage_path),
+          })),
+        );
+        setIncludedAssetIds(photoAssets.map((asset) => asset.id));
+        setHardClaimsConfirmed(false);
+        setRequestingChanges(false);
+        setResponseNote('');
+        setResponseError(null);
         const nameStatus = await getDisplayNameStatus(activeClient);
         if (nameStatus.confirmed) {
-          setState({ step: 'review', preview, draft, voiceUrl, photos });
+          setState({ step: 'review', preview, review, voiceUrl, photos });
         } else {
           setDisplayName(nameStatus.displayName);
-          setState({ step: 'name-confirmation', preview, draft, voiceUrl, photos });
+          setState({ step: 'name-confirmation', preview, review, voiceUrl, photos });
         }
       } catch (error: unknown) {
         if (!(error instanceof Error)) {
@@ -252,22 +259,90 @@ export function ConsentFlow({ token }: { readonly token: string }) {
       return;
     }
 
-    const { preview, draft } = state;
+    const { preview, review } = state;
     setState({ step: 'publishing', preview });
     try {
       const repo = new ConsentRepo(client);
-      for (const assetId of excludedIds) {
-        await repo.excludeAsset(assetId);
-      }
-      const { campaignId, campaignSlug } = await repo.approveAndPublish(draft.id, campaignDays);
-      trackEvent(client, 'pitch_approved', { pitch_draft_id: draft.id });
+      const { campaignId, campaignSlug } = await repo.approveAndPublish({
+        draftId: review.revision.pitch_draft_id,
+        campaignDays: 14,
+        revisionId: review.revision.id,
+        includedAssetIds,
+        hardClaimsConfirmed,
+      });
+      trackEvent(client, 'pitch_approved', { pitch_draft_id: review.revision.pitch_draft_id });
       trackEvent(client, 'campaign_published', { campaign_id: campaignId });
       router.push(`/p/${campaignSlug}`);
     } catch (error: unknown) {
       if (!(error instanceof Error)) {
         throw error;
       }
-      setState({ step: 'error', message: claimErrorMessage(claimErrorDetail(error)) });
+      const detail = claimErrorDetail(error);
+      if (detail.includes('latest consent revision')) {
+        setState({ step: 'revision-stale', preview });
+        return;
+      }
+      setState({ step: 'error', message: claimErrorMessage(detail) });
+    }
+  }
+
+  async function handleRequestChanges(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (client === null || state.step !== 'review') {
+      return;
+    }
+
+    setResponding(true);
+    setResponseError(null);
+    try {
+      const repo = new ConsentRepo(client);
+      await repo.respondToConsent(
+        state.review.revision.pitch_draft_id,
+        'request_changes',
+        responseNote,
+      );
+      trackEvent(client, 'draft_changes_requested', {
+        pitch_draft_id: state.review.revision.pitch_draft_id,
+      });
+      setState({ step: 'responded', action: 'request_changes' });
+    } catch (error: unknown) {
+      if (!(error instanceof Error)) {
+        throw error;
+      }
+      setResponseError('We could not send your request. Check the note and try again.');
+    } finally {
+      setResponding(false);
+    }
+  }
+
+  async function handleDecline() {
+    if (client === null || state.step !== 'review') {
+      return;
+    }
+    const confirmed = window.confirm(
+      'Declining ends this consent request and archives the pitch. This cannot be undone. Decline this pitch?',
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setResponding(true);
+    setResponseError(null);
+    try {
+      const repo = new ConsentRepo(client);
+      await repo.respondToConsent(
+        state.review.revision.pitch_draft_id,
+        'decline',
+        'I do not consent to publication.',
+      );
+      setState({ step: 'responded', action: 'decline' });
+    } catch (error: unknown) {
+      if (!(error instanceof Error)) {
+        throw error;
+      }
+      setResponseError('We could not decline this pitch. Please try again.');
+    } finally {
+      setResponding(false);
     }
   }
 
@@ -499,21 +574,21 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                 <h2 className={styles.photoHeading}>The photos they picked</h2>
                 <div className={styles.photoGrid}>
                   {state.photos.map((photo, index) => {
-                    const excluded = excludedIds.includes(photo.assetId);
+                    const included = includedAssetIds.includes(photo.assetId);
                     return (
                       <button
                         key={photo.assetId}
                         type="button"
-                        className={`${styles.photoToggle} ${excluded ? styles.photoExcluded : ''}`}
-                        aria-pressed={excluded}
+                        className={`${styles.photoToggle} ${included ? '' : styles.photoExcluded}`}
+                        aria-pressed={included}
                         aria-label={
-                          excluded
-                            ? `Keep suggested photo ${index + 1}`
-                            : `Remove suggested photo ${index + 1}`
+                          included
+                            ? `Exclude suggested photo ${index + 1}`
+                            : `Include suggested photo ${index + 1}`
                         }
                         onClick={() =>
-                          setExcludedIds((current) =>
-                            excluded
+                          setIncludedAssetIds((current) =>
+                            included
                               ? current.filter((id) => id !== photo.assetId)
                               : [...current, photo.assetId],
                           )
@@ -525,40 +600,44 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                           alt={`Suggested photo ${index + 1}`}
                         />
                         <span className={styles.photoState}>
-                          {excluded ? 'Removed' : 'Keeping'}
+                          {included ? 'Included' : 'Excluded'}
                         </span>
                       </button>
                     );
                   })}
                 </div>
-                <p className={styles.finePrint}>
-                  Tap a photo to remove it — only what you keep goes live.
+                <p className={styles.muted}>
+                  Choose which photos to include. Nothing is removed until you approve.
                 </p>
               </div>
             )}
 
             <div className={styles.windowBlock}>
-              <h2 className={styles.photoHeading}>How long should your page stay up?</h2>
-              <div className={styles.chipRow} role="radiogroup" aria-label="Visibility window">
-                {([7, 30, 90] as const).map((days) => (
-                  <button
-                    key={days}
-                    type="button"
-                    role="radio"
-                    aria-checked={campaignDays === days}
-                    className={`${styles.chip} ${campaignDays === days ? styles.chipActive : ''}`}
-                    onClick={() => setCampaignDays(days)}
-                  >
-                    {days} days
-                  </button>
-                ))}
-              </div>
+              <h2 className={styles.photoHeading}>Public for 14 days</h2>
+              <p className={styles.muted}>Extension options are coming soon.</p>
             </div>
 
-            {(state.draft.headline !== null || state.draft.body !== null) && (
-              <div className={styles.notes}>
-                {state.draft.headline !== null && <h2>{state.draft.headline}</h2>}
-                {state.draft.body !== null && <p>{state.draft.body}</p>}
+            <div className={styles.notes}>
+              <h2>{state.review.revision.headline}</h2>
+              <p>{state.review.revision.body}</p>
+            </div>
+
+            {state.review.hardClaims.length > 0 && (
+              <div className={styles.claimBlock}>
+                <h2 className={styles.photoHeading}>Claims that need your confirmation</h2>
+                <ul className={styles.claimList}>
+                  {state.review.hardClaims.map((claim) => (
+                    <li key={claim}>{claim}</li>
+                  ))}
+                </ul>
+                <label className={styles.confirmationRow}>
+                  <input
+                    type="checkbox"
+                    checked={hardClaimsConfirmed}
+                    onChange={(event) => setHardClaimsConfirmed(event.target.checked)}
+                  />
+                  <span>I confirm all of these claims are true.</span>
+                </label>
               </div>
             )}
 
@@ -570,9 +649,99 @@ export function ConsentFlow({ token }: { readonly token: string }) {
               </p>
             </div>
 
-            <button className={styles.primary} type="button" onClick={handleApprove}>
+            <button
+              className={styles.primary}
+              type="button"
+              disabled={responding || (state.review.hardClaims.length > 0 && !hardClaimsConfirmed)}
+              onClick={handleApprove}
+            >
               Approve &amp; publish my page
             </button>
+
+            <div className={styles.responseActions}>
+              <button
+                className={styles.secondary}
+                type="button"
+                disabled={responding}
+                aria-expanded={requestingChanges}
+                aria-controls="consent-change-request-form"
+                onClick={() => {
+                  const nextRequestingChanges = !requestingChanges;
+                  setRequestingChanges(nextRequestingChanges);
+                  setResponseError(null);
+                  if (nextRequestingChanges) {
+                    window.requestAnimationFrame(() => responseNoteRef.current?.focus());
+                  }
+                }}
+              >
+                Request changes
+              </button>
+              <button
+                className={`${styles.secondary} ${styles.declineAction}`}
+                type="button"
+                disabled={responding}
+                onClick={() => {
+                  void handleDecline();
+                }}
+              >
+                Politely decline
+              </button>
+            </div>
+
+            {requestingChanges && (
+              <form
+                id="consent-change-request-form"
+                className={styles.responseForm}
+                onSubmit={handleRequestChanges}
+              >
+                <label className={styles.label} htmlFor="consent-change-note">
+                  What should your friend change?
+                </label>
+                <textarea
+                  ref={responseNoteRef}
+                  id="consent-change-note"
+                  className={styles.textarea}
+                  required
+                  rows={4}
+                  value={responseNote}
+                  onChange={(event) => setResponseNote(event.target.value)}
+                />
+                <button className={styles.secondary} type="submit" disabled={responding}>
+                  {responding ? 'Sending…' : 'Send change request'}
+                </button>
+              </form>
+            )}
+
+            {responseError !== null && <p className={styles.error}>{responseError}</p>}
+          </section>
+        )}
+
+        {state.step === 'revision-stale' && (
+          <section className={styles.card}>
+            <span className={styles.badge}>New version ready</span>
+            <h1 className={styles.title}>The introduction was updated.</h1>
+            <p className={styles.lede}>Review the newest version before you decide.</p>
+            <button
+              className={styles.primary}
+              type="button"
+              onClick={() => window.location.reload()}
+            >
+              Reload the latest version
+            </button>
+          </section>
+        )}
+
+        {state.step === 'responded' && (
+          <section className={styles.card}>
+            <span className={styles.badge}>Response sent</span>
+            <h1 className={styles.title}>
+              {state.action === 'request_changes' ? 'Changes requested.' : 'Pitch declined.'}
+            </h1>
+            <p className={styles.muted}>
+              {state.action === 'request_changes'
+                ? 'Your friend can revise the pitch and send you a new version.'
+                : 'The consent request is closed and the pitch will not be published.'}
+            </p>
           </section>
         )}
 

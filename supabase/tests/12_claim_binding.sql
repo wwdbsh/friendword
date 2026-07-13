@@ -123,6 +123,9 @@ $$;
 
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000001';
 DO $$
+DECLARE
+  legacy_revision_id UUID;
+  legacy_asset_ids UUID[];
 BEGIN
   BEGIN
     PERFORM * FROM claim_consent_request((SELECT raw_token FROM slice_c_tokens WHERE kind = 'phone'));
@@ -140,7 +143,17 @@ BEGIN
     RAISE EXCEPTION 'legacy consent request could not be claimed';
   END IF;
 
-  PERFORM * FROM approve_and_publish_pitch('c1200000-0000-0000-0000-000000000003', 7);
+  SELECT r.id, r.asset_ids INTO legacy_revision_id, legacy_asset_ids
+    FROM consent_requests cr
+    JOIN consent_revisions r ON r.id = cr.revision_id
+   WHERE cr.pitch_draft_id = 'c1200000-0000-0000-0000-000000000003';
+  PERFORM * FROM approve_and_publish_pitch(
+    'c1200000-0000-0000-0000-000000000003',
+    14,
+    legacy_revision_id,
+    legacy_asset_ids,
+    true
+  );
 
   IF NOT EXISTS (
     SELECT 1 FROM claim_consent_request((SELECT raw_token FROM slice_c_tokens WHERE kind = 'verification'))
@@ -194,9 +207,22 @@ UPDATE app_config SET value = 'on' WHERE key = 'identity_enforcement';
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000001';
 DO $$
+DECLARE
+  verification_revision_id UUID;
+  verification_asset_ids UUID[];
 BEGIN
+  SELECT r.id, r.asset_ids INTO verification_revision_id, verification_asset_ids
+    FROM consent_requests cr
+    JOIN consent_revisions r ON r.id = cr.revision_id
+   WHERE cr.pitch_draft_id = 'c1200000-0000-0000-0000-000000000004';
   BEGIN
-    PERFORM * FROM approve_and_publish_pitch('c1200000-0000-0000-0000-000000000004', 7);
+    PERFORM * FROM approve_and_publish_pitch(
+      'c1200000-0000-0000-0000-000000000004',
+      14,
+      verification_revision_id,
+      verification_asset_ids,
+      true
+    );
     RAISE EXCEPTION 'publish succeeded without provider verification';
   EXCEPTION
     WHEN raise_exception THEN
@@ -213,8 +239,21 @@ VALUES ('00000000-0000-0000-0000-000000000001', 'audit', 'slice-c-publish', 'pas
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000001';
 DO $$
+DECLARE
+  verification_revision_id UUID;
+  verification_asset_ids UUID[];
 BEGIN
-  PERFORM * FROM approve_and_publish_pitch('c1200000-0000-0000-0000-000000000004', 7);
+  SELECT r.id, r.asset_ids INTO verification_revision_id, verification_asset_ids
+    FROM consent_requests cr
+    JOIN consent_revisions r ON r.id = cr.revision_id
+   WHERE cr.pitch_draft_id = 'c1200000-0000-0000-0000-000000000004';
+  PERFORM * FROM approve_and_publish_pitch(
+    'c1200000-0000-0000-0000-000000000004',
+    14,
+    verification_revision_id,
+    verification_asset_ids,
+    true
+  );
 END;
 $$;
 
@@ -293,12 +332,39 @@ VALUES
 UPDATE pitch_drafts
    SET subject_user_id = 'c1200000-0000-0000-0000-000000000103'
  WHERE id = 'c1200000-0000-0000-0000-000000000202';
-INSERT INTO consent_requests (pitch_draft_id, subject_user_id, token_hash, status)
+INSERT INTO consent_revisions (
+  id,
+  pitch_draft_id,
+  revision_number,
+  headline,
+  body,
+  structure,
+  asset_ids,
+  content_hash
+)
+VALUES (
+  'c1200000-0000-0000-0000-000000000204',
+  'c1200000-0000-0000-0000-000000000202',
+  1,
+  'Suspended approve',
+  'Suspended accounts cannot approve.',
+  '{}'::JSONB,
+  ARRAY[]::UUID[],
+  encode(digest('slice-c-suspended-approve-revision', 'sha256'), 'hex')
+);
+INSERT INTO consent_requests (
+  pitch_draft_id,
+  subject_user_id,
+  token_hash,
+  status,
+  revision_id
+)
 VALUES (
   'c1200000-0000-0000-0000-000000000202',
   'c1200000-0000-0000-0000-000000000103',
   encode(digest('slice-c-suspended-approve', 'sha256'), 'hex'),
-  'claimed'
+  'claimed',
+  'c1200000-0000-0000-0000-000000000204'
 );
 INSERT INTO interests (id, campaign_id, sender_user_id, status, submitted_at)
 VALUES (
@@ -338,7 +404,13 @@ BEGIN
       IF SQLERRM <> 'account must be active' THEN RAISE; END IF;
   END;
   BEGIN
-    PERFORM * FROM approve_and_publish_pitch('c1200000-0000-0000-0000-000000000202', 7);
+    PERFORM * FROM approve_and_publish_pitch(
+      'c1200000-0000-0000-0000-000000000202',
+      14,
+      'c1200000-0000-0000-0000-000000000204',
+      ARRAY[]::UUID[],
+      true
+    );
     RAISE EXCEPTION 'suspended account approved pitch';
   EXCEPTION
     WHEN raise_exception THEN

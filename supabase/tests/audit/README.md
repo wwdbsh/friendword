@@ -20,10 +20,12 @@
 | ------------------------------------ | ---- |
 | `a01_web_user_bootstrap.sql`         | PASS |
 | `a02_claim_and_verification.sql`     | PASS |
-| `a03_consent_immutability.sql`       | FAIL |
-| `a04_commerce_ledger.sql`            | FAIL |
+| `a03_consent_immutability.sql`       | PASS |
+| `a04_commerce_ledger.sql`            | PASS |
 | `a08_verified_interest_evidence.sql` | PASS |
 | `a09_publish_photo_guard.sql`        | FAIL |
 | `a10_account_status_enforcement.sql` | PASS |
 
 후속 slice는 실제 실행 결과가 바뀔 때 이 표도 함께 갱신해야 합니다.
+
+Slice E의 최종 기간 정책은 무료 캠페인 14일 고정이며, Campaign Pass는 구매 시점부터 30일까지 연장합니다. 30일 직접 발행과 90일 경로는 허용하지 않습니다.

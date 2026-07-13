@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { createProviders, ProviderNotImplementedError } from '@friendword/adapters';
-import { createBrowserClient } from '@friendword/data';
+import { createBrowserClient, isTranscriptionEditableStatus } from '@friendword/data';
 
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
 
@@ -51,7 +51,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (draftError !== null || draft.created_by_user_id !== userData.user.id) {
     return NextResponse.json({ error: 'draft not found or not yours' }, { status: 404 });
   }
-  if (draft.status !== 'draft' && draft.status !== 'consent_pending') {
+  if (!isTranscriptionEditableStatus(draft.status)) {
     return NextResponse.json({ error: 'draft is no longer editable' }, { status: 409 });
   }
 
@@ -93,12 +93,18 @@ export async function POST(request: Request): Promise<NextResponse> {
       .filter((part) => part.trim() !== '')
       .join('\n\n');
 
-    const { error: updateError } = await serviceClient
+    const { data: updatedDraft, error: updateError } = await serviceClient
       .from('pitch_drafts')
-      .update({ headline: structure.hook, body })
-      .eq('id', draftId);
+      .update({ headline: structure.hook, body, structure })
+      .eq('id', draftId)
+      .in('status', ['draft', 'changes_requested'])
+      .select('id')
+      .maybeSingle();
     if (updateError !== null) {
       return NextResponse.json({ error: 'draft update failed' }, { status: 500 });
+    }
+    if (updatedDraft === null) {
+      return NextResponse.json({ error: 'draft is no longer editable' }, { status: 409 });
     }
 
     await serviceClient.from('analytics_events').insert({

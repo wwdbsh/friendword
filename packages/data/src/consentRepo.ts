@@ -4,7 +4,7 @@ import type { RelationshipDuration, RelationshipType } from '@friendword/contrac
 import type { Session } from '@supabase/supabase-js';
 
 import type { BrowserSupabaseClient } from './client';
-import type { PitchAssetRow, PitchDraftRow } from './database.types';
+import type { PitchAssetRow } from './database.types';
 import { DataLayerError, UnauthenticatedError } from './errors';
 
 const rawTokenSchema = z
@@ -13,8 +13,12 @@ const rawTokenSchema = z
   .min(24)
   .regex(/^[A-Za-z0-9_-]+$/);
 const uuidSchema = z.string().uuid();
+const fileNameSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 const PITCH_MEDIA_BUCKET = 'pitch-media';
-const VOICE_FILE_NAME = 'voice.m4a';
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
 
 export type ConsentPreview = {
@@ -33,6 +37,39 @@ export type PublishedCampaign = {
   readonly campaignSlug: string;
 };
 
+export type ConsentRevision = {
+  readonly id: string;
+  readonly pitch_draft_id: string;
+  readonly revision_number: number;
+  readonly headline: string;
+  readonly body: string;
+  readonly structure: unknown;
+  readonly asset_ids: readonly string[];
+  readonly voice_asset_path: string | null;
+  readonly content_hash: string;
+  readonly created_at: string;
+};
+
+export type ConsentReview = {
+  readonly revision: ConsentRevision;
+  readonly assets: readonly PitchAssetRow[];
+  readonly hardClaims: readonly string[];
+};
+
+export type ConsentApproval = {
+  readonly draftId: string;
+  readonly campaignDays: 14;
+  readonly revisionId: string;
+  readonly includedAssetIds: readonly string[];
+  readonly hardClaimsConfirmed: boolean;
+};
+
+export type ConsentResponseAction = 'request_changes' | 'decline';
+
+export function isTranscriptionEditableStatus(status: string): boolean {
+  return status === 'draft' || status === 'changes_requested';
+}
+
 const previewRowSchema = z.array(
   z.object({
     introducer_display_name: z.string(),
@@ -50,6 +87,14 @@ const publishRowSchema = z.array(
     campaign_slug: z.string().min(1),
   }),
 );
+
+const revisionStructureSchema = z
+  .object({
+    hard_claims_requiring_confirmation: z.array(z.string().trim().min(1)).default([]),
+  })
+  .nullable();
+
+const responseNoteSchema = z.string().trim().min(1);
 
 /**
  * Flow B client surface: the dater previews an invite anonymously, signs in,
@@ -105,66 +150,85 @@ export class ConsentRepo {
     return { pitchDraftId: row.pitch_draft_id };
   }
 
-  /** The claimed subject reads the draft under RLS for review. */
-  async getDraftForReview(draftId: string): Promise<PitchDraftRow> {
+  async getConsentReview(draftId: string): Promise<ConsentReview> {
     await this.getRequiredSession();
-    const { data, error } = await this.client
-      .from('pitch_drafts')
-      .select()
-      .eq('id', uuidSchema.parse(draftId))
+    const parsedDraftId = uuidSchema.parse(draftId);
+    const { data: request, error: requestError } = await this.client
+      .from('consent_requests')
+      .select('revision_id')
+      .eq('pitch_draft_id', parsedDraftId)
       .single();
-    if (error !== null) {
-      throw new DataLayerError('consent.getDraftForReview', error);
+    if (requestError !== null) {
+      throw new DataLayerError('consent.getConsentReview.request', requestError);
+    }
+    if (request.revision_id === null) {
+      throw new DataLayerError(
+        'consent.getConsentReview.request',
+        new Error('consent request has no revision'),
+      );
     }
 
-    return data;
-  }
-
-  /**
-   * Short-lived playback URL for the introducer's voice note. Storage RLS
-   * only grants this to the draft's creator or claimed subject.
-   */
-  async createVoicePlaybackUrl(draftId: string): Promise<string> {
-    await this.getRequiredSession();
-    const objectPath = `${uuidSchema.parse(draftId)}/${VOICE_FILE_NAME}`;
-    const { data, error } = await this.client.storage
-      .from(PITCH_MEDIA_BUCKET)
-      .createSignedUrl(objectPath, SIGNED_URL_TTL_SECONDS);
-    if (error !== null) {
-      throw new DataLayerError('consent.createVoicePlaybackUrl', error);
-    }
-
-    return data.signedUrl;
-  }
-
-  /** Registered uploads for the draft, in the introducer's chosen order. */
-  async listAssets(draftId: string): Promise<readonly PitchAssetRow[]> {
-    await this.getRequiredSession();
-    const { data, error } = await this.client
-      .from('pitch_assets')
+    const { data: revision, error: revisionError } = await this.client
+      .from('consent_revisions')
       .select()
-      .eq('pitch_draft_id', uuidSchema.parse(draftId))
-      .order('sort_order', { ascending: true });
-    if (error !== null) {
-      throw new DataLayerError('consent.listAssets', error);
+      .eq('id', request.revision_id)
+      .eq('pitch_draft_id', parsedDraftId)
+      .single();
+    if (revisionError !== null) {
+      throw new DataLayerError('consent.getConsentReview.revision', revisionError);
     }
 
-    return data;
+    let assets: readonly PitchAssetRow[] = [];
+    if (revision.asset_ids.length > 0) {
+      const { data, error } = await this.client
+        .from('pitch_assets')
+        .select()
+        .eq('pitch_draft_id', parsedDraftId)
+        .in('id', revision.asset_ids)
+        .order('sort_order', { ascending: true });
+      if (error !== null) {
+        throw new DataLayerError('consent.getConsentReview.assets', error);
+      }
+      const returnedAssetIds = new Set(data.map((asset) => asset.id));
+      if (revision.asset_ids.some((assetId) => !returnedAssetIds.has(assetId))) {
+        throw new DataLayerError(
+          'consent.getConsentReview.assets',
+          new Error('revision asset is unavailable'),
+        );
+      }
+      assets = data;
+    }
+
+    const parsedStructure = revisionStructureSchema.safeParse(revision.structure);
+    if (!parsedStructure.success) {
+      throw new DataLayerError('consent.getConsentReview.structure', parsedStructure.error);
+    }
+
+    return {
+      revision,
+      assets,
+      hardClaims: parsedStructure.data?.hard_claims_requiring_confirmation ?? [],
+    };
   }
 
   /** Signed view URL for a registered asset ('pitch-media/<draft>/<file>'). */
   async createAssetViewUrl(storagePath: string): Promise<string> {
     await this.getRequiredSession();
     const prefix = `${PITCH_MEDIA_BUCKET}/`;
-    if (!storagePath.startsWith(prefix)) {
-      throw new DataLayerError(
-        'consent.createAssetViewUrl',
-        new Error(`unexpected storage path: ${storagePath}`),
-      );
+    const objectPath = storagePath.startsWith(prefix)
+      ? storagePath.slice(prefix.length)
+      : storagePath;
+    const [draftId, ...pathSegments] = objectPath.split('/');
+    const validPath =
+      uuidSchema.safeParse(draftId).success &&
+      pathSegments.length > 0 &&
+      pathSegments.every((segment) => fileNameSchema.safeParse(segment).success);
+    if (!validPath) {
+      throw new DataLayerError('consent.createAssetViewUrl', new Error('unexpected storage path'));
     }
     const { data, error } = await this.client.storage
       .from(PITCH_MEDIA_BUCKET)
-      .createSignedUrl(storagePath.slice(prefix.length), SIGNED_URL_TTL_SECONDS);
+      .createSignedUrl(objectPath, SIGNED_URL_TTL_SECONDS);
     if (error !== null) {
       throw new DataLayerError('consent.createAssetViewUrl', error);
     }
@@ -172,26 +236,15 @@ export class ConsentRepo {
     return data.signedUrl;
   }
 
-  /** The claimed subject removes a suggested photo before approving. */
-  async excludeAsset(assetId: string): Promise<void> {
-    await this.getRequiredSession();
-    const { error } = await this.client.rpc('exclude_pitch_asset', {
-      target_asset_id: uuidSchema.parse(assetId),
-    });
-    if (error !== null) {
-      throw new DataLayerError('consent.excludeAsset', error);
-    }
-  }
-
   /** Approve and publish in one server transaction; returns the public slug. */
-  async approveAndPublish(
-    draftId: string,
-    campaignDays: 7 | 30 | 90 = 30,
-  ): Promise<PublishedCampaign> {
+  async approveAndPublish(approval: ConsentApproval): Promise<PublishedCampaign> {
     await this.getRequiredSession();
     const { data, error } = await this.client.rpc('approve_and_publish_pitch', {
-      draft_id: uuidSchema.parse(draftId),
-      campaign_days: campaignDays,
+      draft_id: uuidSchema.parse(approval.draftId),
+      campaign_days: approval.campaignDays,
+      revision_id: uuidSchema.parse(approval.revisionId),
+      included_asset_ids: approval.includedAssetIds.map((assetId) => uuidSchema.parse(assetId)),
+      hard_claims_confirmed: approval.hardClaimsConfirmed,
     });
     if (error !== null) {
       throw new DataLayerError('consent.approveAndPublish', error);
@@ -203,6 +256,22 @@ export class ConsentRepo {
     }
 
     return { campaignId: row.campaign_id, campaignSlug: row.campaign_slug };
+  }
+
+  async respondToConsent(
+    draftId: string,
+    action: ConsentResponseAction,
+    note: string,
+  ): Promise<void> {
+    await this.getRequiredSession();
+    const { error } = await this.client.rpc('respond_consent_request', {
+      draft_id: uuidSchema.parse(draftId),
+      action,
+      note: responseNoteSchema.parse(note),
+    });
+    if (error !== null) {
+      throw new DataLayerError('consent.respondToConsent', error);
+    }
   }
 
   private async getRequiredSession(): Promise<Session> {

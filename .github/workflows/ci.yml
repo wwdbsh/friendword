@@ -19,6 +19,9 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - run: pnpm format:check
+      - run: pnpm --filter @friendword/web build
+      - run: pnpm --filter @friendword/web test:audit
 
   db-tests:
     runs-on: ubuntu-latest
@@ -44,3 +47,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: bash scripts/test-db.sh
+      - run: bash scripts/test-db-audit.sh

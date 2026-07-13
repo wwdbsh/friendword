@@ -1,22 +1,22 @@
 # PROJECT HANDOFF
 
-> 갱신: 2026-07-13 15:10 KST · 최신 커밋 기준 main
+> 갱신: 2026-07-13 16:10 KST · 최신 커밋 기준 main (origin push·CI 그린)
 
-## 감사 대응 진행 현황 (2026-07-13 오후)
+## 감사 대응 진행 현황 (2026-07-13 저녁 — A~J 완주)
 
-| 감사 항목                       | 상태                                                                                                                                                                                                         |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| P0-1 웹 사용자 bootstrap        | **해소** — 0011 트리거+백필, 이름 확정 UI, 프로덕션 E2E 실증                                                                                                                                                 |
-| P0-2 claim 바인딩·verified 실증 | **해소(코어)** — 이메일 해시 바인딩(0012), verified 카피·이벤트 전면 제거, identity_enforcement 스위치(벤더 선정 시 on)                                                                                      |
-| P0-3 동의 불변성·AI 순서        | **해소** — consent_revisions(0013), introducer 동결, 5인자 원자 approve, 모바일 AI 검토 플로우                                                                                                               |
-| P0-4 결제 원장·효익             | **해소(코어)** — purchase intent+원자 RPC(0014), 웹훅 어댑터, 14일 고정+Pass 30일 연장, Pass 게이트 분석·크레딧 소비(0020). 잔여: E-Mobile 페이월 intent, Creator 킷 페이지, RevenueCat sandbox(사용자 셋업) |
-| P0-5 moderation·신고·삭제       | **해소(코어)** — report 전 표면(0016), 삭제 큐+프로세서, media_validations+웹·모바일 검증 배선. 잔여: 공개 피치 신고 링크(H-Web 후), moderation enforcement on(OPENAI 키 게이트)                             |
-| P0-6 OG·CTA·growth              | 진행 중 — H-Web(codex-1) + growth evidence export 구현됨                                                                                                                                                     |
-| P0-7 환경·CI                    | **대부분 해소** — CI에 build·format·감사 스위트 편입. 잔여: EXPO_PUBLIC_WEB_ORIGIN(사용자), 법적 문서 연결                                                                                                   |
-| P0-8 interest 서버 증거         | **해소** — storage 실증+MIME(0012), phone/identity는 enforcement 스위치                                                                                                                                      |
-| P0-9 fixture 오용               | **해소** — publish 사진 ≥1 강제(0017). 잔여: view.ts fallback 분리(H-Web)                                                                                                                                    |
-| **회귀 스위트**                 | **DB 7/7 PASS · 웹훅 11/11 PASS** (모두 CI 게이트)                                                                                                                                                           |
-| 프로덕션 E2E                    | **전 기능 체크 PASS** (hosted, B~E 계약 반영판)                                                                                                                                                              |
+| 감사 항목                       | 상태                                                                                                                                                                                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0-1 웹 사용자 bootstrap        | **해소** — 0011 트리거+백필, 이름 확정 UI, 프로덕션 E2E 실증                                                                                                                                                                          |
+| P0-2 claim 바인딩·verified 실증 | **해소(코어)** — 이메일 해시 바인딩(0012), verified 카피·이벤트 전면 제거, identity_enforcement 스위치(벤더 선정 시 on)                                                                                                               |
+| P0-3 동의 불변성·AI 순서        | **해소** — consent_revisions(0013), introducer 동결, 5인자 원자 approve, 모바일 AI 검토 플로우                                                                                                                                        |
+| P0-4 결제 원장·효익             | **해소** — purchase intent+원자 RPC(0014, 0022), 웹훅 어댑터, 모바일 페이월 intent+pending 확정, 14일 고정+Pass 30일 연장, Pass 게이트 분석, Creator 킷(unlock+9:16 카드+캡션팩). 잔여: RevenueCat sandbox 실검증(사용자 셋업 게이트) |
+| P0-5 moderation·신고·삭제       | **해소** — report 전 표면(0016)+공개 피치 무가입 신고, 삭제 큐+프로세서, media_validations+웹·모바일 검증 배선. 잔여: moderation enforcement on(OPENAI 키 게이트)                                                                     |
+| P0-6 OG·CTA·growth              | **해소** — campaign별 OG, Trust Layer 랜딩, CTA 분리, growth evidence export                                                                                                                                                          |
+| P0-7 환경·CI                    | **해소(자동화분)** — CI에 build·format·감사 스위트·Playwright(34) 편입, 3잡 그린. 잔여: EXPO_PUBLIC_WEB_ORIGIN(사용자), 18+·법적 문서 표면(스토어 준비 보류와 일괄)                                                                   |
+| P0-8 interest 서버 증거         | **해소** — storage 실증+MIME(0012), phone/identity는 enforcement 스위치                                                                                                                                                               |
+| P0-9 fixture 오용               | **해소** — publish 사진 ≥1 강제(0017) + 실캠페인 인물 fallback 제거                                                                                                                                                                   |
+| **회귀 스위트**                 | **DB 7/7 PASS · 웹훅 11/11 PASS** (모두 CI 게이트)                                                                                                                                                                                    |
+| 프로덕션 E2E                    | **전 기능 체크 PASS** (hosted, B~E 계약 반영판)                                                                                                                                                                                       |
 
 사용자 게이트(변동 없음): Resend 도메인, OPENAI_API_KEY, RevenueCat 셋업, identity 벤더 선정, EXPO_PUBLIC_WEB_ORIGIN. — 이들이 열리면 스위치(identity/media enforcement)를 켜고 sandbox 검증을 완료한다.
 

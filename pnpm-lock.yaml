@@ -126,6 +126,9 @@ importers:
       '@friendword/data':
         specifier: workspace:*
         version: link:../../packages/data
+      '@friendword/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@friendword/ui-tokens':
         specifier: workspace:*
         version: link:../../packages/ui-tokens

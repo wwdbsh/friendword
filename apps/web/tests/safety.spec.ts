@@ -1,0 +1,131 @@
+import { expect, test, type Page } from '@playwright/test';
+
+const DATER_ID = '00000000-0000-0000-0000-000000000002';
+const CAMPAIGN_ID = '20000000-0000-0000-0000-000000000001';
+const INTEREST_ID = '40000000-0000-0000-0000-000000000001';
+
+async function seedSignedInSession(page: Page): Promise<void> {
+  const session = {
+    access_token: 'playwright-access-token',
+    token_type: 'bearer',
+    expires_in: 3600,
+    expires_at: Math.floor(Date.now() / 1000) + 315_360_000,
+    refresh_token: 'playwright-refresh-token',
+    user: {
+      id: DATER_ID,
+      aud: 'authenticated',
+      role: 'authenticated',
+      email: 'dater@example.com',
+      app_metadata: {},
+      user_metadata: {},
+      created_at: '2026-07-13T00:00:00Z',
+    },
+  };
+  await page.addInitScript((value) => {
+    window.localStorage.setItem('friendword-web-auth', value);
+  }, JSON.stringify(session));
+}
+
+async function mockInbox(page: Page): Promise<void> {
+  await page.route('**/rest/v1/campaigns*', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: CAMPAIGN_ID,
+          slug: 'blair-mix123',
+          status: 'published',
+          owner_user_id: DATER_ID,
+          pitch_draft_id: '10000000-0000-0000-0000-000000000001',
+          published_at: '2026-07-13T00:00:00Z',
+          ends_at: null,
+          created_at: '2026-07-13T00:00:00Z',
+          updated_at: '2026-07-13T00:00:00Z',
+        },
+      ],
+    }),
+  );
+  await page.route('**/rest/v1/rpc/list_campaign_interests*', (route) =>
+    route.fulfill({
+      json: [
+        {
+          interest_id: INTEREST_ID,
+          interest_status: 'submitted',
+          note: 'Would love to meet.',
+          submitted_at: '2026-07-13T01:00:00Z',
+          sender_display_name: 'Jordan',
+          sender_age: 29,
+          sender_bio: 'Runner, cook, museum lurker.',
+          sender_photos: [],
+          sender_dating_intent: 'long-term',
+          sender_location: 'Seoul',
+        },
+      ],
+    }),
+  );
+}
+
+test('reports an interest profile from the inbox', async ({ page }) => {
+  await seedSignedInSession(page);
+  await mockInbox(page);
+  let reportPayload: unknown;
+  await page.route('**/rest/v1/rpc/report_content*', (route) => {
+    reportPayload = route.request().postDataJSON();
+    return route.fulfill({ json: '50000000-0000-0000-0000-000000000001' });
+  });
+  await page.route('**/rest/v1/rpc/track_event*', (route) => route.fulfill({ json: null }));
+
+  await page.goto('/inbox');
+  await expect(page.getByRole('heading', { name: 'Jordan, 29' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Report this profile' }).click();
+  await page.getByLabel('Why are you reporting this profile?').selectOption('safety_risk');
+  await page.getByRole('button', { name: 'Send report' }).click();
+
+  await expect(page.getByText('Report received', { exact: false })).toBeVisible();
+  expect(reportPayload).toMatchObject({
+    target_type: 'interest',
+    target_id: INTEREST_ID,
+    reason: 'safety_risk',
+  });
+});
+
+test('deletes the account after an explicit confirmation', async ({ page }) => {
+  await seedSignedInSession(page);
+  await mockInbox(page);
+  let deletionCalls = 0;
+  await page.route('**/rest/v1/rpc/request_account_deletion*', (route) => {
+    deletionCalls += 1;
+    return route.fulfill({ json: null });
+  });
+  await page.route('**/auth/v1/logout*', (route) => route.fulfill({ status: 204 }));
+
+  await page.goto('/inbox');
+  await expect(page.getByRole('heading', { name: 'Your account' })).toBeVisible();
+
+  page.once('dialog', (dialog) => {
+    void dialog.accept();
+  });
+  await page.getByRole('button', { name: 'Delete my account' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Your account is being deleted.' })).toBeVisible();
+  expect(deletionCalls).toBe(1);
+});
+
+test('keeps the account when the deletion dialog is dismissed', async ({ page }) => {
+  await seedSignedInSession(page);
+  await mockInbox(page);
+  let deletionCalls = 0;
+  await page.route('**/rest/v1/rpc/request_account_deletion*', (route) => {
+    deletionCalls += 1;
+    return route.fulfill({ json: null });
+  });
+
+  await page.goto('/inbox');
+  page.once('dialog', (dialog) => {
+    void dialog.dismiss();
+  });
+  await page.getByRole('button', { name: 'Delete my account' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Your account' })).toBeVisible();
+  expect(deletionCalls).toBe(0);
+});

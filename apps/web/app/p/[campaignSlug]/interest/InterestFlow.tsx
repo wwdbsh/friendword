@@ -160,12 +160,39 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
     setError(null);
     try {
       const repo = new InterestRepo(client);
+      const { data: sessionData } = await client.auth.getSession();
+      const accessToken = sessionData.session?.access_token ?? '';
       const uploaded: UploadedPhoto[] = [];
       for (const [index, file] of files.entries()) {
         const extension = file.name.split('.').pop()?.toLowerCase() ?? 'jpg';
         const safeExtension = /^[a-z0-9]{1,5}$/.test(extension) ? extension : 'jpg';
         const fileName = `photo-${Date.now()}-${index}.${safeExtension}`;
         const storagePath = await repo.uploadProfilePhoto(fileName, file);
+        // Server-authoritative validation: the API re-reads the object,
+        // sniffs the real content, and records the verdict for the
+        // submit_interest evidence gate. A failed verdict blocks this photo.
+        const response = await fetch('/api/media/validate', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            bucket: 'profile-media',
+            objectName: storagePath.replace(/^profile-media\//, ''),
+          }),
+        });
+        const verdict: unknown = await response.json().catch(() => null);
+        const verdictOk =
+          response.ok &&
+          typeof verdict === 'object' &&
+          verdict !== null &&
+          'ok' in verdict &&
+          verdict.ok === true;
+        if (!verdictOk && response.status !== 501) {
+          setError('That photo could not be verified as a supported image. Try another one.');
+          continue;
+        }
         uploaded.push({ storagePath, previewUrl: URL.createObjectURL(file) });
       }
       setPhotos((current) => [...current, ...uploaded].slice(0, 6));

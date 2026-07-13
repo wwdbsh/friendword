@@ -8,3 +8,4 @@ export * from './interestRepo';
 export * from './introRoomRepo';
 export * from './pitchDraftRepo';
 export * from './publishedPitchRepo';
+export * from './safetyRepo';

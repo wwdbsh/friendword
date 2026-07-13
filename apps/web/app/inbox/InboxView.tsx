@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   InterestRepo,
+  SafetyRepo,
   trackEvent,
   type BrowserSupabaseClient,
   type CampaignInterest,
@@ -42,6 +43,15 @@ const INTENT_LABELS: Record<string, string> = {
   'open-to-either': 'Open to either',
 };
 
+const REPORT_REASONS = [
+  { value: 'impersonation', label: 'Pretending to be someone else' },
+  { value: 'safety_risk', label: 'Threatening or unsafe behavior' },
+  { value: 'minor', label: 'Appears to be under 18' },
+  { value: 'harassment', label: 'Harassment' },
+  { value: 'spam', label: 'Spam or scam' },
+  { value: 'other', label: 'Something else' },
+] as const;
+
 export function InboxView() {
   const clientRef = useRef<BrowserSupabaseClient | null | undefined>(undefined);
   if (clientRef.current === undefined) {
@@ -54,6 +64,11 @@ export function InboxView() {
   const [deciding, setDeciding] = useState<string | null>(null);
   const [decisionNote, setDecisionNote] = useState<string | null>(null);
   const [openedRoomId, setOpenedRoomId] = useState<string | null>(null);
+  const [reportingInterestId, setReportingInterestId] = useState<string | null>(null);
+  const [reportReason, setReportReason] = useState<string>(REPORT_REASONS[0].value);
+  const [submittingReport, setSubmittingReport] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [accountDeleted, setAccountDeleted] = useState(false);
 
   const loadInbox = useCallback(async () => {
     if (client === null) {
@@ -149,6 +164,68 @@ export function InboxView() {
     } finally {
       setDeciding(null);
     }
+  }
+
+  async function submitInterestReport(interestId: string) {
+    if (client === null) {
+      return;
+    }
+    setSubmittingReport(true);
+    try {
+      await new SafetyRepo(client).reportContent({
+        targetType: 'interest',
+        targetId: interestId,
+        reason: reportReason,
+      });
+      trackEvent(client, 'report_submitted', { target_type: 'interest' });
+      setDecisionNote('Report received. Our team reviews every report.');
+      setReportingInterestId(null);
+    } catch {
+      setDecisionNote('The report did not go through. Refresh and try again.');
+    } finally {
+      setSubmittingReport(false);
+    }
+  }
+
+  async function deleteAccount() {
+    if (client === null) {
+      return;
+    }
+    if (
+      !window.confirm(
+        'Delete your account for good? Your pages, interests, and chats are ' +
+          'removed and cannot be recovered.',
+      )
+    ) {
+      return;
+    }
+    setDeletingAccount(true);
+    try {
+      await new SafetyRepo(client).requestAccountDeletion();
+      await client.auth.signOut();
+      setAccountDeleted(true);
+    } catch {
+      setDecisionNote('Account deletion did not go through. Refresh and try again.');
+    } finally {
+      setDeletingAccount(false);
+    }
+  }
+
+  if (accountDeleted) {
+    return (
+      <main className={styles.page}>
+        <div className={styles.shell}>
+          <p className={styles.wordmark}>Friendword</p>
+          <section className={styles.card}>
+            <h1 className={styles.title}>Your account is being deleted.</h1>
+            <p className={styles.muted}>
+              You are signed out. Your data and media are removed by our deletion job; this cannot
+              be undone.
+            </p>
+          </section>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -343,8 +420,78 @@ export function InboxView() {
                     </button>
                   </div>
                 )}
+
+                {reportingInterestId === interest.interestId ? (
+                  <form
+                    className={styles.form}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void submitInterestReport(interest.interestId);
+                    }}
+                  >
+                    <label
+                      className={styles.label}
+                      htmlFor={`report-reason-${interest.interestId}`}
+                    >
+                      Why are you reporting this profile?
+                    </label>
+                    <select
+                      id={`report-reason-${interest.interestId}`}
+                      className={styles.input}
+                      value={reportReason}
+                      onChange={(event) => setReportReason(event.target.value)}
+                    >
+                      {REPORT_REASONS.map((reason) => (
+                        <option key={reason.value} value={reason.value}>
+                          {reason.label}
+                        </option>
+                      ))}
+                    </select>
+                    <div className={styles.actionRow}>
+                      <button className={styles.danger} type="submit" disabled={submittingReport}>
+                        {submittingReport ? 'Sending…' : 'Send report'}
+                      </button>
+                      <button
+                        className={styles.secondary}
+                        type="button"
+                        onClick={() => setReportingInterestId(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <button
+                    className={styles.quietAction}
+                    type="button"
+                    onClick={() => {
+                      setReportReason(REPORT_REASONS[0].value);
+                      setReportingInterestId(interest.interestId);
+                    }}
+                  >
+                    Report this profile
+                  </button>
+                )}
               </section>
             ))}
+
+            <section className={styles.card}>
+              <h2 className={styles.subTitle}>Your account</h2>
+              <p className={styles.muted}>
+                Deleting your account removes your pages, interests, chats, and photos. This cannot
+                be undone.
+              </p>
+              <button
+                className={styles.danger}
+                type="button"
+                disabled={deletingAccount}
+                onClick={() => {
+                  void deleteAccount();
+                }}
+              >
+                {deletingAccount ? 'Deleting…' : 'Delete my account'}
+              </button>
+            </section>
           </>
         )}
       </div>

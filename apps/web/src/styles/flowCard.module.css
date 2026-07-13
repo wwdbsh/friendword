@@ -225,3 +225,21 @@
   color: var(--color-on-hype);
   transform: rotate(-1.5deg);
 }
+
+/* Trust Layer quiet action: no sticker grammar — reporting and other
+   safety affordances stay visually calm (docs/DESIGN.md intensity table). */
+.quietAction {
+  align-self: flex-start;
+  margin-top: var(--space-sm);
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary, #5f5347);
+  font-size: 0.875rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.quietAction:hover {
+  color: var(--color-ink);
+}

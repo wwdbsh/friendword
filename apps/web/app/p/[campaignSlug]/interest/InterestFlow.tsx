@@ -14,6 +14,7 @@ import {
 } from '@friendword/data';
 
 import { EmailSignIn } from '@/components/EmailSignIn';
+import { requestTextModeration } from '@/lib/moderateText';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { useSession } from '@/lib/useSession';
 
@@ -25,6 +26,9 @@ const DATING_INTENTS = [
   { value: 'short-term', label: 'Short-term' },
 ] as const;
 
+const MAX_PROFILE_PHOTOS = 6;
+const PROFILE_MEDIA_BUCKET = 'profile-media';
+
 type InterestFlowProps = {
   readonly campaignId: string;
   readonly campaignSlug: string;
@@ -35,6 +39,30 @@ type UploadedPhoto = {
   readonly storagePath: string;
   readonly previewUrl: string;
 };
+
+function profilePhotoObjectName(storagePath: string): string | null {
+  const prefix = `${PROFILE_MEDIA_BUCKET}/`;
+  return storagePath.startsWith(prefix) ? storagePath.slice(prefix.length) : null;
+}
+
+async function rollbackProfilePhotoUploads(
+  client: BrowserSupabaseClient,
+  storagePaths: readonly string[],
+): Promise<boolean> {
+  const objectNames = storagePaths
+    .map(profilePhotoObjectName)
+    .filter((objectName): objectName is string => objectName !== null);
+  if (objectNames.length === 0) {
+    return true;
+  }
+
+  try {
+    const { error } = await client.storage.from(PROFILE_MEDIA_BUCKET).remove(objectNames);
+    return error === null;
+  } catch {
+    return false;
+  }
+}
 
 function errorCopy(error: unknown): string {
   const cause = error instanceof DataLayerError ? error.cause : error;
@@ -159,8 +187,20 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
     }
     const files = Array.from(event.target.files);
     event.target.value = '';
+    const remainingSlots = MAX_PROFILE_PHOTOS - photos.length;
+    if (files.length === 0) {
+      return;
+    }
+    if (remainingSlots <= 0 || files.length > remainingSlots) {
+      setError(`You can keep up to ${MAX_PROFILE_PHOTOS} photos. Remove one before adding more.`);
+      return;
+    }
+
     setUploading(true);
     setError(null);
+    const uploadedStoragePaths: string[] = [];
+    const previewUrls: string[] = [];
+    let uploadFailureMessage = 'Those photos could not be uploaded. Please try again.';
     try {
       const repo = new InterestRepo(client);
       const { data: sessionData } = await client.auth.getSession();
@@ -171,6 +211,7 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
         const safeExtension = /^[a-z0-9]{1,5}$/.test(extension) ? extension : 'jpg';
         const fileName = `photo-${Date.now()}-${index}.${safeExtension}`;
         const storagePath = await repo.uploadProfilePhoto(fileName, file);
+        uploadedStoragePaths.push(storagePath);
         // Server-authoritative validation: the API re-reads the object,
         // sniffs the real content, and records the verdict for the
         // submit_interest evidence gate. A failed verdict blocks this photo.
@@ -193,17 +234,27 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
           'ok' in verdict &&
           verdict.ok === true;
         if (!verdictOk && response.status !== 501) {
-          setError('That photo could not be verified as a supported image. Try another one.');
-          continue;
+          uploadFailureMessage =
+            'That photo could not be verified as a supported image. Try another one.';
+          throw new Error('profile photo validation failed');
         }
-        uploaded.push({ storagePath, previewUrl: URL.createObjectURL(file) });
+        const previewUrl = URL.createObjectURL(file);
+        previewUrls.push(previewUrl);
+        uploaded.push({ storagePath, previewUrl });
       }
-      setPhotos((current) => [...current, ...uploaded].slice(0, 6));
+      setPhotos((current) => [...current, ...uploaded]);
     } catch (uploadError: unknown) {
-      if (!(uploadError instanceof Error)) {
-        throw uploadError;
+      const rollbackComplete = await rollbackProfilePhotoUploads(client, uploadedStoragePaths);
+      for (const previewUrl of previewUrls) {
+        URL.revokeObjectURL(previewUrl);
       }
-      setError(errorCopy(uploadError));
+      if (!rollbackComplete) {
+        setError(
+          'The upload failed, and cleanup could not finish. Wait a moment before trying again.',
+        );
+      } else {
+        setError(uploadError instanceof Error ? uploadFailureMessage : errorCopy(uploadError));
+      }
     } finally {
       setUploading(false);
     }
@@ -229,7 +280,27 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
         photos: photos.map((photo) => photo.storagePath),
         birthDate,
       });
-      await repo.submitInterest(campaignId, note.trim() === '' ? null : note.trim());
+      // Text moderation (Slice 2): 'flagged' blocks honestly here;
+      // 'unavailable' defers to the DB gate, which fails closed while
+      // media_validation_enforcement is on.
+      const { data: sessionData } = await client.auth.getSession();
+      const moderationToken = sessionData.session?.access_token ?? '';
+      const trimmedNote = note.trim();
+      const bioVerdict = await requestTextModeration('profile_bio', bio.trim(), moderationToken);
+      const noteVerdict = await requestTextModeration(
+        'interest_note',
+        trimmedNote,
+        moderationToken,
+      );
+      if (bioVerdict === 'flagged' || noteVerdict === 'flagged') {
+        setError(
+          bioVerdict === 'flagged'
+            ? 'Your bio did not pass moderation. Edit the wording and try again.'
+            : 'Your note did not pass moderation. Edit the wording and try again.',
+        );
+        return;
+      }
+      await repo.submitInterest(campaignId, trimmedNote === '' ? null : trimmedNote);
       trackEvent(client, 'interest_submitted', {
         campaign_id: campaignId,
         source: window.sessionStorage.getItem('fw_attribution'),
@@ -397,12 +468,30 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
                 <span className={styles.label}>Current photos (at least 2)</span>
                 <div className={styles.photoGrid}>
                   {photos.map((photo, index) => (
-                    <img
-                      key={photo.storagePath}
-                      className={styles.photo}
-                      src={photo.previewUrl}
-                      alt={`Your photo ${index + 1}`}
-                    />
+                    <figure key={photo.storagePath} style={{ margin: 0 }}>
+                      <img
+                        className={styles.photo}
+                        src={photo.previewUrl}
+                        alt={`Your photo ${index + 1}`}
+                      />
+                      <button
+                        className={styles.quietAction}
+                        type="button"
+                        onClick={() => {
+                          if (photo.previewUrl.startsWith('blob:')) {
+                            URL.revokeObjectURL(photo.previewUrl);
+                          }
+                          setPhotos((current) =>
+                            current.filter(
+                              (candidate) => candidate.storagePath !== photo.storagePath,
+                            ),
+                          );
+                          setError(null);
+                        }}
+                      >
+                        Remove photo {index + 1}
+                      </button>
+                    </figure>
                   ))}
                 </div>
                 <input
@@ -410,7 +499,7 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
                   type="file"
                   accept="image/*"
                   multiple
-                  disabled={uploading}
+                  disabled={uploading || photos.length >= MAX_PROFILE_PHOTOS}
                   onChange={(event) => {
                     void handlePhotoUpload(event);
                   }}

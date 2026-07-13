@@ -105,3 +105,31 @@ UPDATE app_config SET value = 'on'  -- 또는 'off'
 ```sql
 SELECT * FROM ops_alerts WHERE alert_type = 'campaign_auto_paused' AND resolved_at IS NULL;
 ```
+
+## Orphan media cleanup (0025 이후)
+
+`pitch-media`와 `profile-media`의 미참조 객체는 기본 dry-run으로 먼저 점검합니다.
+스크립트는 Storage 경로나 사용자 ID를 출력하지 않고 bucket별 집계만 기록합니다.
+
+```sh
+node scripts/cleanup-orphan-media.mjs
+node scripts/cleanup-orphan-media.mjs --apply
+```
+
+삭제 후보는 다음 조건을 모두 만족해야 합니다.
+
+- 생성 후 48시간이 지남
+- `pitch_assets.storage_path`에서 참조되지 않음
+- `dating_profiles.photos`에서 참조되지 않음
+- `consent_revisions.voice_asset_path` 또는 현재 남아 있는 `asset_ids`에서 참조되지 않음
+- published/paused campaign의 convention voice path가 아님
+
+`consent_revisions.asset_ids`는 과거 사진의 immutable path를 직접 보존하지 않습니다.
+따라서 consent revision이 하나라도 있는 draft prefix는 보수적으로 전부 보호합니다. 이
+경계는 승인·검토된 과거 사진을 orphan으로 오인해 삭제하는 것보다 일부 객체를 더
+보존하는 쪽을 선택한 것입니다.
+
+운영자는 dry-run의 `unknown_age`가 0인지 확인하고 bucket별 후보 수가 예상 범위인지
+검토한 뒤에만 `--apply`를 실행합니다. 실행 중 참조 원장 조회나 Storage listing이 하나라도
+실패하면 삭제 단계에 진입하지 않습니다. 초기에는 매일 1회 실행하고, 후보 수와 실패율이
+안정된 뒤 주기를 조정합니다.

@@ -52,6 +52,7 @@ type FlowState =
   | { readonly step: 'signin'; readonly preview: ConsentPreview }
   | { readonly step: 'link-sent'; readonly preview: ConsentPreview; readonly email: string }
   | { readonly step: 'claiming'; readonly preview: ConsentPreview }
+  | { readonly step: 'contact-mismatch'; readonly preview: ConsentPreview }
   | {
       readonly step: 'name-confirmation';
       readonly preview: ConsentPreview;
@@ -69,7 +70,7 @@ type FlowState =
   | { readonly step: 'publishing'; readonly preview: ConsentPreview }
   | { readonly step: 'error'; readonly message: string };
 
-function claimErrorMessage(error: unknown): string {
+function claimErrorDetail(error: unknown): string {
   const cause = error instanceof DataLayerError ? error.cause : error;
   // PostgREST errors are plain objects in some supabase-js versions, so read
   // .message structurally instead of requiring an Error instance.
@@ -82,6 +83,11 @@ function claimErrorMessage(error: unknown): string {
       : typeof cause === 'string'
         ? cause
         : String(cause);
+
+  return detail;
+}
+
+function claimErrorMessage(detail: string): string {
   const known = CLAIM_ERROR_COPY.find(([fragment]) => detail.includes(fragment));
 
   return known?.[1] ?? 'Something went wrong on our side. Refresh the page to try again.';
@@ -111,6 +117,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   const [state, setState] = useState<FlowState>({ step: 'loading' });
   const [email, setEmail] = useState('');
   const [sendingLink, setSendingLink] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [displayName, setDisplayName] = useState('');
   const [confirmingName, setConfirmingName] = useState(false);
   const [displayNameError, setDisplayNameError] = useState<string | null>(null);
@@ -130,7 +137,6 @@ export function ConsentFlow({ token }: { readonly token: string }) {
       try {
         await ensureUserRow(activeClient);
         const { pitchDraftId } = await repo.claim(token);
-        trackEvent(activeClient, 'dater_verified', { pitch_draft_id: pitchDraftId });
         const draft = await repo.getDraftForReview(pitchDraftId);
         const voiceUrl = await repo.createVoicePlaybackUrl(pitchDraftId).catch(() => null);
         const assets = await repo.listAssets(pitchDraftId).catch(() => []);
@@ -158,7 +164,12 @@ export function ConsentFlow({ token }: { readonly token: string }) {
           throw error;
         }
         claimStartedRef.current = false;
-        setState({ step: 'error', message: claimErrorMessage(error) });
+        const detail = claimErrorDetail(error);
+        if (detail.includes('different contact')) {
+          setState({ step: 'contact-mismatch', preview });
+          return;
+        }
+        setState({ step: 'error', message: claimErrorMessage(detail) });
       }
     },
     [token],
@@ -256,7 +267,35 @@ export function ConsentFlow({ token }: { readonly token: string }) {
       if (!(error instanceof Error)) {
         throw error;
       }
-      setState({ step: 'error', message: claimErrorMessage(error) });
+      setState({ step: 'error', message: claimErrorMessage(claimErrorDetail(error)) });
+    }
+  }
+
+  async function handleRetryWithAnotherEmail() {
+    if (client === null || state.step !== 'contact-mismatch') {
+      return;
+    }
+
+    const { preview } = state;
+    setSigningOut(true);
+    try {
+      const { error } = await client.auth.signOut();
+      if (error !== null) {
+        throw error;
+      }
+      claimStartedRef.current = false;
+      setEmail('');
+      setState({ step: 'signin', preview });
+    } catch (error: unknown) {
+      if (!(error instanceof Error)) {
+        throw error;
+      }
+      setState({
+        step: 'error',
+        message: 'We could not sign you out. Refresh the page and try again.',
+      });
+    } finally {
+      setSigningOut(false);
     }
   }
 
@@ -323,6 +362,27 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                 ? 'You already approved this pitch — it’s live.'
                 : 'This invite is no longer active.'}
             </p>
+          </section>
+        )}
+
+        {state.step === 'contact-mismatch' && (
+          <section className={styles.card}>
+            <span className={styles.badge}>Email mismatch</span>
+            <h1 className={styles.title}>Use the email that received this invite.</h1>
+            <p className={styles.lede}>
+              This invite was sent to a different email address. Sign in with the email that
+              received it.
+            </p>
+            <button
+              className={styles.secondary}
+              type="button"
+              disabled={signingOut}
+              onClick={() => {
+                void handleRetryWithAnotherEmail();
+              }}
+            >
+              {signingOut ? 'Signing out…' : 'Sign out and use another email'}
+            </button>
           </section>
         )}
 

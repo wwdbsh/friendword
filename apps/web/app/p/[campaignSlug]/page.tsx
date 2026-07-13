@@ -127,9 +127,11 @@ export default async function PitchPage({ params }: PitchPageProps) {
         </span>
         <div>
           <h2 id="trust-heading">{pitch.daterName} stays in control.</h2>
+          {/* TODO(identity-provider): Restore identity-verification copy after verification ships. */}
           <p>
             {pitch.daterName} approved every photo, word, and audience choice before this page went
-            live. Only verified profiles can send interest, and contact details stay private.
+            live. Interest requires signing in and completing a dating profile with 2 photos, a bio,
+            and dating intent. Contact details stay private.
           </p>
         </div>
       </section>

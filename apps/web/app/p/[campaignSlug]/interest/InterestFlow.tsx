@@ -235,11 +235,12 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
 
         {client !== null && !loading && session === null && (
           <section className={styles.card}>
-            <span className={styles.badge}>Verified interest</span>
+            {/* TODO(identity-provider): Restore verified-interest copy after verification ships. */}
+            <span className={styles.badge}>Profile-backed interest</span>
             <h1 className={styles.title}>Want to meet {daterName}?</h1>
             <EmailSignIn
               client={client}
-              reason={`${daterName} only sees interest from verified, signed-in people — never anonymous taps.`}
+              reason={`${daterName} only reviews interest from signed-in people who complete a dating profile — never anonymous taps.`}
             />
           </section>
         )}
@@ -283,7 +284,7 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
           prefillDone &&
           displayNameLoaded && (
             <section className={styles.card}>
-              <span className={styles.badge}>Verified interest</span>
+              <span className={styles.badge}>Profile-backed interest</span>
               <h1 className={styles.title}>Introduce yourself to {daterName}.</h1>
               <p className={styles.muted}>
                 {daterName} sees this profile before deciding. Contact details are never shared.

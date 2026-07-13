@@ -271,8 +271,8 @@ export function InboxView() {
               <section className={styles.card}>
                 <h2 className={styles.subTitle}>No interest yet.</h2>
                 <p className={styles.muted}>
-                  When someone sends verified interest on your page, their profile shows up here for
-                  you to accept or decline.
+                  When someone with a complete dating profile sends interest on your page, their
+                  profile shows up here for you to accept or decline.
                 </p>
               </section>
             )}

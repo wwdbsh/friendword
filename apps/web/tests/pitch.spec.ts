@@ -17,7 +17,7 @@ async function waitForAnimations(locator: Locator): Promise<void> {
     .toBe(true);
 }
 
-test('plays the pitch and opens verified interest when the demo campaign is viewed', async ({
+test('plays the pitch and opens the interest flow when the demo campaign is viewed', async ({
   page,
 }) => {
   const pageErrors: string[] = [];
@@ -52,11 +52,16 @@ test('plays the pitch and opens verified interest when the demo campaign is view
     await page.getByRole('button', { name: 'Play Maya’s pitch' }).click();
   });
 
-  await test.step('Then progress advances and interest routes to the verified flow', async () => {
+  await test.step('Then progress advances and interest routes to the profile flow', async () => {
     await expect
       .poll(() => page.locator('[class*="timeRow"] span').first().textContent())
       .not.toBe('0:00');
     await page.screenshot({ path: '/tmp/friendword-pitch-playing.png', fullPage: false });
+    await expect(
+      page.getByText(
+        'Interest requires signing in and completing a dating profile with 2 photos, a bio, and dating intent.',
+      ),
+    ).toBeVisible();
     const interestButton = page.getByRole('link', { name: "I'm interested" }).first();
     await page.keyboard.press('Tab');
     await expect(interestButton).toBeFocused();

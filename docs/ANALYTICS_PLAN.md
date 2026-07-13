@@ -13,14 +13,12 @@ introducer_started
 voice_recorded
 draft_generated
 consent_sent
-dater_verified
 draft_changes_requested
 pitch_approved
 campaign_published
 campaign_shared
 pitch_viewed_unique
 interest_started
-interest_verified
 interest_submitted
 interest_accepted
 intro_room_created

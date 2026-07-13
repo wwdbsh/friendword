@@ -210,6 +210,85 @@ test('explains when the invite was claimed by a different account', async ({ pag
   ).toBeVisible();
 });
 
+test('explains a contact mismatch and lets the dater retry with another email', async ({
+  page,
+}) => {
+  await mockPreview(page, [pendingPreviewRow]);
+  await seedSignedInSession(page);
+  await mockUserBootstrap(page, { displayName: 'Blair', confirmed: true });
+  await page.route('**/rest/v1/rpc/claim_consent_request*', (route) =>
+    route.fulfill({
+      status: 400,
+      json: {
+        code: 'P0001',
+        message: 'consent invite was sent to a different contact',
+        details: null,
+        hint: null,
+      },
+    }),
+  );
+  let logoutCalls = 0;
+  await page.route('**/auth/v1/logout*', (route) => {
+    logoutCalls += 1;
+    return route.fulfill({ status: 204 });
+  });
+
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+
+  await test.step('Then the mismatch names the cause and required account', async () => {
+    await expect(
+      page.getByRole('heading', { name: 'Use the email that received this invite.' }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        'This invite was sent to a different email address. Sign in with the email that received it.',
+      ),
+    ).toBeVisible();
+
+    for (const viewport of [
+      { name: 'mobile', width: 375, height: 812 },
+      { name: 'tablet', width: 768, height: 1024 },
+      { name: 'desktop', width: 1280, height: 900 },
+    ] as const) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      const hasHorizontalOverflow = await page.evaluate(
+        () => document.documentElement.scrollWidth > window.innerWidth,
+      );
+      expect(hasHorizontalOverflow).toBe(false);
+      await page.screenshot({
+        path: `/tmp/friendword-consent-contact-mismatch-${viewport.name}.png`,
+        fullPage: true,
+      });
+    }
+  });
+
+  await test.step('When the dater chooses another email, the current session is signed out', async () => {
+    const retryButton = page.getByRole('button', { name: 'Sign out and use another email' });
+    await retryButton.focus();
+    await expect(retryButton).toBeFocused();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await page.screenshot({
+      path: '/tmp/friendword-consent-contact-mismatch-focus.png',
+      fullPage: false,
+    });
+    await retryButton.click();
+    await expect(page.getByLabel('Your email')).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => window.localStorage.getItem('friendword-web-auth')))
+      .toBeNull();
+    await page.screenshot({
+      path: '/tmp/friendword-consent-contact-mismatch-retry.png',
+      fullPage: true,
+    });
+    expect(logoutCalls).toBe(1);
+  });
+});
+
 test('closes politely when the request was already approved', async ({ page }) => {
   await mockPreview(page, [{ ...pendingPreviewRow, request_status: 'approved' }]);
 

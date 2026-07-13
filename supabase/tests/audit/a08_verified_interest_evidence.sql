@@ -1,5 +1,5 @@
 -- AUDIT REGRESSION: P0-8, 감사 문서 §5 "Verified Interest 서버 증거".
--- 현재 실패 이유: 과거 birth_date와 photos 문자열 배열 길이만으로 submit_interest가 성공한다.
+-- 초기 실패 이유는 self-asserted profile만 검사한 것이며, Slice C 0012로 PASS한다.
 
 BEGIN;
 

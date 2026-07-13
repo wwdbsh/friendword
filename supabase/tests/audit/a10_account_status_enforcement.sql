@@ -1,5 +1,5 @@
 -- AUDIT REGRESSION: 감사 문서 §10, suspended account enforcement.
--- 현재 실패 이유: 주요 RPC와 messages RLS/trigger가 users.account_status를 검사하지 않는다.
+-- 초기 실패 이유는 account_status 미강제였고, Slice C 0012로 PASS한다.
 
 BEGIN;
 
@@ -61,27 +61,31 @@ VALUES
     ],
     'long-term'
   );
-INSERT INTO storage.objects (bucket_id, name, owner_id)
+INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
 VALUES
   (
     'profile-media',
     'a1000000-0000-0000-0000-000000000002/audit-one.jpg',
-    'a1000000-0000-0000-0000-000000000002'
+    'a1000000-0000-0000-0000-000000000002',
+    '{"mimetype":"image/jpeg"}'
   ),
   (
     'profile-media',
     'a1000000-0000-0000-0000-000000000002/audit-two.jpg',
-    'a1000000-0000-0000-0000-000000000002'
+    'a1000000-0000-0000-0000-000000000002',
+    '{"mimetype":"image/jpeg"}'
   ),
   (
     'profile-media',
     'a1000000-0000-0000-0000-000000000003/audit-one.jpg',
-    'a1000000-0000-0000-0000-000000000003'
+    'a1000000-0000-0000-0000-000000000003',
+    '{"mimetype":"image/jpeg"}'
   ),
   (
     'profile-media',
     'a1000000-0000-0000-0000-000000000003/audit-two.jpg',
-    'a1000000-0000-0000-0000-000000000003'
+    'a1000000-0000-0000-0000-000000000003',
+    '{"mimetype":"image/jpeg"}'
   );
 INSERT INTO verification_checks (
   user_id,

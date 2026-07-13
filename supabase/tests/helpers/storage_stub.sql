@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS storage.objects (
   bucket_id TEXT NOT NULL REFERENCES storage.buckets(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   owner_id TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (bucket_id, name)
 );

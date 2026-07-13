@@ -19,11 +19,11 @@
 | 파일                                 | 결과 |
 | ------------------------------------ | ---- |
 | `a01_web_user_bootstrap.sql`         | PASS |
-| `a02_claim_and_verification.sql`     | FAIL |
+| `a02_claim_and_verification.sql`     | PASS |
 | `a03_consent_immutability.sql`       | FAIL |
 | `a04_commerce_ledger.sql`            | FAIL |
-| `a08_verified_interest_evidence.sql` | FAIL |
+| `a08_verified_interest_evidence.sql` | PASS |
 | `a09_publish_photo_guard.sql`        | FAIL |
-| `a10_account_status_enforcement.sql` | FAIL |
+| `a10_account_status_enforcement.sql` | PASS |
 
 후속 slice는 실제 실행 결과가 바뀔 때 이 표도 함께 갱신해야 합니다.

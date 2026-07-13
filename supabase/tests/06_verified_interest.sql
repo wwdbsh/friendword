@@ -1,6 +1,7 @@
 -- Flow C journey: a viewer completes their dating profile, submits verified
 -- interest on the published campaign (20..01, owner user2), the owner reads
 -- the sanitized inbox, and accept/decline transitions open the intro room.
+-- Slice C uses real caller-owned storage objects so photo evidence stays enforceable.
 
 BEGIN;
 
@@ -27,10 +28,27 @@ INSERT INTO dating_profiles (user_id, bio, photos, dating_intent, approximate_lo
 VALUES (
   '00000000-0000-0000-0000-000000000004',
   'Weekend hikes and jazz bars.',
-  ARRAY['local/drew-1.jpg', 'local/drew-2.jpg'],
+  ARRAY[
+    '00000000-0000-0000-0000-000000000004/drew-1.jpg',
+    '00000000-0000-0000-0000-000000000004/drew-2.jpg'
+  ],
   'long-term',
   'Seoul'
 );
+INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+VALUES
+  (
+    'profile-media',
+    '00000000-0000-0000-0000-000000000004/drew-1.jpg',
+    '00000000-0000-0000-0000-000000000004',
+    '{"mimetype":"image/jpeg"}'
+  ),
+  (
+    'profile-media',
+    '00000000-0000-0000-0000-000000000004/drew-2.jpg',
+    '00000000-0000-0000-0000-000000000004',
+    '{"mimetype":"image/jpeg"}'
+  );
 
 CREATE TEMP TABLE interest_journey (interest_id UUID) ON COMMIT DROP;
 GRANT ALL ON interest_journey TO anon, authenticated;
@@ -175,8 +193,25 @@ $$;
 --    on the same campaign and gets declined without an intro room.
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000001';
 UPDATE dating_profiles
-   SET photos = ARRAY['local/alex-1.jpg', 'local/alex-2.jpg']
+   SET photos = ARRAY[
+     '00000000-0000-0000-0000-000000000001/alex-1.jpg',
+     '00000000-0000-0000-0000-000000000001/alex-2.jpg'
+   ]
  WHERE user_id = '00000000-0000-0000-0000-000000000001';
+INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+VALUES
+  (
+    'profile-media',
+    '00000000-0000-0000-0000-000000000001/alex-1.jpg',
+    '00000000-0000-0000-0000-000000000001',
+    '{"mimetype":"image/jpeg"}'
+  ),
+  (
+    'profile-media',
+    '00000000-0000-0000-0000-000000000001/alex-2.jpg',
+    '00000000-0000-0000-0000-000000000001',
+    '{"mimetype":"image/jpeg"}'
+  );
 
 CREATE TEMP TABLE decline_journey (interest_id UUID) ON COMMIT DROP;
 GRANT ALL ON decline_journey TO anon, authenticated;

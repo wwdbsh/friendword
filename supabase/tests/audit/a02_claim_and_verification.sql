@@ -1,5 +1,5 @@
 -- AUDIT REGRESSION: P0-2, 감사 문서 §5 "Fake 소개 방어와 verified 의미".
--- 현재 실패 이유: invite contact hash가 없고 claim/publish가 verification_checks를 검사하지 않는다.
+-- 초기 실패 이유는 contact binding과 verification gate 부재였고, Slice C 0012로 PASS한다.
 
 BEGIN;
 

@@ -23,6 +23,22 @@ jobs:
       - run: pnpm --filter @friendword/web build
       - run: pnpm --filter @friendword/web test:audit
 
+  web-e2e:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://ci-mock.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @friendword/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @friendword/web test:e2e
+
   db-tests:
     runs-on: ubuntu-latest
     services:

@@ -10,6 +10,7 @@ import {
 } from '@friendword/domain';
 import { createBrowserClient } from '@friendword/data';
 
+import { isActiveAccount } from '@/lib/accountStatus';
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
 
 export const dynamic = 'force-dynamic';
@@ -75,6 +76,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'authentication required' }, { status: 401 });
   }
   const callerId = userData.user.id;
+  if (!(await isActiveAccount(serviceClient, callerId))) {
+    return NextResponse.json({ error: 'account is not active' }, { status: 403 });
+  }
 
   const ownerPrefix = objectName.split('/')[0] ?? '';
   if (bucket === 'profile-media') {

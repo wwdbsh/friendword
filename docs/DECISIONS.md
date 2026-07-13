@@ -95,3 +95,10 @@
 - **이유**: 1차와 동일한 패턴 — 합격 기준을 실행 가능한 형태로 먼저 고정하고 슬라이스 완료 정의를 "해당 테스트 그린 전환"으로 관찰 가능하게 만듭니다.
 - **검토 대안**: 슬라이스별 테스트 후행 작성(감사 §7 Slice 0 지시 위반).
 - **영향**: b06(identity evidence schema), b07(provider usage RPC), b08(ai consent), b10(만료 상태 기계)은 Advisor가 확정한 미래 계약(테이블·RPC 시그니처)을 선인코딩하며, 해당 슬라이스 설계가 계약을 바꾸면 테스트와 이 기록을 함께 갱신합니다.
+
+## 2026-07-13: 신고 남용 방어 정책 (P0-1) — distinct identity·dedupe·restrictive read
+
+- **결정**: (1) auto-pause는 신고 행 수가 아니라 **신뢰 가능한 distinct reporter identity**(authenticated user id, 익명은 salted IP hash)를 셉니다. hash 없는 legacy 익명 행은 카운트에서 제외합니다. (2) 같은 target+reason+identity의 24시간 내 반복 신고는 BEFORE INSERT 트리거로 dedupe하며, authenticated에게는 정직한 오류를, 익명 경로는 oracle 방지를 위해 조용히 스킵합니다. (3) `x-forwarded-for`는 신뢰 프록시가 append한 **마지막 값**만 identity로 사용합니다. (4) suspended/deleted 계정의 민감 테이블 SELECT는 테이블별 RESTRICTIVE 정책(`private.account_is_active`)으로 일괄 철회합니다(users/profiles/deletion_requests는 상태 표시를 위해 유지). (5) `/api/transcribe`·`/api/media/validate`는 provider 비용 발생 전 active account를 확인합니다.
+- **이유**: 2차 감사 P0-1(익명 신고 2건 self-DoS)·H-1(계정 상태 read 미강제). 임계치 2 distinct는 유지하되 identity 위조 비용을 올리는 것이 목적입니다.
+- **검토 대안**: 익명 전용 CAPTCHA(무가입 신고 마찰 증가, 후속 검토 가능), 익명 2건은 pause 대신 ops review만(피해자 보호 지연 — 서로 다른 IP 2건은 pause 유지로 결정), 기존 permissive 정책 개별 수정(누락 위험, RESTRICTIVE가 전 정책에 AND로 걸림).
+- **영향**: migration 0024, 신고 라우트 proxy trust 수정, audit2 b01(워커)·b11(Advisor) 그린 전환. 두 identity가 같은 NAT 뒤에 있으면 1명으로 계산되는 한계는 수용(잔여 위험으로 기록).

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
+import { reporterIpFromForwardedHeader } from '@/lib/reporterIdentity';
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
 
 export const dynamic = 'force-dynamic';
@@ -21,9 +22,9 @@ const REPORTS_PER_HOUR_PER_IP = 5;
 const REPORTS_PER_HOUR_PER_CAMPAIGN = 20;
 
 function hashIp(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+  const clientIp = reporterIpFromForwardedHeader(request.headers.get('x-forwarded-for'));
   const salt = process.env.SUPABASE_SERVICE_ROLE_KEY ?? 'friendword-report';
-  return createHash('sha256').update(`${salt}:${forwarded}`).digest('hex');
+  return createHash('sha256').update(`${salt}:${clientIp}`).digest('hex');
 }
 
 /**

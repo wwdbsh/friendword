@@ -15,6 +15,7 @@
 | `b08_ai_processing_consent.sql`     | P0-10     | 외부 AI 처리 동의 없이는 provider 사용 예약 불가                          | Slice 6            |
 | `b09_launch_gates.sql`              | Slice 0   | real payments·public beta 서버 차단 (0023) — **처음부터 그린**            | Slice 0            |
 | `b10_expiration_consistency.sql`    | H-5       | 만료 캠페인의 status/public read/resume 일관성                            | Slice 9            |
+| `b11_account_read_enforcement.sql`  | H-1       | suspended/deleted 계정의 민감 read 철회 (0024 restrictive 정책)           | Slice 1            |
 
 웹훅 DB 계약(P0-3)은 Slice 3에서 RPC 재설계와 함께 `b03_*.sql`로 추가합니다. route 레벨 계약은 `apps/web/tests-audit2/revenuecat-realistic.audit2.test.ts`가 선행 인코딩합니다.
 

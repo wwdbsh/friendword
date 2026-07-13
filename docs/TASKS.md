@@ -12,12 +12,13 @@
 
 운영 메모: Advisor(직접 구현 병행) + `friendword-codex-1` 2인 체제 유지. 제품 상태 판정은 "기능성 베타 — 실결제·외부 공개 차단"이며 launch gate(0023)가 서버에서 강제한다. audit2 스위트는 초기 FAIL이 정상(기대 동작 인코딩), Slice 10에서 CI 편입.
 
-| Session              | 작업                                                                                              | Acceptance criteria                                                         | Status  | Updated    |
-| -------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------- | ---------- |
-| Advisor              | Slice 0: launch gates(0023)·seed 게이트·e2e 토글·audit2 러너·b09·문서 truth reset                 | b09 그린 + 기존 DB 스위트/audit 7/7 그린 유지 + 문서 5종 동기화             | 진행 중 | 2026-07-13 |
-| `friendword-codex-1` | Slice 0: audit2 실패 회귀 스위트 b01~b08·b10 + 웹훅 실payload 테스트 (`.briefs/24`)               | 각 파일 단독 실행 가능, FAIL 사유가 감사 항목과 일치, lint/format 통과      | 진행 중 | 2026-07-13 |
-| 예정                 | Slice 1~9: 감사 §7 순서대로 (신고→media→RevenueCat→유료가치→identity→비용→Dater→데모·영어→growth) | 각 슬라이스의 audit2 테스트 그린 전환 + §12 승인 형식 보고                  | 예정    | 2026-07-13 |
-| 예정                 | Slice 10: release gate                                                                            | 감사 §7 Slice 10 체크리스트 전부 + audit2 CI 편입 + launch gate 해제 재판단 | 예정    | 2026-07-13 |
+| Session              | 작업                                                                                              | Acceptance criteria                                                         | Status                                                           | Updated    |
+| -------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------- | ---------- |
+| Advisor              | Slice 0: launch gates(0023)·seed 게이트·e2e 토글·audit2 러너·b09·문서 truth reset                 | b09 그린 + 기존 DB 스위트/audit 7/7 그린 유지 + 문서 5종 동기화             | 승인 (e9de0de, hosted 0023 배포·게이트 off 검증)                 | 2026-07-13 |
+| `friendword-codex-1` | Slice 0: audit2 실패 회귀 스위트 b01~b08·b10 + 웹훅 실payload 테스트 (`.briefs/24`)               | 각 파일 단독 실행 가능, FAIL 사유가 감사 항목과 일치, lint/format 통과      | 승인 (7fe7c5a, Advisor 재실행 DB 4/10·웹 3/5 red-by-design 확인) | 2026-07-13 |
+| Advisor              | Slice 1: 0024(신고 dedupe·distinct pause·restrictive read)·proxy trust·계정 가드·b11              | b01/b11 그린 + 기존 스위트 그린 유지 + E2E·브라우저 신고 QA                 | 진행 중                                                          | 2026-07-13 |
+| 예정                 | Slice 1~9: 감사 §7 순서대로 (신고→media→RevenueCat→유료가치→identity→비용→Dater→데모·영어→growth) | 각 슬라이스의 audit2 테스트 그린 전환 + §12 승인 형식 보고                  | 예정                                                             | 2026-07-13 |
+| 예정                 | Slice 10: release gate                                                                            | 감사 §7 Slice 10 체크리스트 전부 + audit2 CI 편입 + launch gate 해제 재판단 | 예정                                                             | 2026-07-13 |
 
 ## 2026-07-13 감사 대응 (source of truth: docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md §7, 순서 A→J 고정)
 

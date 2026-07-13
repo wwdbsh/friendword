@@ -95,3 +95,13 @@ SELECT key, value, updated_at FROM app_config
 UPDATE app_config SET value = 'on'  -- 또는 'off'
  WHERE key = 'real_payments_enabled';
 ```
+
+## 신고 auto-pause 정책 (0024 이후)
+
+- 24시간 내 **distinct reporter identity 2개 이상**의 high-severity 신고(campaign 대상)가 있어야 자동 pause됩니다. identity는 authenticated user id 또는 익명 salted IP hash이며, hash 없는 legacy 익명 행은 카운트되지 않습니다.
+- 같은 target+reason+identity의 24시간 내 반복 신고는 저장되지 않습니다(dedupe).
+- 자동 pause 시 `ops_alerts`에 `campaign_auto_paused`가 남습니다. 확인 쿼리:
+
+```sql
+SELECT * FROM ops_alerts WHERE alert_type = 'campaign_auto_paused' AND resolved_at IS NULL;
+```

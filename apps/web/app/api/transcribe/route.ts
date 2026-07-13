@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { createProviders, ProviderNotImplementedError } from '@friendword/adapters';
 import { createBrowserClient, isTranscriptionEditableStatus } from '@friendword/data';
 
+import { isActiveAccount } from '@/lib/accountStatus';
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
 
 export const dynamic = 'force-dynamic';
@@ -41,6 +42,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   const { data: userData, error: userError } = await authClient.auth.getUser(accessToken);
   if (userError !== null || userData.user === null) {
     return NextResponse.json({ error: 'authentication required' }, { status: 401 });
+  }
+  if (!(await isActiveAccount(serviceClient, userData.user.id))) {
+    return NextResponse.json({ error: 'account is not active' }, { status: 403 });
   }
 
   const { data: draft, error: draftError } = await serviceClient

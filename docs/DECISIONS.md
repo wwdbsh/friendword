@@ -144,3 +144,10 @@
 - **이유**: 2차 감사 CP-1("모든 단어·사진·audience 통제")·CP-2("구조화된 friend voice 표현"). 통제권은 UI 편의가 아니라 서버 invariant여야 하며(감사 §12), snapshot 발행은 "Dater가 본 것=공개된 것"을 hash로 보증한다.
 - **검토 대안**: draft 직접 UPDATE 허용(승인 대상과 공개본의 동일성 붕괴 — 기각), audience 필터를 웹 interest 플로우에서만 검사(직접 insert 우회 — 트리거 채택), 위치 정밀도 region 구현을 위한 지오코딩(현 데이터는 approximate_location 문자열뿐 — city=현행 노출, hidden=미노출, region은 동일 문자열 정책으로 시작).
 - **영향**: audit2 b13 그린(12/13, 잔여 red는 b10뿐). 웹 ConsentFlow에 편집·업로드·공개 설정·프로필 확인 UI(codex-1), `/p` 공개 페이지에 승인 body+transcript 섹션. trust note 카피를 실제 통제권 범위로 갱신. 남은 CP-2 항목인 word-level timestamp 하이라이트는 세그먼트 단위로 시작(whisper verbose_json word 단위는 비용·정밀도 재평가 후).
+
+## 2026-07-13: 데모는 정직한 서면 프리뷰, 공개 표면은 영어 기본 (Slice 8, CP-3·CP-4)
+
+- **결정**: (1) **Blair 데모에서 가짜 재생을 제거**한다 — 오디오가 없는 pitch는 Play 버튼·타임라인·타이머를 렌더하지 않고, 전체 서면 피치와 "No voice recording in this preview" 정직 표기를 보여준다. 랜딩 데모 밴드 카피도 "데모에는 음성이 없고 실제 페이지는 친구의 실제 음성을 재생한다"로 고친다. 권리 확보된 실제 데모 음성 녹음은 사용자 결정(직접 녹음 등) 뒤에 언제든 fixture `audioUrl`로 끼울 수 있다 — 코드 경로는 이미 실오디오를 지원한다. AI 합성 음성은 "Introducer 원본 음성" 경계(§CLAUDE 8)와 충돌하므로 채택하지 않는다. (2) **첫 출시 locale은 영어** — 랜딩·공개 피치·OG·모바일 잔여 문자열을 영어로 전환하고, Playwright(§8-16)와 프로덕션 E2E가 `lang="en"`+한글 0자를 회귀로 고정한다(한국어는 후속 locale로 재도입 가능, 기본값 금지). (3) Creator kit 전달을 E2E로 고정: revoked credit 후 재구매 허용→unlock 1회 소비→재진입 idempotent→9:16 카드 렌더(10g~10j).
+- **이유**: 2차 감사 CP-3(가짜 재생은 Grand Prize 대표 데모에서 불허)·CP-4(북미 영어권 타깃)·§7 Slice 8(Creator 결과물 e2e). E2E가 한국어를 기대하던 잘못된 고정도 함께 제거.
+- **검토 대안**: TTS 데모 음성(원본 음성 경계 위반·기만 위험 — 기각), 데모 유지+각주(Play가 동작하는 것처럼 보이는 한 기만 — 기각), 한국어 병행 기본(북미 acquisition 불일치 — 기각).
+- **영향**: `PitchPlayer`가 no-audio 모드를 얻고 fixture 데모가 서면 프리뷰가 된다. landing/pitch Playwright 스펙 영어 전환+한글 회귀 추가(39 passed). 프로덕션 E2E 10e~10j 추가. 남은 한글은 코드 주석의 한국어 문서 섹션명 인용뿐(제품 카피 아님). App Store/email 카피는 해당 표면 구축 시 영어 기준으로 작성한다.

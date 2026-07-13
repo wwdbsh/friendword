@@ -51,6 +51,7 @@ const created = {
   voicePath: null,
   purchaseEventIds: [],
   purchaseOriginalTransactionId: null,
+  kitOriginalTransactionId: null,
 };
 let failures = 0;
 
@@ -380,7 +381,7 @@ try {
   const { error: requestChangesError } = await dater.client.rpc('respond_consent_request', {
     draft_id: draft.id,
     action: 'request_changes',
-    note: '사진 바꿔줘',
+    note: 'Please swap the second photo.',
   });
   const { data: changesRequestedDraft, error: changesRequestedError } = await introducer.client
     .from('pitch_drafts')
@@ -764,6 +765,92 @@ try {
     check('10. /p/[slug] renders real data (names + signed audio)', false, error.message);
   }
 
+  // 10e/10f. Slice 8: English-first public surface and the honest demo.
+  const landingResponse = await fetch('http://localhost:3000/');
+  const landingHtml = await landingResponse.text();
+  check(
+    '10e. landing ships English (lang="en", zero Korean copy)',
+    landingResponse.ok && landingHtml.includes('lang="en"') && !/[가-힣]/.test(landingHtml),
+    `status=${landingResponse.status}`,
+  );
+  const demoResponse = await fetch('http://localhost:3000/p/demo-blair');
+  const demoHtml = await demoResponse.text();
+  check(
+    '10f. Blair demo has no fake playback (no audio element, honest note)',
+    demoResponse.ok &&
+      !demoHtml.includes('<audio') &&
+      demoHtml.includes('No voice recording in this preview') &&
+      !/[가-힣]/.test(demoHtml),
+    `status=${demoResponse.status}`,
+  );
+
+  // 10g~10j. Slice 8: the Creator kit delivers end-to-end after publish.
+  // The step-7 credit was revoked by the cancellation, so a fresh purchase
+  // is allowed and funds the unlock.
+  const { data: kitIntentRows, error: kitIntentError } = await introducer.client.rpc(
+    'issue_purchase_intent',
+    { product_id: 'creator_launch_credit_499', scope_id: draft.id },
+  );
+  const kitIntentId = kitIntentRows?.[0]?.purchase_intent_id;
+  check(
+    '10g. a fresh creator intent is issued once no live benefit remains',
+    !kitIntentError && typeof kitIntentId === 'string',
+    kitIntentError?.message,
+  );
+  const kitPurchaseEventId = `e2e-kit-purchase-${stamp}`;
+  const kitOriginalTransactionId = `e2e-kit-original-${stamp}`;
+  created.purchaseEventIds.push(kitPurchaseEventId);
+  created.kitOriginalTransactionId = kitOriginalTransactionId;
+  const { error: kitPurchaseError } = await admin.rpc('record_revenuecat_event', {
+    payload: {
+      id: kitPurchaseEventId,
+      type: 'INITIAL_PURCHASE',
+      app_user_id: introducer.id,
+      product_id: 'creator_launch_credit_499',
+      purchased_at_ms: Date.now(),
+      expiration_at_ms: null,
+      transaction_id: `e2e-kit-tx-${stamp}`,
+      original_transaction_id: kitOriginalTransactionId,
+      environment: 'SANDBOX',
+      aliases: [],
+      original_app_user_id: introducer.id,
+      subscriber_attributes: { purchase_intent_id: { value: kitIntentId } },
+    },
+  });
+  const { data: kitUnlockRows, error: kitUnlockError } = await introducer.client.rpc(
+    'unlock_share_kit',
+    { target_draft_id: draft.id },
+  );
+  const unlockedKitId = kitUnlockRows?.[0]?.share_kit_id;
+  check(
+    '10h. unlock consumes exactly one credit and creates the permanent kit',
+    !kitPurchaseError &&
+      !kitUnlockError &&
+      typeof unlockedKitId === 'string' &&
+      kitUnlockRows?.[0]?.already_unlocked === false,
+    kitPurchaseError?.message ?? kitUnlockError?.message,
+  );
+  const { data: kitReentryRows, error: kitReentryError } = await introducer.client.rpc(
+    'unlock_share_kit',
+    { target_draft_id: draft.id },
+  );
+  check(
+    '10i. a second unlock is an idempotent re-entry, never a re-charge',
+    !kitReentryError &&
+      kitReentryRows?.[0]?.share_kit_id === unlockedKitId &&
+      kitReentryRows?.[0]?.already_unlocked === true,
+    kitReentryError?.message,
+  );
+  const kitImageResponse = await fetch(`http://localhost:3000/api/kit-image?draftId=${draft.id}`, {
+    headers: { Authorization: `Bearer ${introducerToken}` },
+  });
+  check(
+    '10j. the 9:16 share card renders for the kit owner',
+    kitImageResponse.ok &&
+      (kitImageResponse.headers.get('content-type') ?? '').includes('image/png'),
+    `status=${kitImageResponse.status}`,
+  );
+
   // ── Flow C: verified interest ──────────────────────────────────────────
   const campaignId = created.campaignId;
 
@@ -1122,6 +1209,11 @@ try {
         admin.from('purchase_events').delete().in('provider_event_id', created.purchaseEventIds),
       );
     }
+    // The share kit holds a RESTRICT FK to its consumed credit (H-2 order).
+    await cleanup(
+      'share kits',
+      admin.from('share_kits').delete().eq('pitch_draft_id', created.draftId),
+    );
     if (created.purchaseOriginalTransactionId) {
       await cleanup(
         'purchase credit ledger',
@@ -1129,6 +1221,15 @@ try {
           .from('purchase_credit_ledger')
           .delete()
           .eq('idempotency_key', created.purchaseOriginalTransactionId),
+      );
+    }
+    if (created.kitOriginalTransactionId) {
+      await cleanup(
+        'kit credit ledger',
+        admin
+          .from('purchase_credit_ledger')
+          .delete()
+          .eq('idempotency_key', created.kitOriginalTransactionId),
       );
     }
     await cleanup(

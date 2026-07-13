@@ -17,9 +17,7 @@ async function waitForAnimations(locator: Locator): Promise<void> {
     .toBe(true);
 }
 
-test('plays the pitch and opens the interest flow when the demo campaign is viewed', async ({
-  page,
-}) => {
+test('shows the honest written demo and opens the interest flow', async ({ page }) => {
   const pageErrors: string[] = [];
   const failedResponses: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
@@ -38,7 +36,7 @@ test('plays the pitch and opens the interest flow when the demo campaign is view
       .toBe('instagram');
   });
 
-  await test.step('When the visitor plays the mock timeline', async () => {
+  await test.step('When the visitor reads the demo (CP-3: no fake playback)', async () => {
     const interestButton = page.getByRole('link', { name: "I'm interested" }).first();
     await interestButton.hover();
     await waitForAnimations(interestButton);
@@ -49,14 +47,12 @@ test('plays the pitch and opens the interest flow when the demo campaign is view
         ),
     );
     await page.screenshot({ path: '/tmp/friendword-pitch-interest-hover.png', fullPage: false });
-    await page.getByRole('button', { name: 'Play Maya’s pitch' }).click();
+    await expect(page.getByRole('button', { name: /Play .*pitch/ })).toHaveCount(0);
+    await expect(page.getByTestId('written-pitch')).toContainText('you should meet Blair');
+    await expect(page.getByText('No voice recording in this preview')).toBeVisible();
   });
 
-  await test.step('Then progress advances and interest routes to the profile flow', async () => {
-    await expect
-      .poll(() => page.locator('[class*="timeRow"] span').first().textContent())
-      .not.toBe('0:00');
-    await page.screenshot({ path: '/tmp/friendword-pitch-playing.png', fullPage: false });
+  await test.step('Then interest routes to the profile flow', async () => {
     await expect(
       page.getByText(
         'Interest requires signing in and completing a dating profile with 2 photos, a bio, and dating intent.',

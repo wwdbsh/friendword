@@ -1,6 +1,14 @@
 # PROJECT HANDOFF
 
-> 갱신: 2026-07-13 KST · 2차 감사 대응 (Slice 0~**7** 완료 · Slice 8 진행 예정)
+> 갱신: 2026-07-13 KST · 2차 감사 대응 (Slice 0~**8** 완료 · Slice 9 진행 예정)
+
+## Slice 8 완료 (CP-3·CP-4·Creator kit e2e)
+
+- Blair 데모의 가짜 재생 제거: no-audio pitch는 Play/타임라인 없이 전체 서면 피치+정직 표기 렌더. 랜딩 데모 밴드 카피 정직화.
+- 영어 기본 locale: 랜딩·OG·모바일 잔여 문자열 영어 전환. Playwright에 `lang="en"`+한글 0자 회귀(§8-16), 데모 무재생 회귀(§8-15). 남은 한글은 코드 주석의 문서 섹션명 인용뿐.
+- Creator kit e2e: 프로덕션 E2E 10g~10j(재구매→unlock 1회 소비→재진입 idempotent→9:16 카드 렌더).
+- 검증: Playwright 39/39 · E2E 전 체크 PASS · 전 게이트 그린 · 브라우저에서 영어 랜딩·정직 데모 QA.
+
 > 읽는 순서: 이 문서 → [`docs/FRIENDWORD_SECOND_AUDIT_HANDOFF_2026-07-13.md`](FRIENDWORD_SECOND_AUDIT_HANDOFF_2026-07-13.md)(**acceptance source of truth**) → `docs/TASKS.md` → `docs/DECISIONS.md`(이번 세션 결정 8건) → `docs/OPS.md`, `docs/REVENUECAT_SETUP.md`
 
 ## 다음 세션 시작 방식 (사용자 확정, 2026-07-13)

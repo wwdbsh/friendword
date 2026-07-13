@@ -198,7 +198,7 @@ function renderCampaignOg({ daterName, introducerName, photoUrl }: CampaignOg): 
 
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', fontSize: 38, fontWeight: 700, marginBottom: 12 }}>
-            {introducerName}가 소개하는
+            {introducerName} introduces
           </div>
           <div
             style={{
@@ -228,7 +228,7 @@ function renderCampaignOg({ daterName, introducerName, photoUrl }: CampaignOg): 
         </div>
 
         <div style={{ display: 'flex', fontSize: 25, fontWeight: 700 }}>
-          친구의 목소리로 시작되는 소개
+          Dating, in your friends&apos; words.
         </div>
       </div>
     </div>,

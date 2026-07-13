@@ -49,7 +49,7 @@ export function PitchReviewEditor({
           <StickerCard>
             <Text style={styles.cardTitle}>Write it in your own words</Text>
             <Text style={styles.message}>
-              AI 초안은 OpenAI 키 설정 후 사용 가능해요.{`\n`}직접 작성할 수 있어요.
+              AI drafting unlocks once an OpenAI key is set.{`\n`}You can write it yourself.
             </Text>
           </StickerCard>
         ) : null}
@@ -154,7 +154,7 @@ export function PitchReviewEditor({
         {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
         <HypeButton
           disabled={!complete || busy}
-          label={busy ? 'Sending…' : '동의 요청 보내기'}
+          label={busy ? 'Sending…' : 'Send for approval'}
           onPress={onSubmit}
         />
       </ScrollView>

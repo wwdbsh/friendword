@@ -208,7 +208,8 @@ export default function SharePitchScreen() {
           <TrustCard>
             <Text style={styles.cardTitle}>Existing link updated</Text>
             <Text style={styles.subtitle}>
-              기존 링크가 최신 수정본으로{`\n`}바뀌었어요.{`\n`}새 링크나 재공유는 필요하지 않아요.
+              The existing link now opens the{`\n`}latest revision.{`\n`}No new link or re-share
+              needed.
             </Text>
             <Text style={styles.finePrint}>
               {friendName}’s existing private approval link now opens the latest revision. No new

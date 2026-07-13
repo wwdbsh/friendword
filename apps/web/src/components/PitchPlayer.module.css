@@ -54,6 +54,7 @@
 .location,
 .caption,
 .controls,
+.noAudioNote,
 .desktopInterest {
   position: absolute;
   z-index: 3;
@@ -136,6 +137,16 @@
   display: flex;
   gap: var(--space-md);
   align-items: center;
+}
+
+.noAudioNote {
+  right: var(--space-lg);
+  bottom: 6.75rem;
+  left: var(--space-lg);
+  margin: 0;
+  color: var(--color-stage-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
 }
 
 .playButton {
@@ -369,7 +380,8 @@
 
   .pitchHeader,
   .caption,
-  .controls {
+  .controls,
+  .noAudioNote {
     right: var(--space-md);
     left: var(--space-md);
   }

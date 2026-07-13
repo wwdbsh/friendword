@@ -15,8 +15,6 @@ type PitchPlayerProps = {
   readonly pitch: PitchView;
 };
 
-const TICK_MS = 80;
-
 function formatTime(milliseconds: number): string {
   const seconds = Math.floor(milliseconds / 1000);
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
@@ -61,25 +59,8 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
     }
   }, [pitch.campaignSlug]);
 
-  useEffect(() => {
-    if (!isPlaying || hasRealAudio) {
-      return;
-    }
-
-    const startedAt = window.performance.now() - elapsedRef.current;
-    const intervalId = window.setInterval(() => {
-      const nextElapsed = Math.min(durationMs, window.performance.now() - startedAt);
-      elapsedRef.current = nextElapsed;
-      setElapsedMs(nextElapsed);
-
-      if (nextElapsed >= durationMs) {
-        window.clearInterval(intervalId);
-        setIsPlaying(false);
-      }
-    }, TICK_MS);
-
-    return () => window.clearInterval(intervalId);
-  }, [isPlaying, hasRealAudio, durationMs]);
+  // CP-3 honesty: there is no simulated playback. Without real audio the
+  // player renders the written pitch statically — no Play, no fake timer.
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -162,7 +143,7 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
   // Real audio has no per-photo timeline yet; spread the photos evenly.
   const activePhotoIndex = hasRealAudio
     ? Math.min(Math.floor(progress * pitch.photos.length), pitch.photos.length - 1)
-    : pitch.photos.findIndex((photo) => elapsedMs >= photo.startMs && elapsedMs < photo.endMs);
+    : 0;
   const activeCaption =
     pitch.captions.find((caption) => elapsedMs >= caption.startMs && elapsedMs < caption.endMs) ??
     pitch.captions[0];
@@ -172,6 +153,9 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
   const activeWordIndex = Math.floor(captionProgress * captionWords.length);
 
   const togglePlayback = () => {
+    if (!hasRealAudio) {
+      return;
+    }
     if (elapsedRef.current >= durationMs && durationMs > 0) {
       elapsedRef.current = 0;
       setElapsedMs(0);
@@ -241,61 +225,78 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
           <div className={styles.location}>{pitch.approximateLocation}</div>
         )}
 
-        <div className={styles.caption} aria-live="off">
-          {captionWords.map((word, index) => (
-            <span
-              className={index <= activeWordIndex ? styles.wordActive : undefined}
-              key={`${word}-${index}`}
-            >
-              {word}{' '}
-            </span>
-          ))}
-        </div>
+        {hasRealAudio ? (
+          <div className={styles.caption} aria-live="off">
+            {captionWords.map((word, index) => (
+              <span
+                className={index <= activeWordIndex ? styles.wordActive : undefined}
+                key={`${word}-${index}`}
+              >
+                {word}{' '}
+              </span>
+            ))}
+          </div>
+        ) : (
+          // CP-3 honesty: no recording here, so the whole written pitch is
+          // shown at once instead of pretending to play.
+          <div className={styles.caption} data-testid="written-pitch">
+            {pitch.captions.map((caption) => (
+              <span key={caption.startMs}>{caption.text} </span>
+            ))}
+          </div>
+        )}
 
-        <div className={styles.controls}>
-          <button
-            className={styles.playButton}
-            type="button"
-            onClick={togglePlayback}
-            aria-label={
-              isPlaying
-                ? `Pause ${pitch.introducerPseudonym}’s pitch`
-                : `Play ${pitch.introducerPseudonym}’s pitch`
-            }
-          >
-            <PlayIcon paused={!isPlaying} />
-          </button>
-
-          <div className={styles.timeline}>
-            <svg
-              className={`${styles.waveform} ${isPlaying ? styles.waveformPlaying : ''}`}
-              viewBox="0 0 100 100"
-              preserveAspectRatio="none"
-              role="img"
-              aria-label={`Pitch progress ${Math.round(progress * 100)} percent`}
+        {hasRealAudio ? (
+          <div className={styles.controls}>
+            <button
+              className={styles.playButton}
+              type="button"
+              onClick={togglePlayback}
+              aria-label={
+                isPlaying
+                  ? `Pause ${pitch.introducerPseudonym}’s pitch`
+                  : `Play ${pitch.introducerPseudonym}’s pitch`
+              }
             >
-              {waveform.map((level, index) => {
-                const barWidth = 100 / waveform.length;
-                const played = (index + 1) / waveform.length <= progress;
-                return (
-                  <rect
-                    className={played ? styles.barPlayed : styles.barWaiting}
-                    key={`${level}-${index}`}
-                    x={index * barWidth}
-                    y={100 - level}
-                    width={barWidth * 0.56}
-                    height={level}
-                    rx={barWidth * 0.28}
-                  />
-                );
-              })}
-            </svg>
-            <div className={styles.timeRow}>
-              <span>{formatTime(elapsedMs)}</span>
-              <span>{formatTime(durationMs)}</span>
+              <PlayIcon paused={!isPlaying} />
+            </button>
+
+            <div className={styles.timeline}>
+              <svg
+                className={`${styles.waveform} ${isPlaying ? styles.waveformPlaying : ''}`}
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                role="img"
+                aria-label={`Pitch progress ${Math.round(progress * 100)} percent`}
+              >
+                {waveform.map((level, index) => {
+                  const barWidth = 100 / waveform.length;
+                  const played = (index + 1) / waveform.length <= progress;
+                  return (
+                    <rect
+                      className={played ? styles.barPlayed : styles.barWaiting}
+                      key={`${level}-${index}`}
+                      x={index * barWidth}
+                      y={100 - level}
+                      width={barWidth * 0.56}
+                      height={level}
+                      rx={barWidth * 0.28}
+                    />
+                  );
+                })}
+              </svg>
+              <div className={styles.timeRow}>
+                <span>{formatTime(elapsedMs)}</span>
+                <span>{formatTime(durationMs)}</span>
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <p className={styles.noAudioNote}>
+            No voice recording in this preview — a real Friendword page plays the friend’s actual
+            voice note.
+          </p>
+        )}
 
         {interestButton(styles.desktopInterest)}
       </article>

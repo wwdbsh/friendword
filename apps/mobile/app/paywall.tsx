@@ -2,7 +2,7 @@ import { trackEvent } from '@friendword/data';
 import { colors, fonts, fontSizes, spacing } from '@friendword/ui-tokens';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { HypeButton, QuietNavAction, TrustCard } from '../src/components';
@@ -15,8 +15,10 @@ import {
   type PurchasesStatus,
 } from '../src/services/purchases';
 import { getSupabaseClient } from '../src/services/supabaseClient';
+import { getWebOrigin } from '../src/services/webOrigin';
 
 type FlowState = 'idle' | 'purchasing' | 'confirming' | 'confirmed' | 'timed_out';
+type ExistingBenefit = 'creator_kit' | 'campaign_pass';
 
 export default function PaywallScreen() {
   const router = useRouter();
@@ -37,6 +39,7 @@ export default function PaywallScreen() {
   const [status, setStatus] = useState<PurchasesStatus | null>(null);
   const [flowState, setFlowState] = useState<FlowState>('idle');
   const [note, setNote] = useState<string | null>(null);
+  const [existingBenefit, setExistingBenefit] = useState<ExistingBenefit | null>(null);
   const flowAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -79,6 +82,7 @@ export default function PaywallScreen() {
     flowAbortRef.current = controller;
     setFlowState('purchasing');
     setNote(null);
+    setExistingBenefit(null);
 
     const options = {
       signal: controller.signal,
@@ -107,6 +111,12 @@ export default function PaywallScreen() {
         return;
       }
       setFlowState('idle');
+      const benefit = getExistingBenefitFromRejection(productIntent, error);
+      if (benefit !== null) {
+        setExistingBenefit(benefit);
+        setNote(null);
+        return;
+      }
       setNote(error instanceof Error ? error.message : 'The purchase did not complete.');
     }
   };
@@ -129,17 +139,22 @@ export default function PaywallScreen() {
   }
 
   if (flowState === 'confirming') {
-    return <FlowMessage title="결제 확인 중" body="서버에서 혜택 반영을 확인하고 있어요…" />;
+    return (
+      <FlowMessage
+        title="Confirming your purchase"
+        body="Waiting for the server to confirm your benefit…"
+      />
+    );
   }
 
   if (flowState === 'confirmed') {
     return (
       <FlowMessage
-        title="결제가 확인됐어요"
+        title="Purchase confirmed"
         body={
           productIntent.intent === 'creator_launch'
-            ? 'Creator Launch 크레딧을 이 피치에서 사용할 수 있어요.'
-            : '30일 Campaign Pass가 활성화됐어요.'
+            ? 'Open this pitch’s Creator Kit to unlock its 9:16 share card and caption pack.'
+            : 'Campaign Pass added 30 days and unlocked campaign funnel analytics.'
         }
         onBack={() => router.back()}
       />
@@ -149,8 +164,8 @@ export default function PaywallScreen() {
   if (flowState === 'timed_out') {
     return (
       <FlowMessage
-        title="결제는 접수됐어요"
-        body="혜택은 잠시 후 자동 반영됩니다. 계속 보이지 않으면 Friendword 지원팀에 문의해 주세요."
+        title="Purchase received"
+        body="Your benefit should appear shortly. Contact Friendword support if it remains unavailable."
         onBack={() => router.back()}
       />
     );
@@ -190,7 +205,7 @@ export default function PaywallScreen() {
           </TrustCard>
         ) : null}
 
-        {status?.state === 'ready' && status.package !== null ? (
+        {status?.state === 'ready' && status.package !== null && existingBenefit === null ? (
           <TrustCard>
             <Text style={styles.cardTitle}>{status.package.title}</Text>
             <Text style={styles.subtitle}>{copy.benefit}</Text>
@@ -204,6 +219,34 @@ export default function PaywallScreen() {
               }}
               variant="trust"
             />
+          </TrustCard>
+        ) : null}
+
+        {existingBenefit === 'creator_kit' && productIntent.intent === 'creator_launch' ? (
+          <TrustCard>
+            <Text style={styles.cardTitle}>Creator Kit already available</Text>
+            <Text style={styles.subtitle}>
+              This pitch already has an available credit or unlocked kit. No new purchase is needed.
+            </Text>
+            <HypeButton
+              label="Open Creator Kit"
+              onPress={() => {
+                void Linking.openURL(`${getWebOrigin()}/kit/${productIntent.draftId}`).catch(() => {
+                  setNote('The Creator Kit could not open. Please try again.');
+                });
+              }}
+              variant="trust"
+            />
+          </TrustCard>
+        ) : null}
+
+        {existingBenefit === 'campaign_pass' && productIntent.intent === 'campaign_pass' ? (
+          <TrustCard>
+            <Text style={styles.cardTitle}>Campaign Pass is already active</Text>
+            <Text style={styles.subtitle}>
+              This campaign already has access to its current pass period and funnel analytics. No
+              new purchase was started.
+            </Text>
           </TrustCard>
         ) : null}
 
@@ -238,7 +281,7 @@ function FlowMessage({
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.centeredContent}>
-        <TrustCard tone={title === '결제가 확인됐어요' ? 'success' : 'neutral'}>
+        <TrustCard tone={title === 'Purchase confirmed' ? 'success' : 'neutral'}>
           <Text style={styles.cardTitle}>{title}</Text>
           <Text style={styles.subtitle}>{body}</Text>
         </TrustCard>
@@ -259,16 +302,50 @@ function getPaywallCopy(intent: ProductIntent): {
         eyebrow: 'CREATOR LAUNCH',
         title: 'One credit for this pitch',
         subtitle:
-          'Purchase a Creator Launch credit for the selected pitch. The credit stays scoped to this draft.',
-        benefit: 'Create the approved social launch kit for this pitch after it is published.',
+          'Creator Launch unlocks one static Creator Kit for this published pitch. The kit stays available after unlock.',
+        benefit: 'One 9:16 share card and a caption pack.',
       }
     : {
         eyebrow: 'CAMPAIGN PASS',
         title: '30 more days for this campaign',
-        subtitle:
-          'Purchase Campaign Pass for the selected published campaign. The entitlement is scoped to this campaign.',
-        benefit: 'Extend the campaign and access its performance analytics for the pass period.',
+        subtitle: 'Campaign Pass adds 30 days from purchase for this published campaign.',
+        benefit: 'Access campaign funnel analytics during the active pass period.',
       };
+}
+
+export function getExistingBenefitFromRejection(
+  intent: ProductIntent,
+  error: unknown,
+): ExistingBenefit | null {
+  const message = getErrorChainMessage(error).toLowerCase();
+  if (
+    intent.intent === 'creator_launch' &&
+    (message.includes('unused creator launch credit') || message.includes('unlocked creator kit'))
+  ) {
+    return 'creator_kit';
+  }
+  if (
+    intent.intent === 'campaign_pass' &&
+    message.includes('already has an active campaign pass')
+  ) {
+    return 'campaign_pass';
+  }
+  return null;
+}
+
+function getErrorChainMessage(error: unknown): string {
+  const messages: string[] = [];
+  let current = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (typeof current !== 'object' || current === null) {
+      break;
+    }
+    if ('message' in current && typeof current.message === 'string') {
+      messages.push(current.message);
+    }
+    current = 'cause' in current ? current.cause : null;
+  }
+  return messages.join(' ');
 }
 
 function requirePackageIdentifier(value: string | undefined): string {

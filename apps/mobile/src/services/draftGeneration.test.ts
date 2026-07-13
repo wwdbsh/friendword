@@ -30,6 +30,6 @@ describe('draft generation request', () => {
   it('keeps retryable API failures visible to the caller', async () => {
     await expect(
       requestDraftGeneration('10000000-0000-4000-8000-000000000001', requestWithStatus(502)),
-    ).rejects.toEqual(expect.objectContaining<DraftGenerationError>({ status: 502 }));
+    ).rejects.toEqual(expect.objectContaining<Partial<DraftGenerationError>>({ status: 502 }));
   });
 });

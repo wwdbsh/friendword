@@ -5,14 +5,31 @@ import { useCallback, useEffect, useState } from 'react';
 import { Linking, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { HypeButton, QuietNavAction, StickerCard, TrustCard } from '../../src/components';
+import { HypeButton, QuietNavAction, TrustCard } from '../../src/components';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
 import { hasFinalizedConsent } from '../../src/services/pitchDrafts';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 import type { PitchDraft } from '../../src/services/types';
 import { buildConsentUrl, getWebOrigin } from '../../src/services/webOrigin';
 
-type CreatorCreditState = 'idle' | 'loading' | 'available' | 'unavailable' | 'error';
+export type CreatorBenefitState = 'idle' | 'loading' | 'available' | 'unavailable' | 'error';
+export type CreatorKitSurface = 'checking' | 'purchase' | 'open' | 'error';
+
+export function getCreatorKitSurface(state: CreatorBenefitState): CreatorKitSurface {
+  switch (state) {
+    case 'idle':
+    case 'loading':
+      return 'checking';
+    case 'unavailable':
+      return 'purchase';
+    case 'available':
+      return 'open';
+    case 'error':
+      return 'error';
+    default:
+      return assertNever(state);
+  }
+}
 
 export default function SharePitchScreen() {
   const router = useRouter();
@@ -21,7 +38,7 @@ export default function SharePitchScreen() {
   const [loading, setLoading] = useState(true);
   const [shareError, setShareError] = useState<string | null>(null);
   const [kitError, setKitError] = useState<string | null>(null);
-  const [creatorCreditState, setCreatorCreditState] = useState<CreatorCreditState>('idle');
+  const [creatorBenefitState, setCreatorBenefitState] = useState<CreatorBenefitState>('idle');
   const [creditRefresh, setCreditRefresh] = useState(0);
 
   useEffect(() => {
@@ -68,22 +85,23 @@ export default function SharePitchScreen() {
   const isResent = resent === '1';
   const isPublished = draft?.status === 'published' && serverDraftId !== null;
   const kitUrl = serverDraftId === null ? null : `${getWebOrigin()}/kit/${serverDraftId}`;
+  const creatorKitSurface = getCreatorKitSurface(creatorBenefitState);
 
   useFocusEffect(
     useCallback(() => {
       if (!isPublished || serverDraftId === null) {
-        setCreatorCreditState('idle');
+        setCreatorBenefitState('idle');
         return;
       }
 
       let active = true;
       const client = getSupabaseClient();
       if (client === null) {
-        setCreatorCreditState('error');
+        setCreatorBenefitState('error');
         return;
       }
 
-      setCreatorCreditState('loading');
+      setCreatorBenefitState('loading');
       const repo = new PurchasesRepo(client);
       void repo
         .hasConfirmedBenefit({
@@ -92,12 +110,12 @@ export default function SharePitchScreen() {
         })
         .then((available) => {
           if (active) {
-            setCreatorCreditState(available ? 'available' : 'unavailable');
+            setCreatorBenefitState(available ? 'available' : 'unavailable');
           }
         })
         .catch(() => {
           if (active) {
-            setCreatorCreditState('error');
+            setCreatorBenefitState('error');
           }
         });
 
@@ -135,7 +153,7 @@ export default function SharePitchScreen() {
     try {
       await Linking.openURL(kitUrl);
     } catch {
-      setKitError('The social launch kit could not open. Please try again.');
+      setKitError('The Creator Kit could not open. Please try again.');
     }
   };
 
@@ -168,7 +186,7 @@ export default function SharePitchScreen() {
           </Text>
           <Text style={styles.subtitle}>
             {isPublished
-              ? 'Create social assets from the approved pitch, or open the kit you already purchased.'
+              ? 'Open its static Creator Kit: one 9:16 share card and a caption pack.'
               : isResent
                 ? `${friendName} can review the latest revision at the same private link.`
                 : `One last move: send ${friendName} the private approval invite. Nothing goes public until they say yes.`}
@@ -234,19 +252,19 @@ export default function SharePitchScreen() {
           </>
         ) : null}
 
-        {isPublished && (creatorCreditState === 'idle' || creatorCreditState === 'loading') ? (
+        {isPublished && creatorKitSurface === 'checking' ? (
           <TrustCard>
             <Text style={styles.cardTitle}>Checking Creator Launch access</Text>
-            <Text style={styles.subtitle}>Confirming the credit for this published pitch…</Text>
+            <Text style={styles.subtitle}>Checking this published pitch for a credit or kit…</Text>
           </TrustCard>
         ) : null}
 
-        {isPublished && creatorCreditState === 'unavailable' && serverDraftId !== null ? (
-          <StickerCard>
-            <Text style={styles.cardTitle}>Create social launch kit</Text>
+        {isPublished && creatorKitSurface === 'purchase' && serverDraftId !== null ? (
+          <TrustCard>
+            <Text style={styles.cardTitle}>Unlock this static Creator Kit</Text>
             <Text style={styles.subtitle}>
-              Purchase one Creator Launch credit for this pitch, then create its approved social
-              assets on the web.
+              Creator Launch is one credit for a 9:16 share card and caption pack for this published
+              pitch. Once unlocked, the kit stays available.
             </Text>
             <HypeButton
               label="Get Creator Launch"
@@ -256,16 +274,17 @@ export default function SharePitchScreen() {
                   params: { intent: 'creator_launch', draftId: serverDraftId },
                 })
               }
+              variant="trust"
             />
-          </StickerCard>
+          </TrustCard>
         ) : null}
 
-        {isPublished && creatorCreditState === 'available' && kitUrl !== null ? (
-          <StickerCard>
-            <Text style={styles.cardTitle}>Your social launch kit is ready to unlock</Text>
+        {isPublished && creatorKitSurface === 'open' && kitUrl !== null ? (
+          <TrustCard>
+            <Text style={styles.cardTitle}>Your Creator Kit is available</Text>
             <Text style={styles.subtitle}>
-              Your Creator Launch credit is available for this pitch. Open the web kit to create and
-              share the approved assets.
+              Open the web kit to use an available credit or revisit the 9:16 share card and caption
+              pack you already unlocked.
             </Text>
             <View style={styles.linkBox}>
               <Text numberOfLines={2} style={styles.link}>
@@ -273,16 +292,17 @@ export default function SharePitchScreen() {
               </Text>
             </View>
             <HypeButton
-              label="Open social launch kit"
+              label="Open Creator Kit"
               onPress={() => {
                 void openKit();
               }}
+              variant="trust"
             />
             {kitError ? <Text style={styles.error}>{kitError}</Text> : null}
-          </StickerCard>
+          </TrustCard>
         ) : null}
 
-        {isPublished && creatorCreditState === 'error' ? (
+        {isPublished && creatorKitSurface === 'error' ? (
           <TrustCard tone="danger">
             <Text style={styles.cardTitle}>Creator Launch access could not be checked</Text>
             <Text style={styles.subtitle}>
@@ -299,6 +319,10 @@ export default function SharePitchScreen() {
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function assertNever(value: never): never {
+  return value;
 }
 
 const styles = StyleSheet.create({

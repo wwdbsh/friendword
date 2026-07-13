@@ -48,6 +48,7 @@ vi.mock('expo-router', () => ({
   useRouter: () => ({ back: vi.fn() }),
 }));
 vi.mock('react-native', () => ({
+  Linking: { openURL: vi.fn() },
   ScrollView: 'main',
   StyleSheet: { create: (styles: object) => styles },
   Text: 'span',
@@ -72,8 +73,9 @@ vi.mock('./purchases', () => ({
   runRestoreFlow: vi.fn(),
 }));
 vi.mock('./supabaseClient', () => ({ getSupabaseClient: () => null }));
+vi.mock('./webOrigin', () => ({ getWebOrigin: () => 'https://friendword.example' }));
 
-import PaywallScreen from '../../app/paywall';
+import PaywallScreen, { getExistingBenefitFromRejection } from '../../app/paywall';
 
 describe('PaywallScreen', () => {
   it('shows an error and no catalog when product intent is missing', () => {
@@ -84,5 +86,23 @@ describe('PaywallScreen', () => {
     expect(markup).not.toContain('Restore purchases');
     expect(markup).not.toContain('Get Creator Launch');
     expect(mocks.getPaywallStatus).not.toHaveBeenCalled();
+  });
+
+  it('turns paid-benefit guard rejections into re-entry states', () => {
+    const unusedCredit = new Error('Supabase operation failed', {
+      cause: { message: 'unused Creator Launch credit' },
+    });
+    expect(
+      getExistingBenefitFromRejection(
+        { intent: 'creator_launch', draftId: '10000000-0000-4000-8000-000000000001' },
+        unusedCredit,
+      ),
+    ).toBe('creator_kit');
+    expect(
+      getExistingBenefitFromRejection(
+        { intent: 'campaign_pass', campaignId: '20000000-0000-4000-8000-000000000002' },
+        new Error('already has an active Campaign Pass'),
+      ),
+    ).toBe('campaign_pass');
   });
 });

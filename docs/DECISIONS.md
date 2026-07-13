@@ -116,3 +116,10 @@
 - **이유**: 2차 감사 P0-3(TRANSFER 400, 전 이벤트 intent 강요, terminal 200 유실)·P0-4(anonymous 귀속·계정 전환 오염). 돈을 받은 이벤트는 어떤 경우에도 조용히 사라지면 안 된다.
 - **검토 대안**: TRANSFER 자동 이관(잘못된 자동 병합 위험 — MVP는 ops review), lifecycle에 intent 필수 유지(실계약 위반), route에서 salvage 로직(서버 권위 원칙 위반).
 - **영향**: 1차 계약 테스트 중 "예외" 기대 4곳(14_commerce 3, a04 1, tests-audit 웹 2)을 review-큐 계약으로 갱신 — 1차 감사 acceptance의 의도(효익 미지급·유실 금지)는 유지되고 처리 방식만 durable해졌다. audit2 b03 그린, 웹 audit2 8/8 그린. 실기기 sandbox(구매→restore→refund→transfer)는 여전히 사용자 게이트(RevenueCat 셋업+dev build) 뒤 — 코드 게이트만 해소된 상태로 "real payments ready"를 주장하지 않는다.
+
+## 2026-07-13: Creator Launch·Campaign Pass 최종 MVP 상품 계약 (Slice 4, CP-5·CP-6)
+
+- **결정**: (1) **Creator Launch $4.99 = 정적 share kit로 확정**: 승인 콘텐츠 기반 9:16 share card + caption pack(완전한 public URL 포함), 발행 후 `/kit/[draftId]`에서 크레딧 1회 소비 unlock, 영구 재진입. premium motion theme·MP4 export·end-card 커스터마이즈·재생성은 **판매하지 않으며 카피에서 약속하지 않는다**(post-launch 로드맵). (2) **Campaign Pass $19.99 = 구매 시점부터 30일 연장 + Pass-게이트 캠페인 퍼널 분석 + 인박스 Pass 섹션으로 확정**. vouch/관심 필터/일정 관리/버전 선택/enhanced inbox는 판매 카피에서 제외. 활성 Pass 중 재구매는 서버가 거부하고 만료 후에만 재구매(가치 누적 스택 없음). (3) 서버 계약(0028): unused credit·unlocked kit·활성 Pass가 있으면 동일 scope intent 발급 거부, 미만료 issued intent는 재사용(더블탭 수렴).
+- **이유**: 2차 감사 CP-5의 양자택일에서 "정직한 축소"를 선택 — Shipaton 8/1~9/30 창구 안에서 motion/MP4 파이프라인을 검증 가능한 품질로 만들 수 없고, 감사 원칙은 "구현하지 않을 기능을 판매 카피로 약속하지 않는다"이다. P0-5·P0-6의 1:1 가치 전달이 우선.
+- **검토 대안**: 원계약 유지(MP4/motion 구현 — 일정 리스크), Pass 가치 누적 스택 판매(현 시점 불필요한 복잡성).
+- **영향**: 킷 캡션에서 "Friend-verified" 제거(§11), 캡션 링크 full URL화. b04·17 그린. 모바일 share/campaigns 표면은 codex-1이 이 계약대로 구현. 가격 대비 가치 재평가는 스토어 준비 시점에 사용자와 재논의 가능(문서 기록 후).

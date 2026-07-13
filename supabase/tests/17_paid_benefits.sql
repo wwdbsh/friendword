@@ -157,20 +157,27 @@ BEGIN
 END;
 $$;
 
--- 4b. The introducer can still buy the credit after publish (0022) —
--- that is exactly when the kit becomes usable.
+-- 4b. Second-audit contract (0028): once the kit is unlocked the benefit
+-- is permanent, so rebuying the same draft is refused — the published
+-- share screen must show "Open Creator Kit", never a purchase button.
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000004';
 DO $$
 DECLARE
-  issued RECORD;
+  rejected BOOLEAN := false;
 BEGIN
-  SELECT * INTO issued
-    FROM issue_purchase_intent(
+  BEGIN
+    PERFORM * FROM issue_purchase_intent(
       'creator_launch_credit_499',
       'f1700000-0000-0000-0000-000000000001'
     );
-  IF issued.purchase_intent_id IS NULL THEN
-    RAISE EXCEPTION 'creator intent was not issued for a published draft';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE '%unlocked Creator kit%' THEN
+      RAISE;
+    END IF;
+    rejected := true;
+  END;
+  IF NOT rejected THEN
+    RAISE EXCEPTION 'unlocked draft still allowed a repurchase intent';
   END IF;
 END;
 $$;

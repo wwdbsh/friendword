@@ -29,14 +29,20 @@ type KitState =
   | { readonly step: 'not-published' }
   | { readonly step: 'error' };
 
+/**
+ * Caption copy honesty (second audit CP-5/§11): the shared link is a full
+ * public URL, and no caption claims identity verification — that gate is
+ * not live yet.
+ */
 function captions(headline: string | null, slug: string | null): readonly string[] {
-  const link = slug === null ? '' : ` friendword — /p/${slug}`;
+  const origin = typeof window === 'undefined' ? '' : window.location.origin;
+  const link = slug === null || origin === '' ? '' : ` ${origin}/p/${slug}`;
   const hook = headline ?? 'My friend, in my own words.';
 
   return [
     `${hook}${link}`,
     `I recorded a pitch about my favorite person. Listen before you swipe.${link}`,
-    `Friend-verified. Voice-first. No bios written at 1am.${link}`,
+    `A real friend's voice. No bios written at 1am.${link}`,
   ];
 }
 

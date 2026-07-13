@@ -50,6 +50,9 @@ export class PurchasesRepo {
 
   async hasConfirmedBenefit(scope: PurchaseBenefitScope): Promise<boolean> {
     if (scope.productId === 'creator_launch_credit_499') {
+      // Second audit P0-5: the confirmed Creator benefit is an unused
+      // credit OR the permanent unlocked kit — a consumed credit whose
+      // kit exists must never read as "no benefit" (repurchase trap).
       const { data, error } = await this.client
         .from('purchase_credit_ledger')
         .select('id')
@@ -60,7 +63,18 @@ export class PurchasesRepo {
       if (error !== null) {
         throw translate('purchases.creatorBenefit', error);
       }
-      return data.length > 0;
+      if (data.length > 0) {
+        return true;
+      }
+      const { data: kits, error: kitError } = await this.client
+        .from('share_kits')
+        .select('id')
+        .eq('pitch_draft_id', scope.pitchDraftId)
+        .limit(1);
+      if (kitError !== null) {
+        throw translate('purchases.creatorBenefit', kitError);
+      }
+      return kits.length > 0;
     }
 
     const { data, error } = await this.client

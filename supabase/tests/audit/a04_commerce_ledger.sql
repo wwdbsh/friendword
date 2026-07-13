@@ -420,12 +420,14 @@ INSERT INTO consent_requests (
   subject_user_id,
   token_hash,
   status,
-  revision_id
+  revision_id,
+  invite_contact_channel,
+  invite_contact_hash
 )
 VALUES
-  ('a0400000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', encode(digest('audit-p04-token-14', 'sha256'), 'hex'), 'pending', 'a0400000-0000-0000-0000-000000000021'),
-  ('a0400000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', encode(digest('audit-p04-token-30', 'sha256'), 'hex'), 'pending', 'a0400000-0000-0000-0000-000000000022'),
-  ('a0400000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', encode(digest('audit-p04-token-90', 'sha256'), 'hex'), 'pending', 'a0400000-0000-0000-0000-000000000023');
+  ('a0400000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', encode(digest('audit-p04-token-14', 'sha256'), 'hex'), 'pending', 'a0400000-0000-0000-0000-000000000021', 'email', encode(digest('introducer@example.test', 'sha256'), 'hex')),
+  ('a0400000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', encode(digest('audit-p04-token-30', 'sha256'), 'hex'), 'pending', 'a0400000-0000-0000-0000-000000000022', 'email', encode(digest('introducer@example.test', 'sha256'), 'hex')),
+  ('a0400000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', encode(digest('audit-p04-token-90', 'sha256'), 'hex'), 'pending', 'a0400000-0000-0000-0000-000000000023', 'email', encode(digest('introducer@example.test', 'sha256'), 'hex'));
 INSERT INTO verification_checks (
   user_id,
   provider,

@@ -54,6 +54,7 @@ BEGIN
         id,
         pitch_draft_id,
         token_hash,
+        invite_contact_channel,
         invite_contact_hash,
         status
       )
@@ -61,6 +62,7 @@ BEGIN
         'a0100000-0000-0000-0000-000000000003',
         'a0100000-0000-0000-0000-000000000002',
         encode(digest('audit-bootstrap-token', 'sha256'), 'hex'),
+        'email',
         encode(digest('audit-bootstrap@example.test', 'sha256'), 'hex'),
         'pending'
       )

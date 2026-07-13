@@ -72,6 +72,9 @@ INSERT INTO public.pitch_drafts (
     'Email matching is case-insensitive and whitespace-normalized.'
   );
 
+-- Legacy rows predate the 0029 binding trigger; recreate that state by
+-- inserting with the trigger disabled (superuser test harness only).
+ALTER TABLE public.consent_requests DISABLE TRIGGER consent_requests_contact_binding;
 INSERT INTO public.consent_requests (
   id,
   pitch_draft_id,
@@ -112,6 +115,7 @@ INSERT INTO public.consent_requests (
     NULL,
     NULL
   );
+ALTER TABLE public.consent_requests ENABLE TRIGGER consent_requests_contact_binding;
 
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000004', true);

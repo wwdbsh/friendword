@@ -38,7 +38,12 @@ SET LOCAL ROLE authenticated;
 DO $$
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000004', true);
-  PERFORM * FROM submit_pitch_for_consent('a0900000-0000-0000-0000-000000000001');
+  PERFORM * FROM submit_pitch_for_consent(
+    'a0900000-0000-0000-0000-000000000001',
+    'email',
+    'dater@example.test',
+    'Blair'
+  );
 END;
 $$;
 RESET ROLE;

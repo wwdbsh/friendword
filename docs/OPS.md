@@ -147,3 +147,8 @@ SELECT provider_event_id, event_type, reason, created_at
 
 - `reason` 값: `transfer_requires_ops_review`, `unattributed_purchase`, `unmatched_lifecycle_lineage`, `unknown_product`, `unhandled_event_type`, `lifecycle_user_mismatch`, `intent_transaction_conflict`, `malformed_purchase_intent`, `missing_product_id`, `pass_scope_ownership_changed`.
 - 처리: payload를 확인해 올바른 사용자·scope를 특정한 뒤, 필요한 경우 서비스 role로 정정 처리하고 `status='resolved'`, `resolution_note`를 남깁니다. 처리 전까지 효익은 지급되지 않습니다(돈이 확인되면 반드시 처리해야 합니다).
+
+## Legacy 무접점 consent 요청 (0029 이후)
+
+- claimable 상태(pending/claimed)의 consent 요청은 verified contact 바인딩 없이는 존재할 수 없고, 바인딩 없는 legacy 요청은 claim 시 "reissued with a verified contact" 오류로 거부됩니다.
+- 구제 절차: introducer가 draft를 다시 제출하며 접점을 입력하거나(기존 요청이 rebind됨 — 단 무접점 요청은 재제출도 거부되므로), 실질적으로는 **draft 삭제 후 재생성** 또는 ops가 확인된 접점으로 hash를 직접 세팅하는 방법뿐입니다. raw contact는 저장하지 않으므로 자동 백필은 불가능합니다(의도된 설계).

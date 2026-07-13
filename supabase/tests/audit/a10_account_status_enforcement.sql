@@ -147,7 +147,12 @@ BEGIN
     true
   );
   SELECT consent_request_id INTO active_request
-    FROM submit_pitch_for_consent('a1000000-0000-0000-0000-000000000004');
+    FROM submit_pitch_for_consent(
+      'a1000000-0000-0000-0000-000000000004',
+      'email',
+      'audit-a10-invitee@example.test',
+      'Invitee'
+    );
   SELECT interest_id INTO active_interest
     FROM submit_interest('20000000-0000-0000-0000-000000000001');
   IF active_request IS NULL OR active_interest IS NULL THEN

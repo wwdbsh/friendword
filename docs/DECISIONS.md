@@ -123,3 +123,10 @@
 - **이유**: 2차 감사 CP-5의 양자택일에서 "정직한 축소"를 선택 — Shipaton 8/1~9/30 창구 안에서 motion/MP4 파이프라인을 검증 가능한 품질로 만들 수 없고, 감사 원칙은 "구현하지 않을 기능을 판매 카피로 약속하지 않는다"이다. P0-5·P0-6의 1:1 가치 전달이 우선.
 - **검토 대안**: 원계약 유지(MP4/motion 구현 — 일정 리스크), Pass 가치 누적 스택 판매(현 시점 불필요한 복잡성).
 - **영향**: 킷 캡션에서 "Friend-verified" 제거(§11), 캡션 링크 full URL화. b04·17 그린. 모바일 share/campaigns 표면은 codex-1이 이 계약대로 구현. 가격 대비 가치 재평가는 스토어 준비 시점에 사용자와 재논의 가능(문서 기록 후).
+
+## 2026-07-13: 접점 바인딩 invariant와 typed identity evidence (Slice 5, P0-7·P0-8)
+
+- **결정**: (1) `consent_requests`는 트리거로 "claimable 상태(pending/claimed)에는 verified channel+contact hash 필수"를 강제한다 — 모든 생성·재활성 경로(직접 RPC 포함)를 커버. claim은 unbound 요청을 '재발급 필요'로 fail-closed. legacy unbound 요청의 구제는 introducer 재작성 또는 ops 재발급뿐이다(자동 migration 없음 — hosted에 실사용자 없음). (2) `verification_checks`에 typed evidence 모델(check_type/provider_ref/photo_object_name/result/checked_at/expires_at)을 추가하고, `assert_identity_evidence`는 phone+미만료 passed adult_18plus+liveness를 요구하도록 교체(legacy status/verified_at 행은 더 이상 아무것도 승인하지 않음). publish는 campaigns BEFORE 트리거가 추가로 face_match(photo_object_name=승인 대표 사진, 대표=포함 사진 중 sort_order 최솟값)를 요구하며 resume에도 재검증된다.
+- **이유**: 2차 감사 P0-7(직접 RPC의 token-possession claim)·P0-8(만료·종류·사진 무결성 없는 pass row).
+- **검토 대안**: submit RPC 전면 재정의(재정의 소실 위험 — 트리거 채택), legacy 자동 hash 백필(원본 contact 미보유로 불가능 — 해시만 저장하는 프라이버시 설계의 의도된 결과).
+- **영향**: audit2 b05·b06 그린. 구계약 픽스처 정리: 스위트 04/05/10/12/13/16·a01~~a04·a08~~a10이 contact-bound 제출과 typed evidence로 이행, 12의 "legacy claim 성공" 단언은 "재발급 요구"로 반전. 실 provider 연동·sandbox 증명은 여전히 사용자 게이트(identity 벤더 선정) 뒤이며 enforcement 스위치는 off 유지.

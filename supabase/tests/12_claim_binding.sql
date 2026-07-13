@@ -52,9 +52,38 @@ SELECT 'phone', consent_token FROM submit_pitch_for_consent(
   '+82 (010) 1234-5678',
   'Phone Invite'
 );
-INSERT INTO slice_c_tokens
-SELECT 'legacy', consent_token
-  FROM submit_pitch_for_consent('c1200000-0000-0000-0000-000000000003');
+-- Second-audit contract (0029): a first submission without a contact is
+-- rejected outright, so the "legacy" state can only exist for rows that
+-- predate the trigger — recreated below with the trigger disabled.
+DO $$
+DECLARE
+  rejected BOOLEAN := false;
+BEGIN
+  BEGIN
+    PERFORM * FROM submit_pitch_for_consent('c1200000-0000-0000-0000-000000000003');
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE '%verified invite contact%' THEN RAISE; END IF;
+    rejected := true;
+  END;
+  IF NOT rejected THEN
+    RAISE EXCEPTION 'contactless first submission was accepted';
+  END IF;
+END;
+$$;
+RESET ROLE;
+ALTER TABLE consent_requests DISABLE TRIGGER consent_requests_contact_binding;
+INSERT INTO consent_requests (pitch_draft_id, token_hash, status)
+VALUES (
+  'c1200000-0000-0000-0000-000000000003',
+  encode(digest('slice-c-legacy-token', 'sha256'), 'hex'),
+  'pending'
+);
+ALTER TABLE consent_requests ENABLE TRIGGER consent_requests_contact_binding;
+UPDATE pitch_drafts SET status = 'consent_pending'
+ WHERE id = 'c1200000-0000-0000-0000-000000000003';
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000004';
+INSERT INTO slice_c_tokens VALUES ('legacy', 'slice-c-legacy-token');
 INSERT INTO slice_c_tokens
 SELECT 'verification', consent_token FROM submit_pitch_for_consent(
   'c1200000-0000-0000-0000-000000000004',
@@ -147,24 +176,18 @@ BEGIN
       IF SQLERRM <> 'phone invite verification is not available' THEN RAISE; END IF;
   END;
 
-  IF NOT EXISTS (
-    SELECT 1 FROM claim_consent_request((SELECT raw_token FROM slice_c_tokens WHERE kind = 'legacy'))
-     WHERE pitch_draft_id = 'c1200000-0000-0000-0000-000000000003'
-  ) THEN
-    RAISE EXCEPTION 'legacy consent request could not be claimed';
-  END IF;
-
-  SELECT r.id, r.asset_ids INTO legacy_revision_id, legacy_asset_ids
-    FROM consent_requests cr
-    JOIN consent_revisions r ON r.id = cr.revision_id
-   WHERE cr.pitch_draft_id = 'c1200000-0000-0000-0000-000000000003';
-  PERFORM * FROM approve_and_publish_pitch(
-    'c1200000-0000-0000-0000-000000000003',
-    14,
-    legacy_revision_id,
-    legacy_asset_ids,
-    true
-  );
+  -- Second-audit contract (0029): token possession alone never claims a
+  -- contact-less legacy request; it must be reissued.
+  BEGIN
+    PERFORM * FROM claim_consent_request(
+      (SELECT raw_token FROM slice_c_tokens WHERE kind = 'legacy')
+    );
+    RAISE EXCEPTION 'legacy contactless request was claimable';
+  EXCEPTION
+    WHEN raise_exception THEN
+      IF SQLERRM = 'legacy contactless request was claimable' THEN RAISE; END IF;
+      IF SQLERRM NOT LIKE '%reissued with a verified contact%' THEN RAISE; END IF;
+  END;
 
   IF NOT EXISTS (
     SELECT 1 FROM claim_consent_request((SELECT raw_token FROM slice_c_tokens WHERE kind = 'verification'))
@@ -238,14 +261,24 @@ BEGIN
   EXCEPTION
     WHEN raise_exception THEN
       IF SQLERRM = 'publish succeeded without provider verification' THEN RAISE; END IF;
-      IF SQLERRM <> 'identity verification required' THEN RAISE; END IF;
+      IF SQLERRM NOT LIKE '%identity evidence required%' THEN RAISE; END IF;
   END;
 END;
 $$;
 
 RESET ROLE;
-INSERT INTO verification_checks (user_id, provider, provider_reference, status, verified_at)
-VALUES ('00000000-0000-0000-0000-000000000001', 'audit', 'slice-c-publish', 'passed', now());
+INSERT INTO verification_checks (
+  user_id, provider, provider_reference, status, verified_at,
+  check_type, provider_ref, photo_object_name, result, checked_at, expires_at
+) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'audit', 'slice-c-publish-adult', 'passed', now(),
+   'adult_18plus', 'slice-c-publish-adult', NULL, 'passed', now(), now() + INTERVAL '30 days'),
+  ('00000000-0000-0000-0000-000000000001', 'audit', 'slice-c-publish-liveness', 'passed', now(),
+   'liveness', 'slice-c-publish-liveness', NULL, 'passed', now(), now() + INTERVAL '30 days'),
+  ('00000000-0000-0000-0000-000000000001', 'audit', 'slice-c-publish-face', 'passed', now(),
+   'face_match', 'slice-c-publish-face',
+   'c1200000-0000-0000-0000-000000000004/fixture-photo.jpg',
+   'passed', now(), now() + INTERVAL '30 days');
 
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000001';
@@ -297,12 +330,20 @@ VALUES
   ('profile-media', 'c1200000-0000-0000-0000-000000000104/two.png', 'c1200000-0000-0000-0000-000000000104', '{"mimetype":"image/png"}'),
   ('profile-media', 'c1200000-0000-0000-0000-000000000103/one.bin', 'c1200000-0000-0000-0000-000000000103', '{"mimetype":"application/octet-stream"}'),
   ('profile-media', 'c1200000-0000-0000-0000-000000000103/two.bin', 'c1200000-0000-0000-0000-000000000103', '{"mimetype":"application/octet-stream"}');
-INSERT INTO verification_checks (user_id, provider, provider_reference, status, verified_at)
-VALUES
-  ('c1200000-0000-0000-0000-000000000101', 'audit', 'slice-c-photo-missing', 'passed', now()),
-  ('c1200000-0000-0000-0000-000000000102', 'audit', 'slice-c-photo-foreign', 'passed', now()),
-  ('c1200000-0000-0000-0000-000000000103', 'audit', 'slice-c-photo-mime', 'passed', now()),
-  ('c1200000-0000-0000-0000-000000000104', 'audit', 'slice-c-photo-valid', 'passed', now());
+INSERT INTO verification_checks (
+  user_id, provider, provider_reference, status, verified_at,
+  check_type, provider_ref, result, checked_at, expires_at
+)
+SELECT u.id, 'audit', 'slice-c-' || right(u.id::TEXT, 3) || '-' || kind.check_type, 'passed', now(),
+       kind.check_type, 'slice-c-' || right(u.id::TEXT, 3) || '-' || kind.check_type,
+       'passed', now(), now() + INTERVAL '30 days'
+  FROM (VALUES
+    ('c1200000-0000-0000-0000-000000000101'::UUID),
+    ('c1200000-0000-0000-0000-000000000102'::UUID),
+    ('c1200000-0000-0000-0000-000000000103'::UUID),
+    ('c1200000-0000-0000-0000-000000000104'::UUID)
+  ) AS u(id)
+ CROSS JOIN (VALUES ('adult_18plus'), ('liveness')) AS kind(check_type);
 
 SET LOCAL ROLE authenticated;
 DO $$
@@ -368,14 +409,18 @@ INSERT INTO consent_requests (
   subject_user_id,
   token_hash,
   status,
-  revision_id
+  revision_id,
+  invite_contact_channel,
+  invite_contact_hash
 )
 VALUES (
   'c1200000-0000-0000-0000-000000000202',
   'c1200000-0000-0000-0000-000000000103',
   encode(digest('slice-c-suspended-approve', 'sha256'), 'hex'),
   'claimed',
-  'c1200000-0000-0000-0000-000000000204'
+  'c1200000-0000-0000-0000-000000000204',
+  'email',
+  encode(digest('email:bad-mime@example.test', 'sha256'), 'hex')
 );
 INSERT INTO interests (id, campaign_id, sender_user_id, status, submitted_at)
 VALUES (

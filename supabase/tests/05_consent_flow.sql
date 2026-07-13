@@ -21,7 +21,7 @@ VALUES (
   '10000000-0000-0000-0000-000000000002/journey-photo.jpg'
 );
 INSERT INTO consent_journey
-SELECT consent_token FROM submit_pitch_for_consent('10000000-0000-0000-0000-000000000002');
+SELECT consent_token FROM submit_pitch_for_consent('10000000-0000-0000-0000-000000000002', 'email', 'introducer@example.test', 'Alex');
 
 -- 2. Anonymous preview shows introducer context but nothing sensitive.
 SET LOCAL ROLE anon;

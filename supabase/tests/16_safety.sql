@@ -211,7 +211,7 @@ DECLARE
   request_id UUID;
 BEGIN
   SELECT consent_request_id INTO request_id
-    FROM submit_pitch_for_consent('16000000-0000-0000-0000-000000000001');
+    FROM submit_pitch_for_consent('16000000-0000-0000-0000-000000000001', 'email', 'dater@example.test', 'Blair');
   IF request_id IS NULL THEN
     RAISE EXCEPTION 'media enforcement off changed existing finalize behavior';
   END IF;
@@ -227,7 +227,7 @@ SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000004
 DO $$
 BEGIN
   BEGIN
-    PERFORM * FROM submit_pitch_for_consent('16000000-0000-0000-0000-000000000002');
+    PERFORM * FROM submit_pitch_for_consent('16000000-0000-0000-0000-000000000002', 'email', 'dater@example.test', 'Blair');
     RAISE EXCEPTION 'finalize accepted pitch media without validation';
   EXCEPTION
     WHEN raise_exception THEN
@@ -268,7 +268,7 @@ SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000004
 DO $$
 BEGIN
   BEGIN
-    PERFORM * FROM submit_pitch_for_consent('16000000-0000-0000-0000-000000000002');
+    PERFORM * FROM submit_pitch_for_consent('16000000-0000-0000-0000-000000000002', 'email', 'dater@example.test', 'Blair');
     RAISE EXCEPTION 'finalize accepted skipped pitch moderation';
   EXCEPTION
     WHEN raise_exception THEN
@@ -306,7 +306,7 @@ DECLARE
   request_id UUID;
 BEGIN
   SELECT consent_request_id INTO request_id
-    FROM submit_pitch_for_consent('16000000-0000-0000-0000-000000000002');
+    FROM submit_pitch_for_consent('16000000-0000-0000-0000-000000000002', 'email', 'dater@example.test', 'Blair');
   IF request_id IS NULL THEN
     RAISE EXCEPTION 'validated pitch media did not permit finalize';
   END IF;

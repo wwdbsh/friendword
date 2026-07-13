@@ -45,7 +45,12 @@ BEGIN
   );
   INSERT INTO audit_consent_token
   SELECT consent_token
-    FROM submit_pitch_for_consent('a0300000-0000-0000-0000-000000000001');
+    FROM submit_pitch_for_consent(
+      'a0300000-0000-0000-0000-000000000001',
+      'email',
+      'introducer@example.test',
+      'Alex'
+    );
 END;
 $$;
 

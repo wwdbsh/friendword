@@ -19,7 +19,7 @@ VALUES
 CREATE TEMP TABLE controls_journey (consent_token TEXT) ON COMMIT DROP;
 GRANT ALL ON controls_journey TO anon, authenticated;
 INSERT INTO controls_journey
-SELECT consent_token FROM submit_pitch_for_consent('10000000-0000-0000-0000-000000000002');
+SELECT consent_token FROM submit_pitch_for_consent('10000000-0000-0000-0000-000000000002', 'email', 'introducer@example.test', 'Alex');
 
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000001';
 CREATE TEMP TABLE controls_claim (pitch_draft_id UUID) ON COMMIT DROP;

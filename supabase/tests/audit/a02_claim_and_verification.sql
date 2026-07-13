@@ -50,7 +50,9 @@ INSERT INTO consent_requests (
   pitch_draft_id,
   subject_user_id,
   token_hash,
-  status
+  status,
+  invite_contact_channel,
+  invite_contact_hash
 )
 VALUES
   (
@@ -58,14 +60,18 @@ VALUES
     'a0200000-0000-0000-0000-000000000001',
     NULL,
     encode(digest('audit-forwarded-token', 'sha256'), 'hex'),
-    'pending'
+    'pending',
+    'email',
+    encode(digest('invited-person@example.test', 'sha256'), 'hex')
   ),
   (
     'a0200000-0000-0000-0000-000000000012',
     'a0200000-0000-0000-0000-000000000002',
     NULL,
     encode(digest('audit-unverified-token', 'sha256'), 'hex'),
-    'pending'
+    'pending',
+    'email',
+    encode(digest('dater@example.test', 'sha256'), 'hex')
   );
 
 INSERT INTO pitch_assets (id, pitch_draft_id, uploaded_by_user_id, asset_type, storage_path)
@@ -134,24 +140,6 @@ BEGIN
        WHERE id = 'a0200000-0000-0000-0000-000000000012'
     $sql$;
   END IF;
-END;
-$$;
-
-DO $$
-BEGIN
-  EXECUTE $sql$
-    UPDATE consent_requests
-       SET invite_contact_channel = 'email',
-           invite_contact_hash = CASE id
-             WHEN 'a0200000-0000-0000-0000-000000000011'
-               THEN encode(digest('invited-person@example.test', 'sha256'), 'hex')
-             ELSE encode(digest('dater@example.test', 'sha256'), 'hex')
-           END
-     WHERE id IN (
-       'a0200000-0000-0000-0000-000000000011',
-       'a0200000-0000-0000-0000-000000000012'
-     )
-  $sql$;
 END;
 $$;
 
@@ -224,7 +212,7 @@ BEGIN
     WHEN raise_exception THEN
       IF SQLERRM = 'audit_unverified_publish_was_accepted' THEN
         unverified_publish_rejected := false;
-      ELSIF SQLERRM ~* 'verification' THEN
+      ELSIF SQLERRM ~* 'verification|evidence' THEN
         unverified_publish_rejected := true;
       ELSE
         RAISE;

@@ -355,7 +355,12 @@ SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000004';
 INSERT INTO slice_d_state (key, text_value)
 SELECT 'decline-token', consent_token
-  FROM submit_pitch_for_consent('d1300000-0000-0000-0000-000000000002');
+  FROM submit_pitch_for_consent(
+    'd1300000-0000-0000-0000-000000000002',
+    'email',
+    'introducer@example.test',
+    'Alex'
+  );
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000001';
 DO $$
 BEGIN
@@ -458,7 +463,9 @@ INSERT INTO consent_requests (
   subject_user_id,
   token_hash,
   status,
-  revision_id
+  revision_id,
+  invite_contact_channel,
+  invite_contact_hash
 )
 VALUES
   (
@@ -466,14 +473,18 @@ VALUES
     '00000000-0000-0000-0000-000000000002',
     encode(digest('identity-gated-token', 'sha256'), 'hex'),
     'claimed',
-    'd1300000-0000-0000-0000-000000000021'
+    'd1300000-0000-0000-0000-000000000021',
+    'email',
+    encode(digest('email:dater@example.test', 'sha256'), 'hex')
   ),
   (
     'd1300000-0000-0000-0000-000000000004',
     '00000000-0000-0000-0000-000000000003',
     encode(digest('suspended-approval-token', 'sha256'), 'hex'),
     'claimed',
-    'd1300000-0000-0000-0000-000000000022'
+    'd1300000-0000-0000-0000-000000000022',
+    'email',
+    encode(digest('email:interested@example.test', 'sha256'), 'hex')
   );
 UPDATE app_config SET value = 'on' WHERE key = 'identity_enforcement';
 UPDATE users SET account_status = 'suspended'
@@ -495,7 +506,7 @@ BEGIN
   EXCEPTION
     WHEN raise_exception THEN
       IF SQLERRM = 'identity enforcement gate was lost' THEN RAISE; END IF;
-      IF SQLERRM <> 'identity verification required' THEN RAISE; END IF;
+      IF SQLERRM NOT LIKE '%identity evidence required%' THEN RAISE; END IF;
   END;
 
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000003', true);

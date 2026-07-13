@@ -87,11 +87,20 @@ VALUES
   ('profile-media', 'a0800000-0000-0000-0000-000000000004/one.jpg', 'a0800000-0000-0000-0000-000000000004', '{"mimetype":"image/jpeg"}'),
   ('profile-media', 'a0800000-0000-0000-0000-000000000004/two.jpg', 'a0800000-0000-0000-0000-000000000004', '{"mimetype":"image/jpeg"}');
 
-INSERT INTO verification_checks (user_id, provider, provider_reference, status, verified_at)
-VALUES
-  ('a0800000-0000-0000-0000-000000000001', 'audit', 'audit-p08-storage', 'passed', now()),
-  ('a0800000-0000-0000-0000-000000000002', 'audit', 'audit-p08-phone', 'passed', now()),
-  ('a0800000-0000-0000-0000-000000000004', 'audit', 'audit-p08-valid', 'passed', now());
+-- Second-audit evidence model (0030): typed, unexpired adult+liveness rows.
+INSERT INTO verification_checks (
+  user_id, provider, provider_reference, status, verified_at,
+  check_type, provider_ref, result, checked_at, expires_at
+)
+SELECT u.id, 'audit', 'audit-p08-' || right(u.id::TEXT, 3) || '-' || kind.check_type, 'passed', now(),
+       kind.check_type, 'audit-p08-' || right(u.id::TEXT, 3) || '-' || kind.check_type,
+       'passed', now(), now() + INTERVAL '30 days'
+  FROM (VALUES
+    ('a0800000-0000-0000-0000-000000000001'::UUID),
+    ('a0800000-0000-0000-0000-000000000002'::UUID),
+    ('a0800000-0000-0000-0000-000000000004'::UUID)
+  ) AS u(id)
+ CROSS JOIN (VALUES ('adult_18plus'), ('liveness')) AS kind(check_type);
 
 SET LOCAL ROLE authenticated;
 DO $$
@@ -153,7 +162,7 @@ BEGIN
     WHEN raise_exception THEN
       IF SQLERRM = 'audit_provider_verification_was_accepted' THEN
         verification_rejected := false;
-      ELSIF SQLERRM ~* 'verification' THEN
+      ELSIF SQLERRM ~* 'verification|evidence' THEN
         verification_rejected := true;
       ELSE
         RAISE;

@@ -8,7 +8,7 @@ DO $$
 BEGIN
   -- Not the creator of draft ...-0002 → must fail.
   BEGIN
-    PERFORM * FROM submit_pitch_for_consent('10000000-0000-0000-0000-000000000002');
+    PERFORM * FROM submit_pitch_for_consent('10000000-0000-0000-0000-000000000002', 'email', 'dater@example.test', 'Blair');
     RAISE EXCEPTION 'non-creator was able to submit a draft for consent';
   EXCEPTION
     WHEN raise_exception THEN
@@ -32,7 +32,7 @@ DECLARE
 BEGIN
   SELECT consent_request_id, consent_token
     INTO returned_request_id, returned_token
-    FROM submit_pitch_for_consent('10000000-0000-0000-0000-000000000002');
+    FROM submit_pitch_for_consent('10000000-0000-0000-0000-000000000002', 'email', 'dater@example.test', 'Blair');
 
   IF returned_token IS NULL OR length(returned_token) < 24 THEN
     RAISE EXCEPTION 'submit did not return a usable consent token';
@@ -57,7 +57,7 @@ BEGIN
 
   -- Second submit of the same draft → must fail (no longer in draft status).
   BEGIN
-    PERFORM * FROM submit_pitch_for_consent('10000000-0000-0000-0000-000000000002');
+    PERFORM * FROM submit_pitch_for_consent('10000000-0000-0000-0000-000000000002', 'email', 'dater@example.test', 'Blair');
     RAISE EXCEPTION 'double submit was accepted';
   EXCEPTION
     WHEN raise_exception THEN
@@ -74,7 +74,7 @@ SET LOCAL ROLE anon;
 DO $$
 BEGIN
   BEGIN
-    PERFORM * FROM submit_pitch_for_consent('10000000-0000-0000-0000-000000000002');
+    PERFORM * FROM submit_pitch_for_consent('10000000-0000-0000-0000-000000000002', 'email', 'dater@example.test', 'Blair');
     RAISE EXCEPTION 'anon was able to call submit RPC';
   EXCEPTION
     WHEN insufficient_privilege THEN NULL;

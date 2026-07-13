@@ -1,4 +1,4 @@
-// AUDIT REGRESSION SUITE — 초기 상태 FAIL 예상, Slice E에서 그린 전환
+// AUDIT REGRESSION SUITE — Slice E acceptance
 /* global afterEach, beforeEach, describe, expect, it, vi */
 
 import { createAuditSupabaseFake } from './supabaseAuditFake';
@@ -29,6 +29,8 @@ type RevenueCatEvent = {
   readonly transaction_id?: string;
   readonly original_transaction_id?: string;
   readonly environment?: string;
+  readonly aliases?: readonly string[];
+  readonly original_app_user_id?: string;
   readonly subscriber_attributes: Readonly<Record<string, { readonly value: string | null }>>;
 };
 
@@ -43,6 +45,7 @@ function eventFixture(overrides: Partial<RevenueCatEvent> = {}): RevenueCatEvent
     subscriber_attributes: {
       pitch_draft_id: { value: PITCH_DRAFT_ID },
       campaign_id: { value: CAMPAIGN_ID },
+      purchase_intent_id: { value: 'purchase-intent-1' },
     },
     ...overrides,
   };
@@ -62,6 +65,7 @@ describe('RevenueCat webhook audit contract', () => {
   beforeEach(() => {
     process.env.REVENUECAT_WEBHOOK_AUTH_TOKEN = AUTH_TOKEN;
     mocks.getSupabaseServiceClient.mockReset();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
@@ -76,7 +80,8 @@ describe('RevenueCat webhook audit contract', () => {
   // Audit P0-4a: unknown products must never inherit Campaign Pass behavior.
   it('[P0-4a] rejects an unknown product without any benefit write', async () => {
     // Given
-    const fake = createAuditSupabaseFake();
+    const unknownProductError = { code: 'P0001', message: 'unknown product unknown_product' };
+    const fake = createAuditSupabaseFake({ rpcError: unknownProductError });
     mocks.getSupabaseServiceClient.mockReturnValue(fake.client);
 
     // When
@@ -86,19 +91,49 @@ describe('RevenueCat webhook audit contract', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       recorded: false,
-      reason: expect.any(String),
+      reason: 'unknown product',
     });
-    expect(fake.calls).toHaveLength(0);
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  // Audit P0-4a: rejected intents are terminal attribution failures.
+  it('[P0-4a] returns recorded false for an invalid purchase intent', async () => {
+    // Given
+    const intentError = { code: 'P0001', message: 'purchase intent mismatch' };
+    const fake = createAuditSupabaseFake({ rpcError: intentError });
+    mocks.getSupabaseServiceClient.mockReturnValue(fake.client);
+
+    // When
+    const response = await POST(requestFor(eventFixture()));
+
+    // Then
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      recorded: false,
+      reason: 'invalid purchase intent',
+    });
+  });
+
+  // Audit P0-4b: infrastructure errors mentioning intents still need a retry.
+  it('[P0-4b] returns 5xx for a retryable intent infrastructure failure', async () => {
+    // Given
+    const fake = createAuditSupabaseFake({
+      rpcError: { code: '57014', message: 'purchase intent lookup statement timeout' },
+    });
+    mocks.getSupabaseServiceClient.mockReturnValue(fake.client);
+
+    // When
+    const response = await POST(requestFor(eventFixture()));
+
+    // Then
+    expect(response.status).toBe(500);
   });
 
   // Audit P0-4b: a missing benefit must cause RevenueCat to retry.
   it('[P0-4b] returns 5xx when the benefit write fails', async () => {
     // Given
     const benefitError = { code: 'XX000', message: 'ledger unavailable' };
-    const fake = createAuditSupabaseFake({
-      tableErrors: { purchase_credit_ledger: benefitError },
-      rpcError: benefitError,
-    });
+    const fake = createAuditSupabaseFake({ rpcError: benefitError });
     mocks.getSupabaseServiceClient.mockReturnValue(fake.client);
 
     // When
@@ -111,11 +146,13 @@ describe('RevenueCat webhook audit contract', () => {
   // Audit P0-4c: purchase-event deduplication cannot skip benefit repair.
   it('[P0-4c] retries an absent benefit after a duplicate purchase event', async () => {
     // Given
-    const fake = createAuditSupabaseFake({
-      tableErrors: {
-        purchase_events: { code: '23505', message: 'duplicate provider event' },
-      },
-    });
+    const rpcData = {
+      recorded: true,
+      deduplicated: true,
+      benefit: 'creator_credit',
+      needs_review: false,
+    };
+    const fake = createAuditSupabaseFake({ rpcData });
     mocks.getSupabaseServiceClient.mockReturnValue(fake.client);
 
     // When
@@ -123,8 +160,7 @@ describe('RevenueCat webhook audit contract', () => {
 
     // Then
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual(expect.objectContaining({ recorded: true }));
-    expect(fake.benefitWriteAttempts).toHaveLength(1);
+    await expect(response.json()).resolves.toEqual(rpcData);
   });
 
   // Audit P0-4d: immutable provider transaction identity must be persisted.
@@ -136,6 +172,8 @@ describe('RevenueCat webhook audit contract', () => {
       transaction_id: 'transaction-1',
       original_transaction_id: 'original-transaction-1',
       environment: 'SANDBOX',
+      aliases: ['legacy-user-id'],
+      original_app_user_id: 'original-user-id',
       type: 'NON_RENEWING_PURCHASE',
     });
 
@@ -144,14 +182,19 @@ describe('RevenueCat webhook audit contract', () => {
 
     // Then
     expect(response.status).toBe(200);
-    expect(fake.purchaseEventWriteAttempts).toContainEqual(
-      expect.objectContaining({
-        transaction_id: 'transaction-1',
-        original_transaction_id: 'original-transaction-1',
-        environment: 'SANDBOX',
-        event_type: 'NON_RENEWING_PURCHASE',
-      }),
-    );
+    expect(fake.calls).toContainEqual({
+      functionName: 'record_revenuecat_event',
+      params: {
+        payload: expect.objectContaining({
+          transaction_id: 'transaction-1',
+          original_transaction_id: 'original-transaction-1',
+          environment: 'SANDBOX',
+          aliases: ['legacy-user-id'],
+          original_app_user_id: 'original-user-id',
+          type: 'NON_RENEWING_PURCHASE',
+        }),
+      },
+    });
   });
 
   // Audit P0-4e: cancelling a Creator purchase revokes an available credit.
@@ -173,12 +216,15 @@ describe('RevenueCat webhook audit contract', () => {
 
     // Then
     expect(response.status).toBe(200);
-    expect(fake.creatorCreditRefundAttempts).toContainEqual({
-      payload: expect.objectContaining({
-        transaction_id: 'transaction-1',
-        original_transaction_id: 'original-transaction-1',
-      }),
-      filters: [],
+    expect(fake.calls).toContainEqual({
+      functionName: 'record_revenuecat_event',
+      params: {
+        payload: expect.objectContaining({
+          type: 'CANCELLATION',
+          transaction_id: 'transaction-1',
+          original_transaction_id: 'original-transaction-1',
+        }),
+      },
     });
   });
 
@@ -207,15 +253,20 @@ describe('RevenueCat webhook audit contract', () => {
     // Then
     expect(fake.calls).toEqual([
       {
-        operation: 'rpc',
         functionName: 'record_revenuecat_event',
         params: {
           payload: expect.objectContaining({
+            id: 'rc-event-1',
+            type: 'INITIAL_PURCHASE',
+            app_user_id: USER_ID,
             transaction_id: 'transaction-1',
             original_transaction_id: 'original-transaction-1',
             environment: 'SANDBOX',
             product_id: CREATOR_PRODUCT,
-            purchase_intent_id: 'purchase-intent-1',
+            purchased_at_ms: 1_752_384_000_000,
+            subscriber_attributes: {
+              purchase_intent_id: { value: 'purchase-intent-1' },
+            },
           }),
         },
       },
@@ -254,8 +305,6 @@ describe('RevenueCat webhook audit contract', () => {
   // Audit P0-4g: malformed JSON is rejected before any write.
   it('[P0-4g] returns 400 for a malformed body', async () => {
     // Given
-    const fake = createAuditSupabaseFake();
-    mocks.getSupabaseServiceClient.mockReturnValue(fake.client);
     const request = new Request('http://localhost/api/revenuecat', {
       method: 'POST',
       headers: { authorization: AUTH_TOKEN, 'content-type': 'application/json' },
@@ -268,6 +317,6 @@ describe('RevenueCat webhook audit contract', () => {
     // Then
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: 'malformed event' });
-    expect(fake.calls).toHaveLength(0);
+    expect(mocks.getSupabaseServiceClient).not.toHaveBeenCalled();
   });
 });

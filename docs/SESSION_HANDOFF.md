@@ -1,7 +1,13 @@
 # PROJECT HANDOFF
 
-> 갱신: 2026-07-13 02:15 KST · 최신 커밋 `2eb67e7` (main, CI 그린)
+> 갱신: 2026-07-13 02:40 KST · 최신 커밋 `5c367ff` (main, CI 그린)
 > 읽는 순서: 이 문서 → `docs/TASKS.md` → 필요 시 `FRIENDWORD_HANDOFF.md`(제품 원본), `docs/DESIGN.md`(디자인), `docs/OPS.md`(운영), `docs/REVENUECAT_SETUP.md`(결제 셋업), `CLAUDE.md`/`AGENTS.md`(협업 규칙)
+
+## NEXT SESSION 지시 (사용자 확정, 2026-07-13)
+
+- **작업 형태 복귀**: Advisor(Fable 5) 단독 모드 종료 → **codex 워커 협업 재개** (`friendword-codex-1/2/3` tmux 세션). CLAUDE.md 1~5 규칙 그대로: Advisor가 분해·brief 작성·통합 검증 소유, 워커 결과는 diff·테스트·manual QA 직접 재검증 전까지 미완료
+- **방향**: App Store 심사 준비는 지금 하지 않는다(출시 창구가 8/1 이후라 급하지 않음). 대신 **개발 계속 — 부족한 부분 보완 + 사용자 피드백 반영**이 다음 세션의 축
+- 다음 세션 시작 시: 이 문서 → 사용자에게 피드백/보완 우선순위 확인 → 워커 brief 분해
 
 ## CURRENT STATE
 
@@ -35,15 +41,20 @@
 2. **(사용자) OPENAI_API_KEY 입력** — 넣는 즉시 `/api/transcribe`가 실전사·구조화 초안 생성 (지금은 501)
 3. **(사용자) RevenueCat 셋업** — `docs/REVENUECAT_SETUP.md` 체크리스트 (대시보드·제품 2종·키 2개·dev build). Shipaton 필수
 4. **(사용자+Advisor·출시 게이트) 신원 확인 공급자 선정** — selfie liveness/face match 벤더 결정 + 키 입력 → `UnconfiguredIdentityVerificationProvider` 교체. 실사용자 받기 전 필수
-5. **(P1) 모바일 dev build** — `expo prebuild` + `expo run:ios` (react-native-purchases 네이티브 모듈)
-6. **(P1) App Store 출시 준비** — 18+ 나이 게이트 화면, EAS 빌드, 심사 메타데이터, 7월 말 심사 제출 + 수동 release (데이팅 4.3(b)+UGC 리스크)
-7. **(P2) 9:16 모션 피치 MP4 export** (media-worker), 자막·키네틱 텍스트(전사 결과 활용), Vouch Cards(Flow D)
-8. **(P2) 만료 캠페인 자동 status 전이** (현재는 읽기 시 필터로 처리 — pg_cron 또는 스케줄러)
-9. **(게이트)** Devpost 공식 Rules 게시 시 `docs/HACKATHON_RULES.md` 재확인
+5. **(P1·다음 세션 축) 보완 + 피드백 반영** — 사용자 피드백 수집 후 우선순위 확정. 알려진 보완 후보:
+   - 모바일 손 QA(사진 업로드→공유 화면 경로, 시뮬레이터) + 발견 버그 수정
+   - 웹 계정 플로우 시각 QA(interest/inbox/rooms — 스크린샷 QA 미실시 표면)
+   - 자막·키네틱 텍스트(전사 결과를 공개 페이지 플레이어에 연결)
+   - 만료 캠페인 자동 status 전이(pg_cron), 채팅 폴링→Realtime 전환 검토
+   - 랜딩(`/`) 페이지 — 현재 스캐폴드 수준
+6. **(P2) 9:16 모션 피치 MP4 export** (media-worker), Vouch Cards(Flow D)
+7. **(보류·8/1 이후 일정에 맞춰) App Store 출시 준비** — 18+ 나이 게이트 화면, dev build(`expo prebuild`), EAS, 심사 메타데이터, 수동 release. 데이팅 4.3(b)+UGC 리스크 대응 포함. 사용자 지시로 지금은 착수하지 않음
+8. **(게이트)** Devpost 공식 Rules 게시 시 `docs/HACKATHON_RULES.md` 재확인
 
 ## IMPORTANT DECISIONS
 
-- **워커 운영**: codex 위임 중단, Advisor(Fable 5) 단독 구현 모드
+- **워커 운영**: ~~codex 위임 중단, Advisor 단독 모드~~ → **2026-07-13 사용자 지시로 다음 세션부터 codex 워커 협업 복귀**. 단독 모드는 2026-07-12~13 코어 루프 구축 구간에만 적용된 한시 조치였음. 이유: 코어 루프가 완성돼 병렬 분해 가능한 보완 작업 국면으로 전환. 영향: 다음 세션은 brief 작성(`.briefs/` 패턴)부터 시작
+- **출시 일정**: App Store 심사 준비는 보류(출시 창구 8/1~9/30, 아직 여유). 개발·보완 우선 (2026-07-13 사용자 결정)
 - **보안**: API 키·토큰 값은 사용자가 직접 입력. Claude는 위치만 안내
 - **디자인**: "Hype Mixtape" (크림+탠저린/핫핑크/선샤인, 스티커 미학, Unbounded+Bricolage). 웹 공용 스타일 `apps/web/src/styles/flowCard.module.css`
 - **아키텍처**: 상태 전이는 전부 RPC. 동의 토큰 raw 1회+sha256. 스토리지 버킷 `pitch-media`(draft 폴더)·`profile-media`(user 폴더, 관심 수신 Dater만 열람). 웹 세션 storageKey `friendword-web-auth`. 채팅은 4초 폴링(텍스트 전용)
@@ -54,7 +65,7 @@
 
 - Resend 샌드박스 → 도메인 인증 전 타 사용자 이메일 발송 500 (출시 게이트 1)
 - 이메일 템플릿 config push 후 auth 서비스 반영 ~10분. config.toml에 원격 값 미러링 필수, SMTP 크리덴셜 금지
-- App Review 리스크(데이팅 4.3b + UGC): 7월 말 제출 + 수동 release
+- App Review 리스크(데이팅 4.3b + UGC): 심사 준비는 보류 상태지만 8/1~9/30 창구를 놓치면 참가 자격 상실 — 7월 중하순에 준비 착수 시점을 다시 판단할 것
 - `database.types.ts` 수동 부분 타입 — 테이블·RPC 추가 시 갱신 필수
 - 시뮬레이터 인터랙션 QA는 사용자 손 테스트(모바일 사진 업로드→공유 화면 경로는 코드 검증만 됨, 손 QA 권장)
 - plpgsql 함정: `#variable_conflict use_column`; publish 전 consent approved 트리거(0001); RPC 시그니처 변경은 DROP 후 CREATE(기본값으로 하위 호환)

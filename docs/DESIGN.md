@@ -29,6 +29,40 @@ Friendword에서 친구는 나의 **hype person**이다. UI는 절친이 나를 
 - 불꽃·하트 이모지 남발, 스와이프 카드 은유
 - 과도한 글래스모피즘·블러
 
+## 레이어와 표면별 표현 강도 (2026-07-13 감사 반영 — 구현은 Slice I)
+
+Hype Mixtape는 폐기하지 않는다. 문제는 캠페인 포스터의 언어를 신원·결제·신고까지
+같은 크기로 말한 것이다. 시스템을 세 레이어로 분리한다:
+
+- **Brand Foundation**(전 표면 공통): cream/ink, Bricolage, 파형 모티프
+- **Campaign Expression**(공개 피치·소셜): 스티커·틸트·하드 섀도·Unbounded 전부 허용
+- **Trust Layer**(동의·신원·결제·신고·삭제): 장식보다 상태·위험·복구 가능성·명확한
+  hierarchy. tilt 0, soft shadow 또는 1px border, ease-out 모션, Bricolage 중심.
+  Unbounded는 wordmark/단일 heading 외 금지. teal은 신뢰 신호로만
+
+| 표면                                         | 표현 강도 | 규칙                                                     |
+| -------------------------------------------- | --------: | -------------------------------------------------------- |
+| 공개 피치·social asset                       |      100% | hard shadow, tilt, sticker, bounce, Unbounded 허용       |
+| Introducer 피치 제작                         |       70% | track metaphor·선택 chip 유지, form/card 반복은 절제     |
+| 모바일 홈                                    |       40% | hero 1개만 강하게, 보조 탐색은 조용하게                  |
+| Dater consent                                |       20% | horizontal·low motion·soft elevation, teal을 신뢰 신호로 |
+| Interest / inbox / chat                      |    10~20% | 사진·텍스트·판단이 주인공, tilt 제거                     |
+| identity / phone / payment / report / delete |     0~10% | 장식보다 상태·위험·복구 가능성·명확한 hierarchy 우선     |
+
+컴포넌트 분리(Slice I): `CampaignCard` / `TrustCard` / `PrimaryAction` /
+`SafetyAction` / `QuietNavAction`. "Release day", "This link doesn't play" 같은
+믹스테이프 은유는 campaign surface 전용 — identity/payment/error/safety에서는
+직접적인 문구를 쓴다.
+
+### 대비 정정 (D-P0, 2026-07-13)
+
+측정 결과 `onPop #FFF9F2` on `pop #FF5B2E`는 **2.96:1**로 아래 접근성 기준을
+위반한다(`danger` 위 white 3.91:1, `textFaint` on cream 2.72:1도 위반). **결정:
+saturated fill 위 기본 텍스트는 `ink #221B15`로 통일한다.** 흰색을 유지하려면
+4.5:1이 실측 검증된 어두운 배경 token을 별도로 만든다. `textFaint`는
+placeholder/disabled 외의 fine print에 쓰지 않는다. 자동 contrast check를
+Slice I acceptance로 한다.
+
 ## 표면별 지침
 
 ### 모바일 앱 (Expo)

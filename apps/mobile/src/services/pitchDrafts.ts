@@ -8,7 +8,7 @@ import {
   type PitchPhoto,
   type PitchRecording,
   type PitchRelationship,
-  type PitchServerSync,
+  type PitchReview,
 } from './types';
 import { purgeInvitationContact } from './draftStorage';
 
@@ -24,9 +24,16 @@ export interface PitchDraftService {
   saveRelationship(id: PitchDraftId, relationship: PitchRelationship): Promise<PitchDraft>;
   savePhotos(id: PitchDraftId, photos: readonly PitchPhoto[]): Promise<PitchDraft>;
   saveRecording(id: PitchDraftId, recording: PitchRecording): Promise<PitchDraft>;
-  submitForConsent(id: PitchDraftId): Promise<PitchDraft>;
+  prepareForReview(id: PitchDraftId): Promise<PitchDraft>;
+  loadGeneratedReview(id: PitchDraftId): Promise<PitchDraft>;
+  saveReview(id: PitchDraftId, review: PitchReview): Promise<PitchDraft>;
+  finalizeConsent(id: PitchDraftId): Promise<PitchDraft>;
   purgeInvitationContact(id: PitchDraftId): Promise<PitchDraft>;
   getMyDrafts(): Promise<readonly PitchDraft[]>;
+}
+
+export function hasFinalizedConsent(draft: PitchDraft): boolean {
+  return draft.server !== null && draft.server.consentRequestId !== null;
 }
 
 export class PitchDraftNotFoundError extends Error {
@@ -88,19 +95,77 @@ export class MockPitchDraftService implements PitchDraftService {
     return this.updateDraft(id, (draft) => ({ ...draft, recording }));
   }
 
-  async submitForConsent(id: PitchDraftId): Promise<PitchDraft> {
+  async prepareForReview(id: PitchDraftId): Promise<PitchDraft> {
     return this.updateDraft(id, (draft) => {
-      if (!draft.relationship || draft.photos.length === 0 || !draft.recording) {
-        throw new PitchDraftSubmissionError('Complete every track before sending for approval.');
+      this.requireCompleteDraft(draft);
+      if (draft.status !== 'draft' && draft.status !== 'changes_requested') {
+        throw new PitchDraftSubmissionError('This pitch is no longer editable.');
       }
-      if (draft.recording.durationMillis < 30_000) {
-        throw new PitchDraftSubmissionError('Record at least 30 seconds before sending.');
+      return draft;
+    });
+  }
+
+  async saveReview(id: PitchDraftId, review: PitchReview): Promise<PitchDraft> {
+    return this.updateDraft(id, (draft) => ({ ...draft, review }));
+  }
+
+  loadGeneratedReview(id: PitchDraftId): Promise<PitchDraft> {
+    return this.prepareForReview(id);
+  }
+
+  async finalizeConsent(id: PitchDraftId): Promise<PitchDraft> {
+    return this.updateDraft(id, (draft) => {
+      this.requireCompleteDraft(draft);
+      if (draft.review.headline.trim() === '' || draft.review.body.trim() === '') {
+        throw new PitchDraftSubmissionError('Write a headline and body before sending.');
       }
       if (!canTransitionPitchDraft(draft.status, 'consent_pending')) {
-        throw new PitchDraftSubmissionError('This pitch has already been sent for approval.');
+        throw new PitchDraftSubmissionError('This pitch is no longer editable.');
       }
-      return { ...draft, status: 'consent_pending' };
+      return {
+        ...draft,
+        status: 'consent_pending',
+        review: { ...draft.review, responseNote: null },
+      };
     });
+  }
+
+  async attachServerDraft(id: PitchDraftId, draftId: string): Promise<PitchDraft> {
+    return this.updateDraft(id, (draft) => ({
+      ...draft,
+      server: { draftId, consentRequestId: null, consentToken: null },
+    }));
+  }
+
+  async attachFinalizedConsent(
+    id: PitchDraftId,
+    submission: {
+      readonly consentRequestId: string;
+      readonly consentToken: string | null;
+    },
+  ): Promise<PitchDraft> {
+    return this.updateDraft(id, (draft) => {
+      if (draft.server === null) {
+        throw new PitchDraftSubmissionError('Prepare this pitch before sending.');
+      }
+      return {
+        ...draft,
+        status: 'consent_pending',
+        review: { ...draft.review, responseNote: null },
+        server: {
+          ...draft.server,
+          consentRequestId: submission.consentRequestId,
+          consentToken: submission.consentToken ?? draft.server.consentToken,
+        },
+      };
+    });
+  }
+
+  async syncServerReview(
+    id: PitchDraftId,
+    state: Pick<PitchDraft, 'status' | 'review'>,
+  ): Promise<PitchDraft> {
+    return this.updateDraft(id, (draft) => ({ ...draft, ...state }));
   }
 
   async purgeInvitationContact(id: PitchDraftId): Promise<PitchDraft> {
@@ -114,17 +179,13 @@ export class MockPitchDraftService implements PitchDraftService {
     });
   }
 
-  /**
-   * Records a completed server submission: the draft leaves local-only life
-   * and keeps the consent share info (raw token stays on-device only).
-   */
-  async attachServerSync(id: PitchDraftId, server: PitchServerSync): Promise<PitchDraft> {
-    return this.updateDraft(id, (draft) => {
-      if (!canTransitionPitchDraft(draft.status, 'consent_pending')) {
-        throw new PitchDraftSubmissionError('This pitch has already been sent for approval.');
-      }
-      return { ...draft, status: 'consent_pending', server };
-    });
+  private requireCompleteDraft(draft: PitchDraft): void {
+    if (!draft.relationship || draft.photos.length === 0 || !draft.recording) {
+      throw new PitchDraftSubmissionError('Complete every track before continuing.');
+    }
+    if (draft.recording.durationMillis < 30_000) {
+      throw new PitchDraftSubmissionError('Record at least 30 seconds before continuing.');
+    }
   }
 
   private async updateDraft(

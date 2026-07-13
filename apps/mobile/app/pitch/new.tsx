@@ -227,6 +227,7 @@ export default function NewPitchScreen() {
         <>
           <ReviewStep
             errorMessage={errorMessage}
+            progressMessage={submission.submitting ? '친구 자랑을 글로 정리하는 중…' : null}
             onBack={goBack}
             onRerecord={() => setTrack(4)}
             onSubmit={() => {

@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
-import type { DraftInputs } from '@friendword/contracts';
+import { pitchStructureSchema, type DraftInputs, type PitchStructure } from '@friendword/contracts';
 import type { Session } from '@supabase/supabase-js';
 
 import type { BrowserSupabaseClient } from './client';
-import type { PitchAssetRow, PitchDraftRow } from './database.types';
+import type { ConsentRequestRow, PitchAssetRow, PitchDraftRow } from './database.types';
 import {
   DataLayerError,
   InvalidDraftUpdateError,
@@ -23,6 +23,7 @@ const PITCH_MEDIA_BUCKET = 'pitch-media';
 export type UpdatePitchDraftInput = {
   readonly headline?: string | null;
   readonly body?: string | null;
+  readonly structure?: PitchStructure | null;
 };
 
 export type SignedAssetUpload = {
@@ -33,7 +34,7 @@ export type SignedAssetUpload = {
 
 export type ConsentSubmission = {
   readonly consentRequestId: string;
-  readonly consentToken: string;
+  readonly consentToken: string | null;
 };
 
 const consentInvitationSchema = z.object({
@@ -47,7 +48,7 @@ export type ConsentInvitationInput = z.input<typeof consentInvitationSchema>;
 const consentSubmissionRowSchema = z.array(
   z.object({
     consent_request_id: z.string().uuid(),
-    consent_token: z.string().min(24),
+    consent_token: z.string().min(24).nullable(),
   }),
 );
 
@@ -86,9 +87,16 @@ export class PitchDraftRepo {
   }
 
   async updateDraft(draftId: string, input: UpdatePitchDraftInput): Promise<PitchDraftRow> {
+    await this.getRequiredSession();
     const updates = {
       ...(input.headline === undefined ? {} : { headline: input.headline }),
       ...(input.body === undefined ? {} : { body: input.body }),
+      ...(input.structure === undefined
+        ? {}
+        : {
+            structure:
+              input.structure === null ? null : pitchStructureSchema.parse(input.structure),
+          }),
     };
     if (Object.keys(updates).length === 0) {
       throw new InvalidDraftUpdateError();
@@ -116,6 +124,31 @@ export class PitchDraftRepo {
       throw new DataLayerError('pitchDraft.listMine', error);
     }
 
+    return data;
+  }
+
+  async getDraft(draftId: string): Promise<PitchDraftRow> {
+    await this.getRequiredSession();
+    const { data, error } = await this.client
+      .from('pitch_drafts')
+      .select()
+      .eq('id', uuidSchema.parse(draftId))
+      .single();
+    if (error !== null) {
+      throw new DataLayerError('pitchDraft.get', error);
+    }
+    return data;
+  }
+
+  async listMyConsentRequests(): Promise<readonly ConsentRequestRow[]> {
+    await this.getRequiredSession();
+    const { data, error } = await this.client
+      .from('consent_requests')
+      .select()
+      .order('created_at', { ascending: false });
+    if (error !== null) {
+      throw new DataLayerError('pitchDraft.listConsentRequests', error);
+    }
     return data;
   }
 

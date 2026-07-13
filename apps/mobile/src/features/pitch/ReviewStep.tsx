@@ -17,6 +17,7 @@ type ReviewStepProps = {
   readonly recording: PitchRecording;
   readonly submitting: boolean;
   readonly errorMessage: string | null;
+  readonly progressMessage: string | null;
   readonly onBack: () => void;
   readonly onRerecord: () => void;
   readonly onSubmit: () => void;
@@ -28,6 +29,7 @@ export function ReviewStep({
   recording,
   submitting,
   errorMessage,
+  progressMessage,
   onBack,
   onRerecord,
   onSubmit,
@@ -45,7 +47,7 @@ export function ReviewStep({
       footer={
         <HypeButton
           disabled={!isLongEnough || submitting}
-          label={submitting ? 'Sending…' : 'Send for approval'}
+          label={submitting ? 'Preparing…' : errorMessage ? 'Try again' : 'Create my draft'}
           onPress={onSubmit}
         />
       }
@@ -95,6 +97,7 @@ export function ReviewStep({
         </Text>
       </StickerCard>
 
+      {progressMessage ? <Text style={styles.progress}>{progressMessage}</Text> : null}
       {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
     </PitchStepFrame>
   );
@@ -151,4 +154,5 @@ const styles = StyleSheet.create({
     lineHeight: fontSizes.sm * 1.45,
   },
   error: { color: colors.danger, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.sm },
+  progress: { color: colors.fresh, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.md },
 });

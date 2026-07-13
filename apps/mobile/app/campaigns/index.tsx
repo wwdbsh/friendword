@@ -89,6 +89,25 @@ export default function CampaignsScreen() {
               {draft.photos.length} photo{draft.photos.length === 1 ? '' : 's'} ·{' '}
               {draft.recording ? formatDuration(draft.recording.durationMillis) : 'No voice track'}
             </Text>
+            {draft.status === 'changes_requested' && draft.review.responseNote ? (
+              <View style={styles.changeNote}>
+                <Text style={styles.changeNoteTitle}>Requested update</Text>
+                <Text style={styles.message}>{draft.review.responseNote}</Text>
+              </View>
+            ) : null}
+            {draft.server !== null &&
+            (draft.status === 'draft' || draft.status === 'changes_requested') ? (
+              <HypeButton
+                label={
+                  draft.status === 'changes_requested'
+                    ? 'Review requested changes'
+                    : 'Continue editing'
+                }
+                onPress={() =>
+                  router.push({ pathname: '/pitch/review', params: { draftId: draft.id } })
+                }
+              />
+            ) : null}
             {draft.server !== null && draft.status === 'consent_pending' ? (
               <HypeButton
                 label="Share the approval invite"
@@ -194,4 +213,15 @@ const styles = StyleSheet.create({
   },
   status: { color: colors.onHype, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.xs },
   meta: { color: colors.fresh, fontFamily: 'BricolageGrotesqueSemiBold', fontSize: fontSizes.sm },
+  changeNote: {
+    gap: spacing.xs,
+    borderLeftColor: colors.fresh,
+    borderLeftWidth: spacing.xs,
+    paddingLeft: spacing.md,
+  },
+  changeNoteTitle: {
+    color: colors.fresh,
+    fontFamily: 'BricolageGrotesqueBold',
+    fontSize: fontSizes.sm,
+  },
 });

@@ -8,15 +8,17 @@ import { trackEvent } from '@friendword/data';
 
 import { HypeButton, StickerCard } from '../../src/components';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
+import { hasFinalizedConsent } from '../../src/services/pitchDrafts';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 import type { PitchDraft } from '../../src/services/types';
 import { buildConsentUrl } from '../../src/services/webOrigin';
 
 export default function SharePitchScreen() {
   const router = useRouter();
-  const { draftId } = useLocalSearchParams<{ draftId: string }>();
+  const { draftId, resent } = useLocalSearchParams<{ draftId: string; resent?: string }>();
   const [draft, setDraft] = useState<PitchDraft | null>(null);
   const [loading, setLoading] = useState(true);
+  const [shareError, setShareError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -27,6 +29,7 @@ export default function SharePitchScreen() {
         if (
           candidate === undefined ||
           candidate.server === null ||
+          !hasFinalizedConsent(candidate) ||
           candidate.relationship === null ||
           candidate.relationship.contact.kind === 'sent'
         ) {
@@ -55,38 +58,51 @@ export default function SharePitchScreen() {
   }, [draftId]);
 
   const friendName = draft?.relationship?.friendFirstName ?? 'your friend';
-  const consentUrl =
-    draft?.server === null || draft === null ? null : buildConsentUrl(draft.server.consentToken);
+  const consentToken = draft?.server?.consentToken ?? null;
+  const consentUrl = consentToken === null ? null : buildConsentUrl(consentToken);
+  const isResent = resent === '1';
 
   const shareInvite = async (): Promise<void> => {
     if (consentUrl === null) {
       return;
     }
-    trackEvent(getSupabaseClient(), 'campaign_shared', {
-      platform: 'mobile',
-      pitch_draft_id: draft?.server?.draftId ?? null,
-    });
-    await Share.share({
-      message: `I recorded a Friendword pitch about you — it only goes live if you approve it. Take a listen: ${consentUrl}`,
-    });
+    setShareError(null);
+    try {
+      const result = await Share.share({
+        message: `I recorded a Friendword pitch about you — it only goes live if you approve it. Take a listen: ${consentUrl}`,
+      });
+      if (result.action === Share.sharedAction) {
+        trackEvent(getSupabaseClient(), 'campaign_shared', {
+          platform: 'mobile',
+          pitch_draft_id: draft?.server?.draftId ?? null,
+        });
+      }
+    } catch {
+      setShareError('The share sheet could not open. Please try again.');
+    }
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <Stack.Screen options={{ title: 'Share approval invite' }} />
+      <Stack.Screen options={{ title: isResent ? 'Revision ready' : 'Share approval invite' }} />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.heading}>
-          <Text style={styles.eyebrow}>TRACK 6 · RELEASE DAY</Text>
-          <Text style={styles.title}>Your mix is on its way!</Text>
+          <Text style={styles.eyebrow}>
+            {isResent ? 'LATEST REVISION READY' : 'TRACK 6 · RELEASE DAY'}
+          </Text>
+          <Text style={styles.title}>
+            {isResent ? 'The existing link is up to date' : 'Your mix is ready to send!'}
+          </Text>
           <Text style={styles.subtitle}>
-            One last move: send {friendName} the private approval invite. Nothing goes public until
-            they say yes.
+            {isResent
+              ? `${friendName} can review the latest revision at the same private link.`
+              : `One last move: send ${friendName} the private approval invite. Nothing goes public until they say yes.`}
           </Text>
         </View>
 
         {loading ? <Text style={styles.subtitle}>Loading your invite…</Text> : null}
 
-        {!loading && consentUrl === null ? (
+        {!loading && !isResent && consentUrl === null ? (
           <StickerCard>
             <Text style={styles.cardTitle}>Invite not found</Text>
             <Text style={styles.subtitle}>
@@ -95,7 +111,20 @@ export default function SharePitchScreen() {
           </StickerCard>
         ) : null}
 
-        {consentUrl !== null ? (
+        {isResent && draft !== null ? (
+          <StickerCard>
+            <Text style={styles.cardTitle}>Existing link updated</Text>
+            <Text style={styles.subtitle}>
+              기존 링크가 최신 수정본으로{`\n`}바뀌었어요.{`\n`}새 링크나 재공유는 필요하지 않아요.
+            </Text>
+            <Text style={styles.finePrint}>
+              {friendName}’s existing private approval link now opens the latest revision. No new
+              link was issued.
+            </Text>
+          </StickerCard>
+        ) : null}
+
+        {!isResent && consentUrl !== null ? (
           <>
             <StickerCard>
               <Text style={styles.cardTitle}>{friendName}’s private invite</Text>
@@ -117,6 +146,7 @@ export default function SharePitchScreen() {
                   void shareInvite();
                 }}
               />
+              {shareError ? <Text style={styles.error}>{shareError}</Text> : null}
             </StickerCard>
 
             <StickerCard>
@@ -170,6 +200,7 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.sm,
     lineHeight: fontSizes.sm * 1.45,
   },
+  error: { color: colors.danger, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.sm },
   step: {
     color: colors.textSecondary,
     fontFamily: 'BricolageGrotesqueSemiBold',

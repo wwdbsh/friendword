@@ -1,13 +1,11 @@
-import { trackEvent } from '@friendword/data';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
-import { requestDraftGeneration } from '../../services/draftGeneration';
 import { pitchDraftService } from '../../services/draftServiceInstance';
 import { NeedsSignInError } from '../../services/pitchDraftsSupabase';
-import { getSupabaseClient } from '../../services/supabaseClient';
 import type { PitchDraftId } from '../../services/types';
 import { handleSubmitError, requireDraftId } from './pitchFlowState';
+import { preparePitchReview } from './preparePitchReview';
 
 type PitchSubmissionState = {
   readonly submitting: boolean;
@@ -23,25 +21,19 @@ export function usePitchSubmission(
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [signInVisible, setSignInVisible] = useState(false);
+  const inFlight = useRef(false);
 
   const submit = async (): Promise<void> => {
+    if (inFlight.current) {
+      return;
+    }
     const activeDraftId = requireDraftId(draftId);
+    inFlight.current = true;
     setSubmitting(true);
     try {
-      const submitted = await pitchDraftService.submitForConsent(activeDraftId);
-      trackEvent(getSupabaseClient(), 'consent_sent', {
-        platform: 'mobile',
-        pitch_draft_id: submitted.server?.draftId ?? null,
-      });
-      if (submitted.server !== null) {
-        void requestDraftGeneration(submitted.server.draftId);
-      }
+      await preparePitchReview(pitchDraftService, activeDraftId);
       setErrorMessage(null);
-      router.replace(
-        submitted.server === null
-          ? '/campaigns'
-          : { pathname: '/pitch/share', params: { draftId: submitted.id } },
-      );
+      router.push({ pathname: '/pitch/review', params: { draftId: activeDraftId } });
     } catch (error: unknown) {
       if (error instanceof NeedsSignInError) {
         setSignInVisible(true);
@@ -49,6 +41,7 @@ export function usePitchSubmission(
       }
       handleSubmitError(error, setErrorMessage);
     } finally {
+      inFlight.current = false;
       setSubmitting(false);
     }
   };

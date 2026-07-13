@@ -1,4 +1,10 @@
-import { PitchDraftRepo, UnauthenticatedError, type BrowserSupabaseClient } from '@friendword/data';
+import {
+  PitchDraftRepo,
+  UnauthenticatedError,
+  type BrowserSupabaseClient,
+  type ConsentRequestRow,
+  type PitchDraftRow,
+} from '@friendword/data';
 import type {
   DraftInputs,
   RelationshipDuration as ServerRelationshipDuration,
@@ -10,22 +16,33 @@ import {
   PitchDraftSubmissionError,
   type PitchDraftService,
 } from './pitchDrafts';
-import type {
-  EmailInvitationContact,
-  PitchDraft,
-  PitchDraftId,
-  PitchPhoto,
-  PitchRecording,
-  PitchRelationship,
-  RelationshipDuration,
-  RelationshipKind,
+import {
+  PitchReviewSchema,
+  type PitchDraft,
+  type PitchDraftId,
+  type PitchPhoto,
+  type PitchRecording,
+  type PitchRelationship,
+  type PitchReview,
+  type RelationshipDuration,
+  type RelationshipKind,
 } from './types';
 
-/** Signals the UI to open the sign-in sheet, then retry the submit. */
+type PitchDraftRepository = Pick<
+  PitchDraftRepo,
+  | 'createDraft'
+  | 'getDraft'
+  | 'listMyConsentRequests'
+  | 'listMyDrafts'
+  | 'registerAsset'
+  | 'requestAssetUpload'
+  | 'submitForConsent'
+  | 'updateDraft'
+>;
+
 export class NeedsSignInError extends Error {
   constructor() {
-    super('Sign in to send this pitch for approval.');
-    this.name = 'NeedsSignInError';
+    super('Sign in to continue this pitch.');
   }
 }
 
@@ -44,139 +61,211 @@ const RELATIONSHIP_DURATION_MAP: Record<RelationshipDuration, ServerRelationship
   '10+ years': 'gt10y',
 };
 
-function toDraftInputs(relationship: PitchRelationship): DraftInputs {
-  return {
-    relationshipType: RELATIONSHIP_TYPE_MAP[relationship.kind],
-    relationshipDuration: RELATIONSHIP_DURATION_MAP[relationship.duration],
-  };
-}
-
-/**
- * Drafts compose locally (photos and audio are local files anyway); the
- * moment of truth is submit, when the draft is created on Supabase, the
- * voice recording is uploaded to the private bucket, and the server RPC
- * issues the consent request. Without a configured client this degrades to
- * the pure local mock so the flow stays usable in development.
- */
 export class HybridPitchDraftService implements PitchDraftService {
-  private readonly local = new MockPitchDraftService();
-
-  constructor(private readonly client: BrowserSupabaseClient | null) {}
+  constructor(
+    client: BrowserSupabaseClient | null,
+    private readonly local = new MockPitchDraftService(),
+    private readonly repo: PitchDraftRepository | null = client === null
+      ? null
+      : new PitchDraftRepo(client),
+  ) {}
 
   createDraft(): Promise<PitchDraft> {
     return this.local.createDraft();
   }
 
-  saveRelationship(id: PitchDraftId, relationship: PitchRelationship): Promise<PitchDraft> {
-    return this.local.saveRelationship(id, relationship);
+  saveRelationship(id: PitchDraftId, value: PitchRelationship): Promise<PitchDraft> {
+    return this.local.saveRelationship(id, value);
   }
 
-  savePhotos(id: PitchDraftId, photos: readonly PitchPhoto[]): Promise<PitchDraft> {
-    return this.local.savePhotos(id, photos);
+  savePhotos(id: PitchDraftId, value: readonly PitchPhoto[]): Promise<PitchDraft> {
+    return this.local.savePhotos(id, value);
   }
 
-  saveRecording(id: PitchDraftId, recording: PitchRecording): Promise<PitchDraft> {
-    return this.local.saveRecording(id, recording);
-  }
-
-  getMyDrafts(): Promise<readonly PitchDraft[]> {
-    return this.local.getMyDrafts();
+  saveRecording(id: PitchDraftId, value: PitchRecording): Promise<PitchDraft> {
+    return this.local.saveRecording(id, value);
   }
 
   purgeInvitationContact(id: PitchDraftId): Promise<PitchDraft> {
     return this.local.purgeInvitationContact(id);
   }
 
-  async submitForConsent(id: PitchDraftId): Promise<PitchDraft> {
-    if (this.client === null) {
-      return this.local.submitForConsent(id);
+  async getMyDrafts(): Promise<readonly PitchDraft[]> {
+    const localDrafts = await this.local.getMyDrafts();
+    if (this.repo === null || localDrafts.every((draft) => draft.server === null)) {
+      return localDrafts;
     }
+    const [serverDrafts, requests] = await Promise.all([
+      this.repo.listMyDrafts(),
+      this.repo.listMyConsentRequests(),
+    ]);
+    for (const draft of localDrafts) {
+      const serverDraft = serverDrafts.find((row) => row.id === draft.server?.draftId);
+      if (serverDraft === undefined) {
+        continue;
+      }
+      const request = requests.find((row) => row.pitch_draft_id === serverDraft.id);
+      await this.local.syncServerReview(draft.id, {
+        status: serverDraft.status,
+        review: reviewFromServer(serverDraft, draft.review, request),
+      });
+    }
+    return this.local.getMyDrafts();
+  }
 
-    const drafts = await this.local.getMyDrafts();
-    const draft = drafts.find((candidate) => candidate.id === id);
-    if (!draft || !draft.relationship || draft.photos.length === 0 || !draft.recording) {
-      throw new PitchDraftSubmissionError('Complete every track before sending for approval.');
+  async prepareForReview(id: PitchDraftId): Promise<PitchDraft> {
+    const draft = await this.local.prepareForReview(id);
+    if (this.repo === null || draft.server !== null) {
+      return draft;
     }
-    if (draft.status !== 'draft') {
-      throw new PitchDraftSubmissionError('This pitch has already been sent for approval.');
+    if (draft.relationship?.contact.kind !== 'email') {
+      throw new PitchDraftSubmissionError('Enter a valid email before continuing.');
     }
-    const invitationContact = requireEmailContact(draft.relationship.contact);
-
-    const repo = new PitchDraftRepo(this.client);
-    let submission;
     try {
-      const serverDraft = await repo.createDraft(toDraftInputs(draft.relationship));
-      await this.uploadRecording(repo, serverDraft.id, draft.recording);
-      await this.uploadPhotos(repo, serverDraft.id, draft.photos);
-      submission = {
-        serverDraftId: serverDraft.id,
-        ...(await repo.submitForConsent(serverDraft.id, {
-          channel: 'email',
-          contact: invitationContact.value,
-          friendName: draft.relationship.friendFirstName,
-        })),
-      };
+      const serverDraft = await this.repo.createDraft(toDraftInputs(draft.relationship));
+      if (draft.recording === null) {
+        throw new PitchDraftSubmissionError('Record a voice track before continuing.');
+      }
+      await this.uploadFile(
+        this.repo,
+        serverDraft.id,
+        'voice.m4a',
+        draft.recording.uri,
+        'audio/mp4',
+      );
+      await this.repo.registerAsset(serverDraft.id, 'voice', 'voice.m4a');
+      for (const [index, photo] of draft.photos.entries()) {
+        const fileName = `photo-${index + 1}.jpg`;
+        await this.uploadFile(this.repo, serverDraft.id, fileName, photo.uri, 'image/jpeg');
+        await this.repo.registerAsset(serverDraft.id, 'photo', fileName, index);
+      }
+      return this.local.attachServerDraft(id, serverDraft.id);
     } catch (error: unknown) {
       if (error instanceof UnauthenticatedError) {
         throw new NeedsSignInError();
       }
       throw error;
     }
+  }
 
-    return this.local.attachServerSync(id, {
-      draftId: submission.serverDraftId,
-      consentRequestId: submission.consentRequestId,
-      consentToken: submission.consentToken,
+  async loadGeneratedReview(id: PitchDraftId): Promise<PitchDraft> {
+    const draft = await findDraft(this.local, id);
+    if (this.repo === null || draft.server === null) {
+      return draft;
+    }
+    const serverDraft = await this.repo.getDraft(draft.server.draftId);
+    const review = reviewFromServer(serverDraft, draft.review, undefined);
+    if (review.headline.trim() === '' || review.body.trim() === '') {
+      throw new PitchDraftSubmissionError('The AI draft was empty. Please try again.');
+    }
+    return this.local.saveReview(id, { ...review, generationMode: 'generated' });
+  }
+
+  async saveReview(id: PitchDraftId, review: PitchReview): Promise<PitchDraft> {
+    const parsed = PitchReviewSchema.parse(review);
+    const draft = await findDraft(this.local, id);
+    if (this.repo !== null && draft.server !== null) {
+      await this.repo.updateDraft(draft.server.draftId, {
+        headline: parsed.headline.trim(),
+        body: parsed.body.trim(),
+        structure: parsed.structure,
+      });
+    }
+    return this.local.saveReview(id, parsed);
+  }
+
+  async finalizeConsent(id: PitchDraftId): Promise<PitchDraft> {
+    const draft = await findDraft(this.local, id);
+    if (this.repo === null) {
+      return this.local.finalizeConsent(id);
+    }
+    if (draft.server === null) {
+      throw new PitchDraftSubmissionError('Prepare this pitch before sending.');
+    }
+    await this.repo.updateDraft(draft.server.draftId, {
+      headline: draft.review.headline.trim(),
+      body: draft.review.body.trim(),
+      structure: draft.review.structure,
     });
-  }
-
-  private async uploadRecording(
-    repo: PitchDraftRepo,
-    serverDraftId: string,
-    recording: PitchRecording,
-  ): Promise<void> {
-    await this.uploadObject(repo, serverDraftId, 'voice.m4a', recording.uri, 'audio/mp4');
-    await repo.registerAsset(serverDraftId, 'voice', 'voice.m4a');
-  }
-
-  private async uploadPhotos(
-    repo: PitchDraftRepo,
-    serverDraftId: string,
-    photos: readonly PitchPhoto[],
-  ): Promise<void> {
-    for (const [index, photo] of photos.entries()) {
-      const fileName = `photo-${index + 1}.jpg`;
-      await this.uploadObject(repo, serverDraftId, fileName, photo.uri, 'image/jpeg');
-      await repo.registerAsset(serverDraftId, 'photo', fileName, index);
+    const invitation = invitationForFinalize(draft);
+    try {
+      const submission = await this.repo.submitForConsent(draft.server.draftId, invitation);
+      if (draft.server.consentRequestId === null && submission.consentToken === null) {
+        throw new PitchDraftSubmissionError('The approval invite was not created. Please retry.');
+      }
+      return this.local.attachFinalizedConsent(id, submission);
+    } catch (error: unknown) {
+      if (error instanceof UnauthenticatedError) {
+        throw new NeedsSignInError();
+      }
+      throw error;
     }
   }
 
-  private async uploadObject(
-    repo: PitchDraftRepo,
-    serverDraftId: string,
+  private async uploadFile(
+    repo: PitchDraftRepository,
+    draftId: string,
     fileName: string,
-    localUri: string,
+    uri: string,
     contentType: string,
   ): Promise<void> {
-    const upload = await repo.requestAssetUpload(serverDraftId, fileName);
-    const file = await fetch(localUri);
-    const body = await file.blob();
+    const upload = await repo.requestAssetUpload(draftId, fileName);
     const response = await fetch(upload.signedUrl, {
       method: 'PUT',
       headers: { 'Content-Type': contentType, 'x-upsert': 'false' },
-      body,
+      body: await (await fetch(uri)).blob(),
     });
     if (!response.ok) {
-      throw new PitchDraftSubmissionError(
-        `Upload of ${fileName} failed (${response.status}). Check your connection and try again.`,
-      );
+      throw new PitchDraftSubmissionError(`Upload of ${fileName} failed (${response.status}).`);
     }
   }
 }
 
-function requireEmailContact(contact: PitchRelationship['contact']): EmailInvitationContact {
-  if (contact.kind !== 'email') {
-    throw new PitchDraftSubmissionError('Enter a valid email before sending for approval.');
+function toDraftInputs(relationship: PitchRelationship | null): DraftInputs {
+  if (relationship === null) {
+    throw new PitchDraftSubmissionError('Add your friend details before continuing.');
   }
-  return contact;
+  return {
+    relationshipType: RELATIONSHIP_TYPE_MAP[relationship.kind],
+    relationshipDuration: RELATIONSHIP_DURATION_MAP[relationship.duration],
+  };
+}
+
+function invitationForFinalize(draft: PitchDraft) {
+  const relationship = draft.relationship;
+  if (relationship?.contact.kind !== 'email') {
+    return undefined;
+  }
+  return {
+    channel: 'email' as const,
+    contact: relationship.contact.value,
+    friendName: relationship.friendFirstName,
+  };
+}
+
+async function findDraft(local: MockPitchDraftService, id: PitchDraftId): Promise<PitchDraft> {
+  const draft = (await local.getMyDrafts()).find((candidate) => candidate.id === id);
+  if (draft === undefined) {
+    throw new PitchDraftSubmissionError('This pitch could not be found.');
+  }
+  return draft;
+}
+
+function reviewFromServer(
+  row: PitchDraftRow,
+  fallback: PitchReview,
+  request: ConsentRequestRow | undefined,
+): PitchReview {
+  const structure = PitchReviewSchema.shape.structure.safeParse(row.structure);
+  const hasGeneratedCopy = (row.headline?.trim() ?? '') !== '' && (row.body?.trim() ?? '') !== '';
+  return PitchReviewSchema.parse({
+    headline: row.headline ?? fallback.headline,
+    body: row.body ?? fallback.body,
+    structure: structure.success ? structure.data : fallback.structure,
+    generationMode:
+      fallback.generationMode === 'pending' && hasGeneratedCopy
+        ? 'generated'
+        : fallback.generationMode,
+    responseNote: request?.response_note ?? null,
+  });
 }

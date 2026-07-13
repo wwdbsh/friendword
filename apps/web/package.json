@@ -7,6 +7,7 @@
     "build": "NEXT_DIST_DIR=.next-build next build",
     "start": "NEXT_DIST_DIR=.next-build next start",
     "test:audit": "pnpm --filter @friendword/contracts exec vitest run --config ../../apps/web/vitest.audit.config.ts",
+    "test:audit2": "pnpm --filter @friendword/contracts exec vitest run --config ../../apps/web/vitest.audit2.config.ts",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit"
   },

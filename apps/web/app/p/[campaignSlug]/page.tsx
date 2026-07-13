@@ -127,6 +127,30 @@ export default async function PitchPage({ params }: PitchPageProps) {
         <PitchPlayer pitch={pitch} />
       </section>
 
+      {(pitch.approvedBody !== null || pitch.transcriptText !== null) && (
+        <section
+          className={`${styles.storySection} ${styles.revealTwo}`}
+          aria-labelledby="story-heading"
+        >
+          <article className={styles.storyCard}>
+            <h2 id="story-heading">In {pitch.introducerPseudonym}’s words</h2>
+            {pitch.approvedBody !== null && (
+              <p className={styles.storyBody}>{pitch.approvedBody}</p>
+            )}
+            <p className={styles.storyMeta}>
+              Structured from {pitch.introducerPseudonym}’s voice note — every word here was
+              reviewed and approved by {pitch.daterName} before publishing.
+            </p>
+            {pitch.transcriptText !== null && (
+              <details className={styles.transcript}>
+                <summary>Read the full voice transcript</summary>
+                <p>{pitch.transcriptText}</p>
+              </details>
+            )}
+          </article>
+        </section>
+      )}
+
       {pitch.vouches.length > 0 && (
         <section className={styles.vouchSection} aria-labelledby="vouch-heading">
           <div className={`${styles.vouchHeading} ${styles.revealTwo}`}>
@@ -165,14 +189,14 @@ export default async function PitchPage({ params }: PitchPageProps) {
         <div>
           <h2 id="trust-heading">{pitch.daterName} stays in control.</h2>
           {/* TODO(identity-provider): Restore identity-verification copy after verification ships. */}
-          {/* Copy honesty (second audit §11): full text/photo-replacement/audience
-              controls are not shipped yet, so this only claims the review steps
-              that actually gate publication today. */}
+          {/* Copy honesty (second audit §11): claims below match the shipped
+              Slice 7 dater controls — text editing, own photos, audience,
+              location precision, and duration — no more, no less. */}
           <p>
-            {pitch.daterName} reviewed this pitch — the recording, the photos shown here, and its
-            claims — and approved it before this page went live. Interest requires signing in and
-            completing a dating profile with 2 photos, a bio, and dating intent. Contact details
-            stay private.
+            {pitch.daterName} reviewed this pitch — the recording, the wording, the photos shown
+            here, and its claims — could edit any of it, and chose who can reach out and how long
+            this page stays up before approving it. Interest requires signing in and completing a
+            dating profile with 2 photos, a bio, and dating intent. Contact details stay private.
           </p>
         </div>
       </section>

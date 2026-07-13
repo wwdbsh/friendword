@@ -48,6 +48,7 @@ const mocks = vi.hoisted(() => ({
   consentRevisionSelect: vi.fn(),
   consentAssetSelect: vi.fn(),
   signedUpload: vi.fn(),
+  uploadSigned: vi.fn(),
   signedUrl: vi.fn(),
   rpc: vi.fn(),
 }));
@@ -95,6 +96,7 @@ function configureMockClient(): void {
     storage: {
       from: () => ({
         createSignedUploadUrl: mocks.signedUpload,
+        uploadToSignedUrl: mocks.uploadSigned,
         createSignedUrl: mocks.signedUrl,
       }),
     },
@@ -538,6 +540,7 @@ describe('ConsentRepo', () => {
   const revisionId = '30000000-0000-0000-0000-000000000001';
   const firstPhotoId = '40000000-0000-0000-0000-000000000001';
   const secondPhotoId = '40000000-0000-0000-0000-000000000002';
+  const voiceAssetId = '40000000-0000-0000-0000-000000000003';
 
   function signedInSession(): void {
     mocks.getSession.mockResolvedValue({
@@ -786,6 +789,100 @@ describe('ConsentRepo', () => {
       campaignId: '20000000-0000-0000-0000-000000000001',
       campaignSlug: 'blair-abc123',
     });
+  });
+
+  it('creates a dater revision with the complete asset snapshot including voice', async () => {
+    signedInSession();
+    mocks.rpc.mockResolvedValue({
+      data: [{ revision_id: revisionId, revision_number: 3 }],
+      error: null,
+    });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    const revision = await repo.createDaterRevision({
+      draftId,
+      headline: 'My edited headline',
+      body: 'My edited body',
+      includedAssetIds: [secondPhotoId, voiceAssetId],
+    });
+
+    expect(mocks.rpc).toHaveBeenCalledWith('create_dater_revision', {
+      draft_id: draftId,
+      new_headline: 'My edited headline',
+      new_body: 'My edited body',
+      included_asset_ids: [secondPhotoId, voiceAssetId],
+    });
+    expect(revision).toEqual({ revisionId, revisionNumber: 3 });
+  });
+
+  it('sets a 7-day publish preference and omits an empty intent filter', async () => {
+    signedInSession();
+    mocks.rpc.mockResolvedValue({ data: null, error: null });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await repo.setPublishPreferences({
+      draftId,
+      audience: { minAge: 21, maxAge: 35, intents: [] },
+      locationPrecision: 'region',
+      publishDays: 7,
+    });
+
+    expect(mocks.rpc).toHaveBeenCalledWith('set_publish_preferences', {
+      draft_id: draftId,
+      audience: { min_age: 21, max_age: 35 },
+      target_location_precision: 'region',
+      target_publish_days: 7,
+    });
+  });
+
+  it('uploads a dater photo before registering it at the next sort order', async () => {
+    signedInSession();
+    const fileBody = new ArrayBuffer(8);
+    const registered = {
+      id: firstPhotoId,
+      pitch_draft_id: draftId,
+      uploaded_by_user_id: '00000000-0000-0000-0000-000000000002',
+      asset_type: 'photo',
+      storage_path: `pitch-media/${draftId}/dater-123.jpg`,
+      sort_order: 5,
+      created_at: '2026-07-13T00:00:00Z',
+      updated_at: '2026-07-13T00:00:00Z',
+    };
+    mocks.consentAssetSelect.mockReturnValue({
+      eq: () => ({
+        order: () => ({ limit: async () => ({ data: [{ sort_order: 4 }], error: null }) }),
+      }),
+    });
+    mocks.signedUpload.mockResolvedValue({
+      data: { token: 'signed-token', signedUrl: 'https://storage.example/upload' },
+      error: null,
+    });
+    mocks.uploadSigned.mockResolvedValue({
+      data: { path: `${draftId}/dater-123.jpg` },
+      error: null,
+    });
+    mocks.draftInsert.mockReturnValue({
+      select: () => ({ single: async () => ({ data: registered, error: null }) }),
+    });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    const result = await repo.uploadDaterPhoto(draftId, 'dater-123.jpg', fileBody, 'image/jpeg');
+
+    expect(mocks.signedUpload).toHaveBeenCalledWith(`${draftId}/dater-123.jpg`, { upsert: false });
+    expect(mocks.uploadSigned).toHaveBeenCalledWith(
+      `${draftId}/dater-123.jpg`,
+      'signed-token',
+      fileBody,
+      { contentType: 'image/jpeg' },
+    );
+    expect(mocks.draftInsert).toHaveBeenCalledWith({
+      pitch_draft_id: draftId,
+      uploaded_by_user_id: '00000000-0000-0000-0000-000000000002',
+      asset_type: 'photo',
+      storage_path: `pitch-media/${draftId}/dater-123.jpg`,
+      sort_order: 5,
+    });
+    expect(result).toEqual(registered);
   });
 
   it('sends request-changes and decline responses through the consent response RPC', async () => {

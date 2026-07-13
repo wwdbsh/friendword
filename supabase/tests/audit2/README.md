@@ -18,7 +18,8 @@
 | `b10_expiration_consistency.sql`    | H-5       | 만료 캠페인의 status/public read/resume 일관성                            | Slice 9            |
 | `b11_account_read_enforcement.sql`  | H-1       | suspended/deleted 계정의 민감 read 철회 (0024 restrictive 정책)           | Slice 1            |
 | `b12_text_moderation_gate.sql`      | H-3       | content-addressed 텍스트 moderation 게이트 (0026)                         | Slice 2            |
+| `b13_dater_snapshot_control.sql`    | CP-1      | dater revision·publish preference snapshot 발행, audience 트리거 게이트   | Slice 7            |
 
-route 레벨 계약은 `apps/web/tests-audit2/revenuecat-realistic.audit2.test.ts`가 인코딩하며 Slice 3부터 그린이다.
+route 레벨 계약은 `apps/web/tests-audit2/revenuecat-realistic.audit2.test.ts`가 인코딩하며 Slice 3부터 그린이다. `b13`은 서버 골격(0032)이 Slice 7 groundwork로 선행 커밋된 뒤 작성되어 처음부터 그린이다.
 
 후속 슬라이스는 실제 실행 결과가 바뀔 때 이 표의 상태도 함께 갱신해야 합니다.

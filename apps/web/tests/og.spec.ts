@@ -37,6 +37,8 @@ test('keeps the real campaign fallback branded and isolated from Blair fixtures'
     relationshipDuration: 'y3to10',
     headline: 'Alex makes ordinary plans memorable.',
     body: 'A warm introduction approved for publication.',
+    transcript: null,
+    approximateLocation: null,
     voiceUrl: null,
     photos: [],
   };

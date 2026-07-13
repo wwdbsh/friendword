@@ -6,9 +6,11 @@ const CONSENT_TOKEN = 'consenttesttoken12345678';
 const DRAFT_ID = '10000000-0000-0000-0000-000000000001';
 const DATER_ID = '00000000-0000-0000-0000-000000000002';
 const REVISION_ID = '30000000-0000-0000-0000-000000000001';
+const DATER_REVISION_ID = '30000000-0000-0000-0000-000000000002';
 const FIRST_PHOTO_ID = '40000000-0000-0000-0000-000000000001';
 const SECOND_PHOTO_ID = '40000000-0000-0000-0000-000000000002';
 const VOICE_ASSET_ID = '40000000-0000-0000-0000-000000000003';
+const DATER_PHOTO_ID = '40000000-0000-0000-0000-000000000004';
 
 const pendingPreviewRow = {
   introducer_display_name: 'Maya',
@@ -30,7 +32,18 @@ const revisionRow = {
   created_at: '2026-07-13T00:00:00Z',
 };
 
-const assetRows = [
+type ConsentAssetFixture = {
+  readonly id: string;
+  readonly pitch_draft_id: string;
+  readonly uploaded_by_user_id: string;
+  readonly asset_type: string;
+  readonly storage_path: string;
+  readonly sort_order: number;
+  readonly created_at: string;
+  readonly updated_at: string;
+};
+
+const assetRows: readonly ConsentAssetFixture[] = [
   {
     id: FIRST_PHOTO_ID,
     pitch_draft_id: DRAFT_ID,
@@ -61,7 +74,7 @@ const assetRows = [
     created_at: '2026-07-13T00:00:00Z',
     updated_at: '2026-07-13T00:00:00Z',
   },
-] as const;
+];
 
 async function mockPreview(page: Page, rows: readonly unknown[]): Promise<void> {
   await page.route('**/rest/v1/rpc/get_consent_preview*', (route) => route.fulfill({ json: rows }));
@@ -151,6 +164,9 @@ async function mockClaimedReview(
   await page.route('**/rest/v1/rpc/claim_consent_request*', (route) =>
     route.fulfill({ json: [{ pitch_draft_id: DRAFT_ID }] }),
   );
+  await page.route('**/rest/v1/rpc/set_publish_preferences*', (route) =>
+    route.fulfill({ json: null }),
+  );
   await mockConsentReview(page);
 }
 
@@ -224,9 +240,13 @@ test('claims, reviews the voice pitch, and publishes when signed in', async ({ p
       page.getByRole('heading', { name: 'Hear what Maya says about you.' }),
     ).toBeVisible();
     await expect(page.locator('audio')).toBeVisible();
-    await expect(page.getByText(revisionRow.headline)).toBeVisible();
+    await expect(page.getByLabel('Headline')).toHaveValue(revisionRow.headline);
+    await expect(page.getByLabel('Introduction')).toHaveValue(revisionRow.body);
     await expect(page.getByText('Blair owns a home.')).toBeVisible();
-    await expect(page.getByText('Public for 14 days')).toBeVisible();
+    await expect(page.getByLabel('14 days')).toBeChecked();
+    await expect(page.getByLabel('Location visibility')).toHaveValue('city');
+    await expect(page.getByLabel('Minimum age')).toHaveValue('18');
+    await expect(page.getByLabel('Upload my photo')).toBeVisible();
     await expect(page.getByText('You stay in control', { exact: false })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Approve & publish my page' })).toBeDisabled();
     for (const viewport of [
@@ -246,8 +266,15 @@ test('claims, reviews the voice pitch, and publishes when signed in', async ({ p
     }
   });
 
-  await test.step('When the dater selects photos, confirms claims, and approves', async () => {
-    await page.getByRole('button', { name: 'Exclude suggested photo 1' }).click();
+  await test.step('A minimum age below 18 blocks approval on the client', async () => {
+    await page.getByLabel('I confirm all of these claims are true.').check();
+    await page.getByLabel('Minimum age').fill('17');
+    await expect(page.getByText('Minimum age must be 18 or older.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Approve & publish my page' })).toBeDisabled();
+    await page.getByLabel('Minimum age').fill('18');
+  });
+
+  await test.step('When the dater confirms claims and approves with the defaults', async () => {
     await page.getByLabel('I confirm all of these claims are true.').check();
     await page.getByRole('button', { name: 'Approve & publish my page' }).click();
     await page.waitForURL('**/p/blair-mix123');
@@ -255,9 +282,202 @@ test('claims, reviews the voice pitch, and publishes when signed in', async ({ p
       draft_id: DRAFT_ID,
       campaign_days: 14,
       revision_id: REVISION_ID,
-      included_asset_ids: [SECOND_PHOTO_ID],
+      included_asset_ids: [FIRST_PHOTO_ID, SECOND_PHOTO_ID],
       hard_claims_confirmed: true,
     });
+  });
+});
+
+test('saves dater edits with voice retained, reloads the revision, and publishes for 7 days', async ({
+  page,
+}) => {
+  await mockClaimedReview(page);
+  let activeRevision = revisionRow;
+  let revisionBody: unknown;
+  let preferencesBody: unknown;
+  let approveBody: unknown;
+
+  await page.route('**/rest/v1/consent_requests*', (route) =>
+    route.fulfill({ json: { revision_id: activeRevision.id } }),
+  );
+  await page.route('**/rest/v1/consent_revisions*', (route) =>
+    route.fulfill({ json: activeRevision }),
+  );
+  await page.route('**/rest/v1/pitch_assets*', (route) =>
+    route.fulfill({
+      json: assetRows.filter((asset) => activeRevision.asset_ids.includes(asset.id)),
+    }),
+  );
+  await page.route('**/rest/v1/rpc/create_dater_revision*', (route) => {
+    revisionBody = route.request().postDataJSON();
+    activeRevision = {
+      ...revisionRow,
+      id: DATER_REVISION_ID,
+      revision_number: 3,
+      headline: 'The headline I chose myself.',
+      body: 'The introduction I reviewed and rewrote myself.',
+      asset_ids: [SECOND_PHOTO_ID, VOICE_ASSET_ID],
+    };
+    return route.fulfill({
+      json: [{ revision_id: DATER_REVISION_ID, revision_number: 3 }],
+    });
+  });
+  await page.route('**/rest/v1/rpc/set_publish_preferences*', (route) => {
+    preferencesBody = route.request().postDataJSON();
+    return route.fulfill({ json: null });
+  });
+  await page.route('**/rest/v1/rpc/approve_and_publish_pitch*', (route) => {
+    approveBody = route.request().postDataJSON();
+    return route.fulfill({
+      json: [
+        { campaign_id: '20000000-0000-0000-0000-000000000001', campaign_slug: 'blair-edited' },
+      ],
+    });
+  });
+
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+  await page.getByLabel('Headline').fill('The headline I chose myself.');
+  await page.getByLabel('Introduction').fill('The introduction I reviewed and rewrote myself.');
+  await page.getByRole('button', { name: 'Exclude suggested photo 1' }).click();
+  await page.getByRole('button', { name: 'Save my edits' }).click();
+
+  await expect(page.getByText('Your edits are saved in a new review version.')).toBeVisible();
+  await expect(page.getByLabel('Headline')).toHaveValue('The headline I chose myself.');
+  expect(revisionBody).toEqual({
+    draft_id: DRAFT_ID,
+    new_headline: 'The headline I chose myself.',
+    new_body: 'The introduction I reviewed and rewrote myself.',
+    included_asset_ids: [SECOND_PHOTO_ID, VOICE_ASSET_ID],
+  });
+
+  await page.getByLabel('7 days').check();
+  await page.getByLabel('Location visibility').selectOption('hidden');
+  await page.getByLabel('Minimum age').fill('21');
+  await page.getByLabel('Maximum age (optional)').fill('35');
+  await page.getByLabel('Long-term').check();
+  await expect(page.getByText('Location hidden')).toBeVisible();
+  await expect(page.getByText('7 days', { exact: true }).last()).toBeVisible();
+  await expect(page.getByText('Blair', { exact: true })).toBeVisible();
+  await page.getByLabel('I confirm all of these claims are true.').check();
+  await page.getByRole('button', { name: 'Approve & publish my page' }).click();
+  await page.waitForURL('**/p/blair-edited');
+
+  expect(preferencesBody).toEqual({
+    draft_id: DRAFT_ID,
+    audience: { min_age: 21, max_age: 35, intents: ['long-term'] },
+    target_location_precision: 'hidden',
+    target_publish_days: 7,
+  });
+  expect(approveBody).toEqual({
+    draft_id: DRAFT_ID,
+    campaign_days: 7,
+    revision_id: DATER_REVISION_ID,
+    included_asset_ids: [SECOND_PHOTO_ID],
+    hard_claims_confirmed: true,
+  });
+});
+
+test('uploads and validates a dater photo before saving it in the full revision snapshot', async ({
+  page,
+}) => {
+  await mockClaimedReview(page);
+  let activeRevision = revisionRow;
+  let activeAssets: readonly ConsentAssetFixture[] = assetRows;
+  let revisionBody: unknown;
+  let assetInsertBody: unknown;
+  let uploadedObjectName = '';
+
+  await page.route('**/rest/v1/consent_requests*', (route) =>
+    route.fulfill({ json: { revision_id: activeRevision.id } }),
+  );
+  await page.route('**/rest/v1/consent_revisions*', (route) =>
+    route.fulfill({ json: activeRevision }),
+  );
+  await page.route('**/rest/v1/pitch_assets*', (route) => {
+    const request = route.request();
+    if (request.method() === 'POST') {
+      assetInsertBody = request.postDataJSON();
+      const registered = {
+        id: DATER_PHOTO_ID,
+        pitch_draft_id: DRAFT_ID,
+        uploaded_by_user_id: DATER_ID,
+        asset_type: 'photo',
+        storage_path: `pitch-media/${DRAFT_ID}/${uploadedObjectName.split('/').at(-1)}`,
+        sort_order: 2,
+        created_at: '2026-07-13T00:00:00Z',
+        updated_at: '2026-07-13T00:00:00Z',
+      };
+      activeAssets = [...activeAssets, registered];
+      return route.fulfill({ json: registered });
+    }
+    if (request.url().includes('select=sort_order')) {
+      return route.fulfill({ json: [{ sort_order: 1 }] });
+    }
+    return route.fulfill({
+      json: activeAssets.filter((asset) => activeRevision.asset_ids.includes(asset.id)),
+    });
+  });
+  await page.route('**/storage/v1/object/upload/sign/pitch-media/**', (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const marker = '/object/upload/sign/pitch-media/';
+    uploadedObjectName = decodeURIComponent(url.pathname.split(marker)[1] ?? '');
+    if (request.method() === 'POST') {
+      return route.fulfill({
+        json: {
+          url: `${marker}${uploadedObjectName}?token=playwright-upload`,
+        },
+      });
+    }
+    return route.fulfill({ json: { Key: `pitch-media/${uploadedObjectName}` } });
+  });
+  await page.route('**/api/media/validate', (route) =>
+    route.fulfill({ json: { ok: true, moderationStatus: 'passed' } }),
+  );
+  await page.route('**/storage/v1/object/sign/pitch-media/**dater-*.*', (route) =>
+    route.fulfill({
+      json: {
+        signedURL: `/object/sign/pitch-media/${DRAFT_ID}/${uploadedObjectName.split('/').at(-1)}?token=playwright`,
+      },
+    }),
+  );
+  await page.route('**/rest/v1/rpc/create_dater_revision*', (route) => {
+    revisionBody = route.request().postDataJSON();
+    activeRevision = {
+      ...revisionRow,
+      id: DATER_REVISION_ID,
+      revision_number: 3,
+      asset_ids: [FIRST_PHOTO_ID, SECOND_PHOTO_ID, VOICE_ASSET_ID, DATER_PHOTO_ID],
+    };
+    return route.fulfill({
+      json: [{ revision_id: DATER_REVISION_ID, revision_number: 3 }],
+    });
+  });
+
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+  await page.getByLabel('Upload my photo').setInputFiles({
+    name: 'my-photo.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('playwright-image-fixture'),
+  });
+
+  await expect(
+    page.getByText('Photo uploaded. Save your edits to add it to this review version.'),
+  ).toBeVisible();
+  expect(assetInsertBody).toEqual({
+    pitch_draft_id: DRAFT_ID,
+    uploaded_by_user_id: DATER_ID,
+    asset_type: 'photo',
+    storage_path: `pitch-media/${DRAFT_ID}/${uploadedObjectName.split('/').at(-1)}`,
+    sort_order: 2,
+  });
+  await page.getByRole('button', { name: 'Save my edits' }).click();
+  await expect(page.getByText('Your edits are saved in a new review version.')).toBeVisible();
+  expect(revisionBody).toEqual({
+    draft_id: DRAFT_ID,
+    new_headline: revisionRow.headline,
+    new_body: revisionRow.body,
+    included_asset_ids: [FIRST_PHOTO_ID, SECOND_PHOTO_ID, VOICE_ASSET_ID, DATER_PHOTO_ID],
   });
 });
 

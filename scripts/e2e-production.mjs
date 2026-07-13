@@ -89,6 +89,16 @@ async function restoreLaunchGates() {
 
 const initialHeadline = 'E2E Blair makes ordinary plans memorable.';
 const revisedHeadline = 'E2E Blair makes every gathering feel welcoming.';
+const daterHeadline = 'E2E Blair, in Blair’s own words.';
+const daterBody =
+  'I rewrote this myself: warm plans, honest follow-through, and room for something steady.';
+const daterTranscript = {
+  text: 'E2E transcript: Blair is the friend who shows up.',
+  segments: [
+    { start: 0, end: 2.2, text: 'E2E transcript: Blair is the friend' },
+    { start: 2.2, end: 3.4, text: 'who shows up.' },
+  ],
+};
 const pitchStructure = {
   hook: initialHeadline,
   relationship_context: 'Maya and Blair have been friends for years.',
@@ -434,6 +444,71 @@ try {
     latestRequestError?.message ?? latestRevisionError?.message,
   );
 
+  // 6h. Slice 7 (CP-1): the dater rewrites the copy as a new immutable
+  // revision that freezes the draft transcript, and sets publish preferences.
+  const { error: transcriptSeedError } = await admin
+    .from('pitch_drafts')
+    .update({ transcript: daterTranscript })
+    .eq('id', draft.id);
+  if (transcriptSeedError) throw new Error(`transcript seed: ${transcriptSeedError.message}`);
+
+  const { data: daterRevisionRows, error: daterRevisionError } = await dater.client.rpc(
+    'create_dater_revision',
+    {
+      draft_id: draft.id,
+      new_headline: daterHeadline,
+      new_body: daterBody,
+      included_asset_ids: [voiceAsset.id, photo1Asset.id, photo2Asset.id],
+    },
+  );
+  const daterRevisionId = daterRevisionRows?.[0]?.revision_id;
+  const { data: daterRequestRow } = await dater.client
+    .from('consent_requests')
+    .select('revision_id')
+    .eq('pitch_draft_id', draft.id)
+    .single();
+  const { data: daterRevisionRow } = await dater.client
+    .from('consent_revisions')
+    .select('id, revision_number, headline, body, transcript, voice_asset_path')
+    .eq('id', daterRevisionId)
+    .single();
+  check(
+    '6h. dater cuts an immutable revision with frozen transcript and voice path',
+    !daterRevisionError &&
+      typeof daterRevisionId === 'string' &&
+      daterRequestRow?.revision_id === daterRevisionId &&
+      daterRevisionRow?.revision_number === latestRevision.revision_number + 1 &&
+      daterRevisionRow?.headline === daterHeadline &&
+      daterRevisionRow?.body === daterBody &&
+      daterRevisionRow?.transcript?.text === daterTranscript.text &&
+      typeof daterRevisionRow?.voice_asset_path === 'string',
+    daterRevisionError?.message,
+  );
+
+  const { error: underageAudienceError } = await dater.client.rpc('set_publish_preferences', {
+    draft_id: draft.id,
+    audience: { min_age: 17 },
+    target_location_precision: 'city',
+    target_publish_days: 14,
+  });
+  check(
+    '6i. audience minimum age under 18 is rejected server-side',
+    Boolean(underageAudienceError),
+    underageAudienceError?.message,
+  );
+
+  const { error: preferencesError } = await dater.client.rpc('set_publish_preferences', {
+    draft_id: draft.id,
+    audience: null,
+    target_location_precision: 'hidden',
+    target_publish_days: 7,
+  });
+  check(
+    '6j. dater stores publish preferences (hidden location, 7 days)',
+    !preferencesError,
+    preferencesError?.message,
+  );
+
   // 6g. Finalized drafts are locked against transcription while ownership stays private.
   const introducerToken = (await introducer.client.auth.getSession()).data.session?.access_token;
   const transcribeOwn = await fetch('http://localhost:3000/api/transcribe', {
@@ -565,11 +640,12 @@ try {
     cancellationError?.message ?? revokedCreditsError?.message,
   );
 
-  // 8. Approval rejects unconfirmed claims, then publishes one selected photo for 14 days.
+  // 8. Approval rejects unconfirmed claims, stale revisions, and duration
+  // mismatches, then publishes the dater snapshot for the chosen 7 days.
   const approvalArgs = {
     draft_id: draft.id,
-    campaign_days: 14,
-    revision_id: latestRevision.id,
+    campaign_days: 7,
+    revision_id: daterRevisionId,
     included_asset_ids: [photo1Asset.id],
     hard_claims_confirmed: false,
   };
@@ -581,6 +657,28 @@ try {
     '8a. approve rejects an unconfirmed hard claim',
     Boolean(unconfirmedClaimsError) && unconfirmedClaimsError.message.includes('hard claims'),
     unconfirmedClaimsError?.message,
+  );
+
+  const { error: staleRevisionError } = await dater.client.rpc('approve_and_publish_pitch', {
+    ...approvalArgs,
+    revision_id: latestRevision.id,
+    hard_claims_confirmed: true,
+  });
+  check(
+    '8c. approve rejects the pre-edit (stale) revision',
+    Boolean(staleRevisionError) && staleRevisionError.message.includes('latest consent revision'),
+    staleRevisionError?.message,
+  );
+
+  const { error: durationMismatchError } = await dater.client.rpc('approve_and_publish_pitch', {
+    ...approvalArgs,
+    campaign_days: 14,
+    hard_claims_confirmed: true,
+  });
+  check(
+    '8d. approve rejects a duration that ignores the stored 7-day preference',
+    Boolean(durationMismatchError) && durationMismatchError.message.includes('publish preference'),
+    durationMismatchError?.message,
   );
 
   const { data: publishRows, error: publishError } = await dater.client.rpc(
@@ -637,16 +735,23 @@ try {
         !html.includes('photo-2.jpg'),
       `status=${pageResponse.status}`,
     );
+    check(
+      '10d. /p/[slug] renders the dater-approved body and the full transcript (CP-2)',
+      html.includes(daterBody) &&
+        html.includes('Read the full voice transcript') &&
+        html.includes('E2E transcript: Blair is the friend who shows up.'),
+      `status=${pageResponse.status}`,
+    );
     const { data: windowRow } = await admin
       .from('campaigns')
-      .select('ends_at')
+      .select('ends_at, location_precision')
       .eq('id', created.campaignId)
       .single();
     const endsAt = windowRow?.ends_at ? new Date(windowRow.ends_at).getTime() : 0;
-    const inFourteenDays = Date.now() + 14 * 24 * 3600 * 1000;
+    const inSevenDays = Date.now() + 7 * 24 * 3600 * 1000;
     check(
-      '10c. approve stamped the fixed 14-day visibility window',
-      Math.abs(endsAt - inFourteenDays) < 3600 * 1000,
+      '10c. approve stamped the dater-chosen 7-day window and hidden location',
+      Math.abs(endsAt - inSevenDays) < 3600 * 1000 && windowRow?.location_precision === 'hidden',
       windowRow?.ends_at,
     );
     const missResponse = await fetch('http://localhost:3000/p/not-a-real-slug');

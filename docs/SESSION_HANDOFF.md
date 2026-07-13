@@ -1,6 +1,6 @@
 # PROJECT HANDOFF
 
-> 갱신: 2026-07-13 심야 KST · 2차 감사 대응 세션 (Slice 0~6 완료 + Slice 7 groundwork)
+> 갱신: 2026-07-13 KST · 2차 감사 대응 (Slice 0~**7** 완료 · Slice 8 진행 예정)
 > 읽는 순서: 이 문서 → [`docs/FRIENDWORD_SECOND_AUDIT_HANDOFF_2026-07-13.md`](FRIENDWORD_SECOND_AUDIT_HANDOFF_2026-07-13.md)(**acceptance source of truth**) → `docs/TASKS.md` → `docs/DECISIONS.md`(이번 세션 결정 8건) → `docs/OPS.md`, `docs/REVENUECAT_SETUP.md`
 
 ## 다음 세션 시작 방식 (사용자 확정, 2026-07-13)
@@ -23,19 +23,12 @@
 
 **증거**: DB 스위트 01~18 그린 · 1차 audit 7/7 · **audit2 11/12** (남은 red는 b10 만료 상태기계 — Slice 9 대상) · 웹 audit 11/11 + audit2 8/8 · 유닛(전 워크스페이스) 그린 · Playwright 35/35 · 프로덕션 E2E 21체크 전부 PASS(launch gate 토글 포함) · migrations **0001~0032 hosted 배포 완료**.
 
-## Slice 7 groundwork (커밋됨, 다음 세션이 완결할 것)
+## Slice 7 완료 (CP-1·CP-2)
 
-이미 그린 상태로 존재:
-
-- **0032**: `pitch_drafts.transcript`(+revision snapshot 트리거), `create_dater_revision`(Dater 텍스트 수정→새 revision+request 갱신), `set_publish_preferences`(audience/location_precision/7·14일), dater 사진 업로드(storage helper+pitch_assets subject 정책), approve가 preference를 campaigns로 복사(+7일 허용), `interests_audience_gate`(연령·intent 서버 필터).
-- whisper-1 verbose_json 세그먼트(어댑터), transcribe 라우트의 transcript 저장, `publishedPitchRepo.transcript/approximateLocation`, view.ts 실 caption 매핑, PitchPlayer 실 waveform(AudioContext decode).
-
-다음 세션 잔여 (Slice 7 완결 조건):
-
-1. **웹 ConsentFlow UI**: Dater 텍스트 편집(create_dater_revision), 본인 사진 업로드, audience/기간/위치 정밀도 컨트롤, 프로필 확인 — 워커 위임 추천 (brief에 위 RPC 계약 명시).
-2. **공개 페이지 렌더**: `/p/[campaignSlug]/page.tsx`에 approvedBody 섹션 + 접근 가능한 전체 transcript(`<details>`), PitchView의 `approvedBody`/`transcriptText` 소비 (view.ts에 이미 필드 존재).
-3. **b13 audit2 테스트**: CP-1 acceptance(최종 snapshot hash 고정·정확히 그 snapshot만 발행, audience 필터 동작) 인코딩 후 그린 확인.
-4. 문서: DECISIONS(Slice 7 항목), audit2 README 표, TASKS 승인 전환.
+- 서버(0032, hosted 배포됨): `pitch_drafts.transcript`+revision snapshot 트리거, `create_dater_revision`, `set_publish_preferences`, dater 사진 업로드 정책, approve의 preference 복사(7일 허용), `interests_audience_gate`.
+- 웹 ConsentFlow(codex-1, `.briefs/29`): "Make it yours" 텍스트 편집→새 immutable revision, 본인 사진 업로드(+`/api/media/validate`), 공개 설정(7/14일·city/region/hidden·나이·intent), 프로필 요약, approve가 선택 기간 전달. **함정: revision의 included_asset_ids는 voice 포함 전체 asset 집합** — 사진만 넘기면 approve가 voice를 삭제한다.
+- 공개 페이지: 승인 body 섹션 + `<details>` 전체 transcript, 실 세그먼트 caption, trust 카피를 실제 통제권 범위로 갱신.
+- 검증: audit2 **12/13**(신규 b13 그린, 잔여 red는 b10뿐) · 프로덕션 E2E 전 체크 PASS(신규 6h/6i/6j/8c/8d/10c/10d) · 전 게이트 그린 · 실브라우저에서 세션 주입으로 편집→7일/hidden 설정→발행→공개 페이지 QA 완료.
 
 ## Slice 8~10 요약 (감사 §7)
 

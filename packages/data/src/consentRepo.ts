@@ -18,8 +18,40 @@ const fileNameSchema = z
   .min(1)
   .max(255)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
+const daterPhotoContentTypeSchema = z.enum(['image/jpeg', 'image/png', 'image/webp']);
 const PITCH_MEDIA_BUCKET = 'pitch-media';
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
+
+const daterRevisionRowSchema = z.array(
+  z.object({
+    revision_id: z.string().uuid(),
+    revision_number: z.number().int().positive(),
+  }),
+);
+
+const daterRevisionInputSchema = z.object({
+  draftId: z.string().uuid(),
+  headline: z.string().trim().min(1).max(120),
+  body: z.string().trim().min(1).max(2000),
+  includedAssetIds: z.array(z.string().uuid()),
+});
+
+const publishPreferencesSchema = z
+  .object({
+    draftId: z.string().uuid(),
+    audience: z
+      .object({
+        minAge: z.number().int().min(18),
+        maxAge: z.number().int().min(18).optional(),
+        intents: z.array(z.enum(['long-term', 'open-to-either', 'short-term'])).optional(),
+      })
+      .refine((audience) => audience.maxAge === undefined || audience.maxAge >= audience.minAge, {
+        message: 'maximum age cannot be below minimum age',
+      }),
+    locationPrecision: z.enum(['city', 'region', 'hidden']),
+    publishDays: z.union([z.literal(7), z.literal(14)]),
+  })
+  .strict();
 
 export type ConsentPreview = {
   readonly introducerDisplayName: string;
@@ -58,10 +90,33 @@ export type ConsentReview = {
 
 export type ConsentApproval = {
   readonly draftId: string;
-  readonly campaignDays: 14;
+  readonly campaignDays: 7 | 14;
   readonly revisionId: string;
   readonly includedAssetIds: readonly string[];
   readonly hardClaimsConfirmed: boolean;
+};
+
+export type DaterRevisionInput = {
+  readonly draftId: string;
+  readonly headline: string;
+  readonly body: string;
+  readonly includedAssetIds: readonly string[];
+};
+
+export type DaterRevisionResult = {
+  readonly revisionId: string;
+  readonly revisionNumber: number;
+};
+
+export type PublishPreferencesInput = {
+  readonly draftId: string;
+  readonly audience: {
+    readonly minAge: number;
+    readonly maxAge?: number;
+    readonly intents?: readonly ('long-term' | 'open-to-either' | 'short-term')[];
+  };
+  readonly locationPrecision: 'city' | 'region' | 'hidden';
+  readonly publishDays: 7 | 14;
 };
 
 export type ConsentResponseAction = 'request_changes' | 'decline';
@@ -236,6 +291,113 @@ export class ConsentRepo {
     return data.signedUrl;
   }
 
+  /** Uploads and registers a dater-owned photo; validation remains the caller's next step. */
+  async uploadDaterPhoto(
+    draftId: string,
+    fileName: string,
+    fileBody: ArrayBuffer,
+    contentType: 'image/jpeg' | 'image/png' | 'image/webp',
+  ): Promise<PitchAssetRow> {
+    const session = await this.getRequiredSession();
+    const parsedDraftId = uuidSchema.parse(draftId);
+    const parsedFileName = fileNameSchema.parse(fileName);
+    const parsedContentType = daterPhotoContentTypeSchema.parse(contentType);
+    const objectPath = `${parsedDraftId}/${parsedFileName}`;
+    const storagePath = `${PITCH_MEDIA_BUCKET}/${objectPath}`;
+
+    const { data: latestAssets, error: latestAssetsError } = await this.client
+      .from('pitch_assets')
+      .select('sort_order')
+      .eq('pitch_draft_id', parsedDraftId)
+      .order('sort_order', { ascending: false })
+      .limit(1);
+    if (latestAssetsError !== null) {
+      throw new DataLayerError('consent.uploadDaterPhoto.sortOrder', latestAssetsError);
+    }
+    const sortOrder = (latestAssets.at(0)?.sort_order ?? -1) + 1;
+
+    const bucket = this.client.storage.from(PITCH_MEDIA_BUCKET);
+    const { data: upload, error: signedUploadError } = await bucket.createSignedUploadUrl(
+      objectPath,
+      { upsert: false },
+    );
+    if (signedUploadError !== null) {
+      throw new DataLayerError('consent.uploadDaterPhoto.signedUpload', signedUploadError);
+    }
+    const { error: uploadError } = await bucket.uploadToSignedUrl(
+      objectPath,
+      upload.token,
+      fileBody,
+      { contentType: parsedContentType },
+    );
+    if (uploadError !== null) {
+      throw new DataLayerError('consent.uploadDaterPhoto.upload', uploadError);
+    }
+
+    const { data: asset, error: assetError } = await this.client
+      .from('pitch_assets')
+      .insert({
+        pitch_draft_id: parsedDraftId,
+        uploaded_by_user_id: session.user.id,
+        asset_type: 'photo',
+        storage_path: storagePath,
+        sort_order: sortOrder,
+      })
+      .select()
+      .single();
+    if (assetError !== null) {
+      throw new DataLayerError('consent.uploadDaterPhoto.register', assetError);
+    }
+
+    return asset;
+  }
+
+  /** Creates the dater's immutable text/photo selection revision. */
+  async createDaterRevision(input: DaterRevisionInput): Promise<DaterRevisionResult> {
+    await this.getRequiredSession();
+    const parsed = daterRevisionInputSchema.parse(input);
+    const { data, error } = await callUntypedRpc(this.client, 'create_dater_revision', {
+      draft_id: parsed.draftId,
+      new_headline: parsed.headline,
+      new_body: parsed.body,
+      included_asset_ids: parsed.includedAssetIds,
+    });
+    if (error !== null) {
+      throw new DataLayerError('consent.createDaterRevision', error);
+    }
+    const row = daterRevisionRowSchema.parse(data).at(0);
+    if (row === undefined) {
+      throw new DataLayerError(
+        'consent.createDaterRevision',
+        new Error('RPC returned no revision'),
+      );
+    }
+
+    return { revisionId: row.revision_id, revisionNumber: row.revision_number };
+  }
+
+  /** Persists audience, location, and duration immediately before approval. */
+  async setPublishPreferences(input: PublishPreferencesInput): Promise<void> {
+    await this.getRequiredSession();
+    const parsed = publishPreferencesSchema.parse(input);
+    const audience = {
+      min_age: parsed.audience.minAge,
+      ...(parsed.audience.maxAge === undefined ? {} : { max_age: parsed.audience.maxAge }),
+      ...(parsed.audience.intents === undefined || parsed.audience.intents.length === 0
+        ? {}
+        : { intents: parsed.audience.intents }),
+    };
+    const { error } = await callUntypedRpc(this.client, 'set_publish_preferences', {
+      draft_id: parsed.draftId,
+      audience,
+      target_location_precision: parsed.locationPrecision,
+      target_publish_days: parsed.publishDays,
+    });
+    if (error !== null) {
+      throw new DataLayerError('consent.setPublishPreferences', error);
+    }
+  }
+
   /** Approve and publish in one server transaction; returns the public slug. */
   async approveAndPublish(approval: ConsentApproval): Promise<PublishedCampaign> {
     await this.getRequiredSession();
@@ -285,4 +447,32 @@ export class ConsentRepo {
 
     return data.session;
   }
+}
+
+type RpcEnvelope = {
+  readonly data: unknown;
+  readonly error: unknown | null;
+};
+
+async function callUntypedRpc(
+  client: BrowserSupabaseClient,
+  functionName: 'create_dater_revision' | 'set_publish_preferences',
+  args: Readonly<Record<string, unknown>>,
+): Promise<RpcEnvelope> {
+  const rpc: unknown = Reflect.get(client, 'rpc');
+  if (typeof rpc !== 'function') {
+    throw new DataLayerError('consent.rpc', new Error('Supabase RPC client is unavailable'));
+  }
+  const result: unknown = await Reflect.apply(rpc, client, [functionName, args]);
+  if (
+    typeof result !== 'object' ||
+    result === null ||
+    !('data' in result) ||
+    !('error' in result)
+  ) {
+    throw new DataLayerError('consent.rpc', new Error('Supabase RPC returned an invalid result'));
+  }
+  const data: unknown = Reflect.get(result, 'data');
+  const error: unknown = Reflect.get(result, 'error');
+  return { data, error };
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import {
   confirmDisplayName,
@@ -43,6 +43,17 @@ const CLAIM_ERROR_COPY: readonly (readonly [string, string])[] = [
   ['linked to another account', 'This invite was already claimed with a different account.'],
   ['no longer claimable', 'This invite has already been answered or is no longer active.'],
 ];
+
+const DATING_INTENTS = [
+  { value: 'long-term', label: 'Long-term' },
+  { value: 'open-to-either', label: 'Open to either' },
+  { value: 'short-term', label: 'Short-term' },
+] as const;
+const PUBLISH_DAY_OPTIONS = [7, 14] as const;
+
+type DatingIntent = (typeof DATING_INTENTS)[number]['value'];
+type LocationPrecision = 'city' | 'region' | 'hidden';
+type PublishDays = 7 | 14;
 
 type ReviewContext = {
   readonly preview: ConsentPreview;
@@ -106,6 +117,68 @@ function relationshipLine(preview: ConsentPreview): string {
   return duration === null ? kind : `${kind} · ${duration}`;
 }
 
+async function loadReviewContext(
+  repo: ConsentRepo,
+  preview: ConsentPreview,
+  review: ConsentReview,
+): Promise<ReviewContext> {
+  const voiceUrl =
+    review.revision.voice_asset_path === null
+      ? null
+      : await repo.createAssetViewUrl(review.revision.voice_asset_path);
+  const photoAssets = review.assets.filter((asset) => asset.asset_type === 'photo');
+  const photos = await Promise.all(
+    photoAssets.map(async (asset) => ({
+      assetId: asset.id,
+      url: await repo.createAssetViewUrl(asset.storage_path),
+    })),
+  );
+  return { preview, review, voiceUrl, photos };
+}
+
+function sameIds(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((id) => right.includes(id));
+}
+
+function revisionAssetIds(
+  review: ConsentReview,
+  includedPhotoAssetIds: readonly string[],
+): readonly string[] {
+  const selectedPhotos = new Set(includedPhotoAssetIds);
+  const assetsById = new Map(review.assets.map((asset) => [asset.id, asset]));
+  const retainedRevisionAssets = review.revision.asset_ids.filter((assetId) => {
+    const asset = assetsById.get(assetId);
+    return asset?.asset_type !== 'photo' || selectedPhotos.has(assetId);
+  });
+  const retainedIds = new Set(retainedRevisionAssets);
+  return [
+    ...retainedRevisionAssets,
+    ...includedPhotoAssetIds.filter((assetId) => !retainedIds.has(assetId)),
+  ];
+}
+
+function audienceError(minAge: string, maxAge: string): string | null {
+  const parsedMinAge = Number(minAge);
+  if (!Number.isInteger(parsedMinAge) || parsedMinAge < 18) {
+    return 'Minimum age must be 18 or older.';
+  }
+  if (maxAge.trim() === '') {
+    return null;
+  }
+  const parsedMaxAge = Number(maxAge);
+  if (!Number.isInteger(parsedMaxAge) || parsedMaxAge < parsedMinAge) {
+    return 'Maximum age must be a whole number at or above the minimum.';
+  }
+  return null;
+}
+
+function locationSummary(locationPrecision: LocationPrecision): string {
+  if (locationPrecision === 'hidden') {
+    return 'Location hidden';
+  }
+  return locationPrecision === 'region' ? 'Region-level location' : 'City-level location';
+}
+
 export function ConsentFlow({ token }: { readonly token: string }) {
   const router = useRouter();
   const clientRef = useRef<BrowserSupabaseClient | null | undefined>(undefined);
@@ -122,6 +195,18 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   const [confirmingName, setConfirmingName] = useState(false);
   const [displayNameError, setDisplayNameError] = useState<string | null>(null);
   const [includedAssetIds, setIncludedAssetIds] = useState<readonly string[]>([]);
+  const [editHeadline, setEditHeadline] = useState('');
+  const [editBody, setEditBody] = useState('');
+  const [savingEdits, setSavingEdits] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [editStatus, setEditStatus] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [publishDays, setPublishDays] = useState<PublishDays>(14);
+  const [locationPrecision, setLocationPrecision] = useState<LocationPrecision>('city');
+  const [minimumAge, setMinimumAge] = useState('18');
+  const [maximumAge, setMaximumAge] = useState('');
+  const [selectedIntents, setSelectedIntents] = useState<readonly DatingIntent[]>([]);
+  const [preferenceError, setPreferenceError] = useState<string | null>(null);
   const [hardClaimsConfirmed, setHardClaimsConfirmed] = useState(false);
   const [requestingChanges, setRequestingChanges] = useState(false);
   const [responseNote, setResponseNote] = useState('');
@@ -129,6 +214,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   const [responseError, setResponseError] = useState<string | null>(null);
   const responseNoteRef = useRef<HTMLTextAreaElement | null>(null);
   const claimStartedRef = useRef(false);
+  const approvalStartedRef = useRef(false);
 
   const enterReview = useCallback(
     async (activeClient: BrowserSupabaseClient, preview: ConsentPreview) => {
@@ -143,28 +229,22 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         await ensureUserRow(activeClient);
         const { pitchDraftId } = await repo.claim(token);
         const review = await repo.getConsentReview(pitchDraftId);
-        const voiceUrl =
-          review.revision.voice_asset_path === null
-            ? null
-            : await repo.createAssetViewUrl(review.revision.voice_asset_path);
-        const photoAssets = review.assets.filter((asset) => asset.asset_type === 'photo');
-        const photos = await Promise.all(
-          photoAssets.map(async (asset) => ({
-            assetId: asset.id,
-            url: await repo.createAssetViewUrl(asset.storage_path),
-          })),
-        );
-        setIncludedAssetIds(photoAssets.map((asset) => asset.id));
+        const context = await loadReviewContext(repo, preview, review);
+        setIncludedAssetIds(context.photos.map((photo) => photo.assetId));
+        setEditHeadline(review.revision.headline);
+        setEditBody(review.revision.body);
+        setEditStatus(null);
+        setEditError(null);
         setHardClaimsConfirmed(false);
         setRequestingChanges(false);
         setResponseNote('');
         setResponseError(null);
         const nameStatus = await getDisplayNameStatus(activeClient);
+        setDisplayName(nameStatus.displayName);
         if (nameStatus.confirmed) {
-          setState({ step: 'review', preview, review, voiceUrl, photos });
+          setState({ step: 'review', ...context });
         } else {
-          setDisplayName(nameStatus.displayName);
-          setState({ step: 'name-confirmation', preview, review, voiceUrl, photos });
+          setState({ step: 'name-confirmation', ...context });
         }
       } catch (error: unknown) {
         if (!(error instanceof Error)) {
@@ -255,17 +335,33 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   }
 
   async function handleApprove() {
-    if (client === null || state.step !== 'review') {
+    if (client === null || state.step !== 'review' || approvalStartedRef.current) {
       return;
     }
 
     const { preview, review } = state;
+    const validationMessage = audienceError(minimumAge, maximumAge);
+    if (validationMessage !== null) {
+      setPreferenceError(validationMessage);
+      return;
+    }
+    approvalStartedRef.current = true;
     setState({ step: 'publishing', preview });
     try {
       const repo = new ConsentRepo(client);
+      await repo.setPublishPreferences({
+        draftId: review.revision.pitch_draft_id,
+        audience: {
+          minAge: Number(minimumAge),
+          ...(maximumAge.trim() === '' ? {} : { maxAge: Number(maximumAge) }),
+          ...(selectedIntents.length === 0 ? {} : { intents: selectedIntents }),
+        },
+        locationPrecision,
+        publishDays,
+      });
       const { campaignId, campaignSlug } = await repo.approveAndPublish({
         draftId: review.revision.pitch_draft_id,
-        campaignDays: 14,
+        campaignDays: publishDays,
         revisionId: review.revision.id,
         includedAssetIds,
         hardClaimsConfirmed,
@@ -283,6 +379,129 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         return;
       }
       setState({ step: 'error', message: claimErrorMessage(detail) });
+    }
+  }
+
+  async function handleSaveEdits() {
+    if (client === null || state.step !== 'review') {
+      return;
+    }
+    const headline = editHeadline.trim();
+    const body = editBody.trim();
+    if (headline.length === 0 || body.length === 0) {
+      setEditError('Headline and introduction are required.');
+      return;
+    }
+    if (headline.length > 120 || body.length > 2000) {
+      setEditError('Keep the headline under 120 characters and the introduction under 2,000.');
+      return;
+    }
+
+    setSavingEdits(true);
+    setEditError(null);
+    setEditStatus(null);
+    try {
+      const repo = new ConsentRepo(client);
+      await repo.createDaterRevision({
+        draftId: state.review.revision.pitch_draft_id,
+        headline,
+        body,
+        includedAssetIds: revisionAssetIds(state.review, includedAssetIds),
+      });
+      const latestReview = await repo.getConsentReview(state.review.revision.pitch_draft_id);
+      const context = await loadReviewContext(repo, state.preview, latestReview);
+      setState({ step: 'review', ...context });
+      setIncludedAssetIds(context.photos.map((photo) => photo.assetId));
+      setEditHeadline(latestReview.revision.headline);
+      setEditBody(latestReview.revision.body);
+      setHardClaimsConfirmed(false);
+      setEditStatus('Your edits are saved in a new review version.');
+    } catch (error: unknown) {
+      if (!(error instanceof Error)) {
+        throw error;
+      }
+      const detail = claimErrorDetail(error);
+      setEditError(
+        detail.includes('too long')
+          ? 'Keep the headline under 120 characters and the introduction under 2,000.'
+          : 'We could not save your edits. Please try again.',
+      );
+    } finally {
+      setSavingEdits(false);
+    }
+  }
+
+  async function handlePhotoUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.item(0) ?? null;
+    event.target.value = '';
+    if (client === null || state.step !== 'review' || file === null) {
+      return;
+    }
+
+    setUploadingPhoto(true);
+    setEditStatus(null);
+    setEditError(null);
+    try {
+      const repo = new ConsentRepo(client);
+      if (file.type !== 'image/jpeg' && file.type !== 'image/png' && file.type !== 'image/webp') {
+        setEditError('Photo validation failed — try a different photo.');
+        return;
+      }
+      const supportedContentType = file.type;
+      const extension =
+        supportedContentType === 'image/png'
+          ? 'png'
+          : supportedContentType === 'image/webp'
+            ? 'webp'
+            : 'jpg';
+      const fileName = `dater-${crypto.randomUUID()}.${extension}`;
+      const asset = await repo.uploadDaterPhoto(
+        state.review.revision.pitch_draft_id,
+        fileName,
+        await file.arrayBuffer(),
+        supportedContentType,
+      );
+      const { data, error } = await client.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (error !== null || accessToken === undefined) {
+        throw new Error('photo validation requires a session');
+      }
+      const objectName = asset.storage_path.replace(/^pitch-media\//, '');
+      const validationResponse = await fetch('/api/media/validate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ bucket: 'pitch-media', objectName }),
+      });
+      const verdict: unknown = await validationResponse.json().catch(() => null);
+      const validated =
+        validationResponse.ok &&
+        typeof verdict === 'object' &&
+        verdict !== null &&
+        'ok' in verdict &&
+        verdict.ok === true;
+      if (!validated) {
+        setEditError('Photo validation failed — try a different photo.');
+        return;
+      }
+
+      const url = await repo.createAssetViewUrl(asset.storage_path);
+      setState((current) =>
+        current.step === 'review'
+          ? { ...current, photos: [...current.photos, { assetId: asset.id, url }] }
+          : current,
+      );
+      setIncludedAssetIds((current) => [...current, asset.id]);
+      setEditStatus('Photo uploaded. Save your edits to add it to this review version.');
+    } catch (error: unknown) {
+      if (!(error instanceof Error)) {
+        throw error;
+      }
+      setEditError('Photo validation failed — try a different photo.');
+    } finally {
+      setUploadingPhoto(false);
     }
   }
 
@@ -384,6 +603,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
     setDisplayNameError(null);
     try {
       await confirmDisplayName(client, displayName);
+      setDisplayName(displayName.trim());
       setState({ ...state, step: 'review' });
     } catch (error: unknown) {
       if (error instanceof Error) {
@@ -395,6 +615,17 @@ export function ConsentFlow({ token }: { readonly token: string }) {
       setConfirmingName(false);
     }
   }
+
+  const currentRevisionPhotoIds =
+    state.step === 'review'
+      ? state.review.assets.filter((asset) => asset.asset_type === 'photo').map((asset) => asset.id)
+      : [];
+  const editsDirty =
+    state.step === 'review' &&
+    (editHeadline !== state.review.revision.headline ||
+      editBody !== state.review.revision.body ||
+      !sameIds(includedAssetIds, currentRevisionPhotoIds));
+  const currentAudienceError = audienceError(minimumAge, maximumAge);
 
   return (
     <main className={styles.page}>
@@ -569,63 +800,240 @@ export function ConsentFlow({ token }: { readonly token: string }) {
               )}
             </div>
 
-            {state.photos.length > 0 && (
-              <div className={styles.photoBlock}>
-                <h2 className={styles.photoHeading}>The photos they picked</h2>
-                <div className={styles.photoGrid}>
-                  {state.photos.map((photo, index) => {
-                    const included = includedAssetIds.includes(photo.assetId);
-                    return (
-                      <button
-                        key={photo.assetId}
-                        type="button"
-                        className={`${styles.photoToggle} ${included ? '' : styles.photoExcluded}`}
-                        aria-pressed={included}
-                        aria-label={
-                          included
-                            ? `Exclude suggested photo ${index + 1}`
-                            : `Include suggested photo ${index + 1}`
-                        }
-                        onClick={() =>
-                          setIncludedAssetIds((current) =>
+            <div className={styles.editBlock}>
+              <h2 className={styles.sectionHeading}>Make it yours</h2>
+              <p className={styles.muted}>
+                Edit every word and choose every photo before you approve.
+              </p>
+
+              <div className={styles.editFields}>
+                <label className={styles.label} htmlFor="dater-headline">
+                  Headline
+                </label>
+                <input
+                  id="dater-headline"
+                  className={styles.input}
+                  type="text"
+                  required
+                  maxLength={120}
+                  value={editHeadline}
+                  onChange={(event) => {
+                    setEditHeadline(event.target.value);
+                    setEditStatus(null);
+                    setEditError(null);
+                  }}
+                />
+                <label className={styles.label} htmlFor="dater-body">
+                  Introduction
+                </label>
+                <textarea
+                  id="dater-body"
+                  className={styles.textarea}
+                  required
+                  maxLength={2000}
+                  rows={7}
+                  value={editBody}
+                  onChange={(event) => {
+                    setEditBody(event.target.value);
+                    setEditStatus(null);
+                    setEditError(null);
+                  }}
+                />
+              </div>
+
+              {state.photos.length > 0 && (
+                <div className={styles.photoBlock}>
+                  <h3 className={styles.photoHeading}>Photos on your page</h3>
+                  <div className={styles.photoGrid}>
+                    {state.photos.map((photo, index) => {
+                      const included = includedAssetIds.includes(photo.assetId);
+                      return (
+                        <button
+                          key={photo.assetId}
+                          type="button"
+                          className={`${styles.photoToggle} ${included ? '' : styles.photoExcluded}`}
+                          aria-pressed={included}
+                          aria-label={
                             included
-                              ? current.filter((id) => id !== photo.assetId)
-                              : [...current, photo.assetId],
+                              ? `Exclude suggested photo ${index + 1}`
+                              : `Include suggested photo ${index + 1}`
+                          }
+                          onClick={() => {
+                            setEditStatus(null);
+                            setEditError(null);
+                            setIncludedAssetIds((current) =>
+                              included
+                                ? current.filter((id) => id !== photo.assetId)
+                                : [...current, photo.assetId],
+                            );
+                          }}
+                        >
+                          <img
+                            className={styles.photo}
+                            src={photo.url}
+                            alt={`Suggested photo ${index + 1}`}
+                          />
+                          <span className={styles.photoState}>
+                            {included ? 'Included' : 'Excluded'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className={styles.muted}>Choose which photos this review version includes.</p>
+                </div>
+              )}
+
+              <label className={styles.uploadLabel} htmlFor="dater-photo-upload">
+                {uploadingPhoto ? 'Uploading & validating…' : 'Upload my photo'}
+              </label>
+              <input
+                id="dater-photo-upload"
+                className={styles.fileInput}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                disabled={uploadingPhoto || savingEdits}
+                onChange={(event) => {
+                  void handlePhotoUpload(event);
+                }}
+              />
+
+              {includedAssetIds.length === 0 && (
+                <p className={styles.muted} role="status">
+                  Your page needs at least one photo — keep one to publish.
+                </p>
+              )}
+              {editStatus !== null && (
+                <p className={styles.status} role="status">
+                  {editStatus}
+                </p>
+              )}
+              {editError !== null && (
+                <p className={styles.error} role="status">
+                  {editError}
+                </p>
+              )}
+              <button
+                className={styles.secondary}
+                type="button"
+                disabled={!editsDirty || savingEdits || uploadingPhoto}
+                onClick={() => {
+                  void handleSaveEdits();
+                }}
+              >
+                {savingEdits ? 'Saving edits…' : 'Save my edits'}
+              </button>
+            </div>
+
+            <fieldset className={styles.preferenceBlock}>
+              <legend className={styles.sectionHeading}>Who can see this &amp; for how long</legend>
+
+              <div className={styles.fieldGroup}>
+                <span className={styles.label}>Public duration</span>
+                <div className={styles.choiceRow}>
+                  {PUBLISH_DAY_OPTIONS.map((days) => (
+                    <label className={styles.choice} key={days}>
+                      <input
+                        type="radio"
+                        name="publish-days"
+                        value={days}
+                        checked={publishDays === days}
+                        onChange={() => setPublishDays(days)}
+                      />
+                      <span>{days} days</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className={styles.fieldGroup}>
+                <label className={styles.label} htmlFor="location-precision">
+                  Location visibility
+                </label>
+                <select
+                  id="location-precision"
+                  className={styles.input}
+                  value={locationPrecision}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (value === 'city' || value === 'region' || value === 'hidden') {
+                      setLocationPrecision(value);
+                    }
+                  }}
+                >
+                  <option value="city">City</option>
+                  <option value="region">Region only</option>
+                  <option value="hidden">Hidden</option>
+                </select>
+              </div>
+
+              <div className={styles.ageGrid}>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.label} htmlFor="audience-min-age">
+                    Minimum age
+                  </label>
+                  <input
+                    id="audience-min-age"
+                    className={styles.input}
+                    type="number"
+                    min={18}
+                    step={1}
+                    inputMode="numeric"
+                    value={minimumAge}
+                    onChange={(event) => {
+                      setMinimumAge(event.target.value);
+                      setPreferenceError(null);
+                    }}
+                  />
+                </div>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.label} htmlFor="audience-max-age">
+                    Maximum age (optional)
+                  </label>
+                  <input
+                    id="audience-max-age"
+                    className={styles.input}
+                    type="number"
+                    min={18}
+                    step={1}
+                    inputMode="numeric"
+                    value={maximumAge}
+                    onChange={(event) => {
+                      setMaximumAge(event.target.value);
+                      setPreferenceError(null);
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.fieldGroup}>
+                <span className={styles.label}>Dating intents (optional)</span>
+                <div className={styles.checkboxList}>
+                  {DATING_INTENTS.map((intent) => (
+                    <label className={styles.choice} key={intent.value}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIntents.includes(intent.value)}
+                        onChange={(event) =>
+                          setSelectedIntents((current) =>
+                            event.target.checked
+                              ? [...current, intent.value]
+                              : current.filter((value) => value !== intent.value),
                           )
                         }
-                      >
-                        <img
-                          className={styles.photo}
-                          src={photo.url}
-                          alt={`Suggested photo ${index + 1}`}
-                        />
-                        <span className={styles.photoState}>
-                          {included ? 'Included' : 'Excluded'}
-                        </span>
-                      </button>
-                    );
-                  })}
+                      />
+                      <span>{intent.label}</span>
+                    </label>
+                  ))}
                 </div>
-                <p className={styles.muted}>
-                  Choose which photos to include. Nothing is removed until you approve.
-                </p>
-                {includedAssetIds.length === 0 && (
-                  <p className={styles.muted} role="status">
-                    Your page needs at least one photo — keep one to publish.
-                  </p>
-                )}
               </div>
-            )}
 
-            <div className={styles.windowBlock}>
-              <h2 className={styles.photoHeading}>Public for 14 days</h2>
-              <p className={styles.muted}>Extension options are coming soon.</p>
-            </div>
-
-            <div className={styles.notes}>
-              <h2>{state.review.revision.headline}</h2>
-              <p>{state.review.revision.body}</p>
-            </div>
+              {(preferenceError ?? currentAudienceError) !== null && (
+                <p className={styles.error} role="status">
+                  {preferenceError ?? currentAudienceError}
+                </p>
+              )}
+            </fieldset>
 
             {state.review.hardClaims.length > 0 && (
               <div className={styles.claimBlock}>
@@ -646,6 +1054,28 @@ export function ConsentFlow({ token }: { readonly token: string }) {
               </div>
             )}
 
+            <div className={styles.profileSummary}>
+              <h2 className={styles.sectionHeading}>This is how your page will look</h2>
+              <dl className={styles.summaryList}>
+                <div>
+                  <dt>Display name</dt>
+                  <dd>{displayName}</dd>
+                </div>
+                <div>
+                  <dt>Location</dt>
+                  <dd>{locationSummary(locationPrecision)}</dd>
+                </div>
+                <div>
+                  <dt>Public duration</dt>
+                  <dd>{publishDays} days</dd>
+                </div>
+                <div>
+                  <dt>Included photos</dt>
+                  <dd>{includedAssetIds.length}</dd>
+                </div>
+              </dl>
+            </div>
+
             <div className={styles.controlNote}>
               <span aria-hidden="true">✓</span>
               <p>
@@ -654,11 +1084,21 @@ export function ConsentFlow({ token }: { readonly token: string }) {
               </p>
             </div>
 
+            {editsDirty && (
+              <p className={styles.muted} role="status">
+                Save your edits before approving this page.
+              </p>
+            )}
+
             <button
               className={styles.primary}
               type="button"
               disabled={
                 responding ||
+                savingEdits ||
+                uploadingPhoto ||
+                editsDirty ||
+                currentAudienceError !== null ||
                 includedAssetIds.length === 0 ||
                 (state.review.hardClaims.length > 0 && !hardClaimsConfirmed)
               }

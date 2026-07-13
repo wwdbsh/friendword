@@ -5,6 +5,10 @@ import type { PitchCaption, PitchFixture, PitchPhoto, PitchVouch } from '@/fixtu
 export type PitchView = {
   readonly campaignSlug: string;
   readonly daterName: string;
+  /** Dater-approved structured body, rendered below the player (CP-2). */
+  readonly approvedBody: string | null;
+  /** Full transcript text for the accessible transcript section (CP-2). */
+  readonly transcriptText: string | null;
   readonly age: number | null;
   readonly approximateLocation: string | null;
   readonly introducerPseudonym: string;
@@ -67,7 +71,7 @@ export function relationshipLabel(pitch: PublishedPitch): string {
 }
 
 export function fromFixture(fixture: PitchFixture): PitchView {
-  return { ...fixture, audioUrl: null };
+  return { ...fixture, approvedBody: null, transcriptText: null, audioUrl: null };
 }
 
 function realPhotos(pitch: PublishedPitch): readonly [PitchPhoto, ...PitchPhoto[]] | null {
@@ -97,22 +101,41 @@ function realPhotos(pitch: PublishedPitch): readonly [PitchPhoto, ...PitchPhoto[
   ];
 }
 
+function realCaptions(pitch: PublishedPitch): readonly [PitchCaption, ...PitchCaption[]] | null {
+  const segments = pitch.transcript?.segments ?? [];
+  const [first, ...rest] = segments;
+  if (first === undefined) {
+    return null;
+  }
+  // CP-2: captions carry the provider's real segment timestamps.
+  const toCaption = (segment: (typeof segments)[number]): PitchCaption => ({
+    startMs: Math.max(0, Math.round(segment.start * 1000)),
+    endMs: Math.max(1, Math.round(segment.end * 1000)),
+    text: segment.text,
+  });
+  return [toCaption(first), ...rest.map(toCaption)];
+}
+
 export function fromPublishedPitch(pitch: PublishedPitch): PitchView {
   const captionText =
     pitch.headline ??
     `${pitch.introducerDisplayName} says it best — press play and hear it in their own voice.`;
+  const captions = realCaptions(pitch);
+  const lastSegment = pitch.transcript?.segments.at(-1);
 
   return {
     campaignSlug: pitch.campaignSlug,
     daterName: pitch.daterDisplayName,
+    approvedBody: pitch.body,
+    transcriptText: pitch.transcript?.text ?? null,
     age: null,
-    approximateLocation: null,
+    approximateLocation: pitch.approximateLocation,
     introducerPseudonym: pitch.introducerDisplayName,
     relationship: relationshipLabel(pitch),
-    durationMs: 60_000,
+    durationMs: lastSegment === undefined ? 60_000 : Math.round(lastSegment.end * 1000),
     description: `Meet ${pitch.daterDisplayName} through ${pitch.introducerDisplayName}'s original voice pitch, shared with ${pitch.daterDisplayName}'s approval.`,
     photos: realPhotos(pitch) ?? [ABSTRACT_PHOTO],
-    captions: [{ startMs: 0, endMs: Number.MAX_SAFE_INTEGER, text: captionText }],
+    captions: captions ?? [{ startMs: 0, endMs: Number.MAX_SAFE_INTEGER, text: captionText }],
     waveform: PLACEHOLDER_WAVEFORM,
     vouches: [],
     audioUrl: pitch.voiceUrl,

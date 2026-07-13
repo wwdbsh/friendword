@@ -32,6 +32,10 @@ export type PitchDraftRow = {
   readonly headline: string | null;
   readonly body: string | null;
   readonly structure: Json | null;
+  readonly transcript: Json | null;
+  readonly audience_policy: Json | null;
+  readonly location_precision: 'city' | 'region' | 'hidden' | null;
+  readonly publish_days: number | null;
   readonly relationship_type: RelationshipType | null;
   readonly relationship_duration: RelationshipDuration | null;
   readonly created_at: string;
@@ -57,6 +61,8 @@ export type CampaignRow = {
   readonly published_at: string | null;
   readonly slug: string | null;
   readonly ends_at: string | null;
+  readonly audience_policy: Json | null;
+  readonly location_precision: 'city' | 'region' | 'hidden' | null;
   readonly created_at: string;
   readonly updated_at: string;
 };
@@ -216,6 +222,7 @@ export type Database = {
           readonly headline?: string | null;
           readonly body?: string | null;
           readonly structure?: Json | null;
+          readonly transcript?: Json | null;
           readonly relationship_type?: RelationshipType | null;
           readonly relationship_duration?: RelationshipDuration | null;
         };
@@ -309,6 +316,39 @@ export type Database = {
           readonly moderation_status?: 'passed' | 'flagged' | 'skipped';
           readonly moderation_ref?: string | null;
         };
+        Relationships: [];
+      };
+      provider_usage_events: {
+        Row: {
+          readonly id: string;
+          readonly user_id: string | null;
+          readonly usage_kind: string | null;
+          readonly request_ref: string | null;
+          readonly estimated_cents: number | null;
+          readonly actual_cents: number | null;
+          readonly status: 'reserved' | 'succeeded' | 'failed' | 'timeout' | 'released';
+          readonly pitch_draft_id: string | null;
+          readonly created_at: string;
+          readonly reconciled_at: string | null;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      ai_processing_consents: {
+        Row: {
+          readonly id: string;
+          readonly user_id: string;
+          readonly pitch_draft_id: string;
+          readonly consent_revision: string;
+          readonly consented_at: string;
+        };
+        Insert: {
+          readonly user_id: string;
+          readonly pitch_draft_id: string;
+          readonly consent_revision: string;
+        };
+        Update: Record<string, never>;
         Relationships: [];
       };
       text_moderations: {
@@ -581,6 +621,30 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: {
+      reserve_provider_usage: {
+        Args: {
+          readonly usage_kind: 'transcribe' | 'structure' | 'moderate_text' | 'media_validate';
+          readonly request_ref: string;
+          readonly estimated_cents: number;
+          readonly scope_draft_id?: string | null;
+        };
+        Returns: string;
+      };
+      reconcile_provider_usage: {
+        Args: {
+          readonly reservation_id: string;
+          readonly actual_cents: number;
+          readonly final_status: 'succeeded' | 'failed' | 'timeout' | 'released';
+        };
+        Returns: undefined;
+      };
+      record_ai_processing_consent: {
+        Args: {
+          readonly target_draft_id: string;
+          readonly target_consent_revision: string;
+        };
+        Returns: string;
+      };
       report_content: {
         Args: {
           readonly target_type: 'campaign' | 'interest' | 'intro_room' | 'message';

@@ -20,6 +20,17 @@ export type PublishedPitchPhoto = {
   readonly sortOrder: number;
 };
 
+export type PublishedTranscriptSegment = {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+};
+
+export type PublishedTranscript = {
+  readonly text: string;
+  readonly segments: readonly PublishedTranscriptSegment[];
+};
+
 export type PublishedPitch = {
   readonly campaignId: string;
   readonly campaignSlug: string;
@@ -30,6 +41,8 @@ export type PublishedPitch = {
   readonly relationshipDuration: RelationshipDuration | null;
   readonly headline: string | null;
   readonly body: string | null;
+  readonly transcript: PublishedTranscript | null;
+  readonly approximateLocation: string | null;
   readonly voiceUrl: string | null;
   readonly photos: readonly PublishedPitchPhoto[];
 };
@@ -115,6 +128,46 @@ export async function getPublishedPitchBySlug(
     }
   }
 
+  // CP-2: the published transcript is the dater-approved snapshot.
+  let transcript: PublishedTranscript | null = null;
+  const rawTranscript = draft.transcript;
+  if (
+    typeof rawTranscript === 'object' &&
+    rawTranscript !== null &&
+    !Array.isArray(rawTranscript) &&
+    typeof (rawTranscript as { readonly text?: unknown }).text === 'string'
+  ) {
+    const candidate = rawTranscript as {
+      readonly text: string;
+      readonly segments?: readonly unknown[];
+    };
+    const segments = (candidate.segments ?? []).flatMap((segment) => {
+      if (
+        typeof segment === 'object' &&
+        segment !== null &&
+        typeof (segment as { readonly start?: unknown }).start === 'number' &&
+        typeof (segment as { readonly end?: unknown }).end === 'number' &&
+        typeof (segment as { readonly text?: unknown }).text === 'string'
+      ) {
+        const typed = segment as { start: number; end: number; text: string };
+        return [{ start: typed.start, end: typed.end, text: typed.text }];
+      }
+      return [];
+    });
+    transcript = { text: candidate.text, segments };
+  }
+
+  // CP-1 location precision: 'hidden' publishes no location at all.
+  let approximateLocation: string | null = null;
+  if (campaign.location_precision !== 'hidden') {
+    const { data: daterDatingProfile } = await client
+      .from('dating_profiles')
+      .select('approximate_location')
+      .eq('user_id', campaign.owner_user_id)
+      .maybeSingle();
+    approximateLocation = daterDatingProfile?.approximate_location ?? null;
+  }
+
   return {
     campaignId: campaign.id,
     campaignSlug: parsedSlug.data,
@@ -125,6 +178,8 @@ export async function getPublishedPitchBySlug(
     relationshipDuration: draft.relationship_duration,
     headline: draft.headline,
     body: draft.body,
+    transcript,
+    approximateLocation,
     voiceUrl: signed?.signedUrl ?? null,
     photos,
   };

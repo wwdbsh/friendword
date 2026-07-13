@@ -863,6 +863,18 @@ describe('getPublishedPitchBySlug', () => {
           select: () => ({ eq: () => ({ single: async () => ({ data: draftRow, error: null }) }) }),
         };
       }
+      if (table === 'dating_profiles') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: { approximate_location: 'Seattle' },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
       if (table === 'pitch_assets') {
         return {
           select: () => ({
@@ -925,6 +937,8 @@ describe('getPublishedPitchBySlug', () => {
       relationshipDuration: 'y3to10',
       headline: null,
       body: null,
+      transcript: null,
+      approximateLocation: 'Seattle',
       voiceUrl: `https://storage.example/${draftRow.id}/voice.m4a`,
       photos: [
         {

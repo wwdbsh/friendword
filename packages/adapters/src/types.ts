@@ -5,9 +5,17 @@ export type AudioInput = {
   readonly durationMs: number;
 };
 
+export type TranscriptSegment = {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+};
+
 export type TranscriptionResult = {
   readonly text: string;
   readonly language: string;
+  /** Segment-level timestamps when the provider supplies them (CP-2). */
+  readonly segments?: readonly TranscriptSegment[];
 };
 
 export interface TranscriptionProvider {

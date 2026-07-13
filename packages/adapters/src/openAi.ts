@@ -13,7 +13,9 @@ import type {
 } from './types';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
-const TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe';
+// whisper-1 + verbose_json is the only transcription surface that returns
+// segment timestamps, which the public pitch captions require (CP-2).
+const TRANSCRIBE_MODEL = 'whisper-1';
 const STRUCTURE_MODEL = 'gpt-4o-mini';
 const MODERATION_MODEL = 'omni-moderation-latest';
 
@@ -39,7 +41,7 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
     const form = new FormData();
     form.append('file', audioBlob, 'voice.m4a');
     form.append('model', TRANSCRIBE_MODEL);
-    form.append('response_format', 'json');
+    form.append('response_format', 'verbose_json');
 
     const response = await fetch(`${OPENAI_BASE_URL}/audio/transcriptions`, {
       method: 'POST',
@@ -50,12 +52,38 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
       throw new ProviderRequestError('transcription', response.status);
     }
 
-    const data = (await response.json()) as { readonly text?: string };
+    const data = (await response.json()) as {
+      readonly text?: string;
+      readonly language?: string;
+      readonly segments?: readonly {
+        readonly start?: number;
+        readonly end?: number;
+        readonly text?: string;
+      }[];
+    };
     if (typeof data.text !== 'string' || data.text.trim() === '') {
       throw new ProviderRequestError('transcription', 502);
     }
 
-    return { text: data.text, language: 'en' };
+    const segments = (data.segments ?? [])
+      .filter(
+        (segment) =>
+          typeof segment.start === 'number' &&
+          typeof segment.end === 'number' &&
+          typeof segment.text === 'string' &&
+          segment.text.trim() !== '',
+      )
+      .map((segment) => ({
+        start: segment.start as number,
+        end: segment.end as number,
+        text: (segment.text as string).trim(),
+      }));
+
+    return {
+      text: data.text,
+      language: typeof data.language === 'string' ? data.language : 'en',
+      segments,
+    };
   }
 }
 

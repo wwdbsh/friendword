@@ -37,6 +37,7 @@ function PlayIcon({ paused }: { readonly paused: boolean }) {
 export function PitchPlayer({ pitch }: PitchPlayerProps) {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [durationMs, setDurationMs] = useState(pitch.durationMs);
+  const [waveform, setWaveform] = useState<readonly number[]>(pitch.waveform);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isFooterVisible, setIsFooterVisible] = useState(false);
   const elapsedRef = useRef(0);
@@ -92,6 +93,57 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
       audio.pause();
     }
   }, [isPlaying, hasRealAudio]);
+
+  // CP-2: derive the waveform from the actual audio instead of a fixed
+  // placeholder. Falls back silently when decode is unavailable.
+  useEffect(() => {
+    if (pitch.audioUrl === null) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(pitch.audioUrl as string);
+        if (!response.ok) {
+          return;
+        }
+        const buffer = await response.arrayBuffer();
+        const context = new AudioContext();
+        try {
+          const decoded = await context.decodeAudioData(buffer);
+          const channel = decoded.getChannelData(0);
+          const barCount = 48;
+          const blockSize = Math.max(1, Math.floor(channel.length / barCount));
+          const peaks: number[] = [];
+          let maxPeak = 0;
+          for (let bar = 0; bar < barCount; bar += 1) {
+            let sum = 0;
+            const start = bar * blockSize;
+            for (
+              let index = start;
+              index < start + blockSize && index < channel.length;
+              index += 1
+            ) {
+              sum += Math.abs(channel[index] ?? 0);
+            }
+            const average = sum / blockSize;
+            peaks.push(average);
+            maxPeak = Math.max(maxPeak, average);
+          }
+          if (!cancelled && maxPeak > 0) {
+            setWaveform(peaks.map((peak) => Math.max(12, Math.round((peak / maxPeak) * 100))));
+          }
+        } finally {
+          void context.close();
+        }
+      } catch {
+        // Keep the placeholder bars; progress display still works.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pitch.audioUrl]);
 
   useEffect(() => {
     const footer = document.querySelector('[data-pitch-footer]');
@@ -222,9 +274,9 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
               role="img"
               aria-label={`Pitch progress ${Math.round(progress * 100)} percent`}
             >
-              {pitch.waveform.map((level, index) => {
-                const barWidth = 100 / pitch.waveform.length;
-                const played = (index + 1) / pitch.waveform.length <= progress;
+              {waveform.map((level, index) => {
+                const barWidth = 100 / waveform.length;
+                const played = (index + 1) / waveform.length <= progress;
                 return (
                   <rect
                     className={played ? styles.barPlayed : styles.barWaiting}

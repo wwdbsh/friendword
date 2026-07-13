@@ -16,9 +16,11 @@ export class MockTranscriptionProvider implements TranscriptionProvider {
   async transcribe(audio: AudioInput): Promise<TranscriptionResult> {
     await simulateDelay(this.#options);
 
+    const text = `A ${audio.durationMs}ms introduction recorded at ${audio.uri}.`;
     return {
-      text: `A ${audio.durationMs}ms introduction recorded at ${audio.uri}.`,
+      text,
       language: 'en',
+      segments: [{ start: 0, end: audio.durationMs / 1000, text }],
     };
   }
 }

@@ -2,9 +2,9 @@
 
 ## 기록 형식
 
-| Session   | Owned paths             | Dependency                        | Acceptance criteria               | Status                                                       | Updated    |
-| --------- | ----------------------- | --------------------------------- | --------------------------------- | ------------------------------------------------------------ | ---------- |
-| 세션 이름 | 겹치지 않는 정확한 경로 | 승인되어야 할 선행 작업 또는 없음 | 관찰 가능한 완료 조건과 검증 명령 | 예정 / 진행 중 / Worker 완료·Advisor 검증 대기 / 승인 / 차단 | YYYY-MM-DD |
+| Session   | Owned paths             | Dependency                        | Acceptance criteria               | Status                                                                              | Updated    |
+| --------- | ----------------------- | --------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------- | ---------- |
+| 세션 이름 | 겹치지 않는 정확한 경로 | 승인되어야 할 선행 작업 또는 없음 | 관찰 가능한 완료 조건과 검증 명령 | 예정 / 진행 중 / 승인 (a417930, Advisor 재실행 모바일 49 테스트 그린) / 승인 / 차단 | YYYY-MM-DD |
 
 상태는 Worker의 자체 보고와 Advisor 승인을 구분합니다. Worker 완료는 Advisor가 diff, 동일 테스트와 matching-surface manual QA를 재실행하기 전까지 통합 승인이 아닙니다. 범위가 바뀌면 작업 전에 이 표를 갱신합니다.
 
@@ -22,7 +22,7 @@
 | Advisor              | Slice 3: 0027 실이벤트 계약·review 큐·route 재작성·b03·구계약 테스트 4곳 갱신                      | b03 그린 + 웹 audit/audit2 그린 + DB 01~18 그린                             | 승인 (hosted 0027 배포)                                          | 2026-07-13 |
 | `friendword-codex-1` | Slice 3: RevenueCat identity 동기화 서비스·auth 배선·구매 전 일치 보증 (`.briefs/26`)              | identity 시나리오 6종 테스트 + 모바일 35 테스트 그린                        | 승인 (Advisor 재실행 그린; sandbox 실기기는 사용자 게이트 잔존)  | 2026-07-13 |
 | Advisor              | Slice 6: 0031 usage 원장·cap·kill switch·AI 동의·라우트 reserve/reconcile·H-2 FK·정기 ops 스크립트 | b07/b08 그린 + 전체 게이트 그린 + hosted 배포                               | 승인 (hosted 0031 배포)                                          | 2026-07-13 |
-| `friendword-codex-1` | Slice 6: 모바일 AI 동의 disclosure·affirmative action·오류 표기 (`.briefs/28`)                     | 동의 전 transcribe 미호출 + 시나리오 테스트 + 게이트 그린                   | Worker 완료·Advisor 검증 대기                                    | 2026-07-13 |
+| `friendword-codex-1` | Slice 6: 모바일 AI 동의 disclosure·affirmative action·오류 표기 (`.briefs/28`)                     | 동의 전 transcribe 미호출 + 시나리오 테스트 + 게이트 그린                   | 승인 (a417930, Advisor 재실행 모바일 49 테스트 그린)             | 2026-07-13 |
 | Advisor              | Slice 7 groundwork(WIP): 0032 dater 통제 RPC·transcript 스냅샷·whisper 세그먼트·공개 렌더 골격     | 다음 세션에서 UI·b13·문서와 함께 완결                                       | 진행 중 (서버 골격 그린, UI/테스트/문서 잔여)                    | 2026-07-13 |
 | 예정                 | Slice 1~9: 감사 §7 순서대로 (신고→media→RevenueCat→유료가치→identity→비용→Dater→데모·영어→growth)  | 각 슬라이스의 audit2 테스트 그린 전환 + §12 승인 형식 보고                  | 예정                                                             | 2026-07-13 |
 | 예정                 | Slice 10: release gate                                                                             | 감사 §7 Slice 10 체크리스트 전부 + audit2 CI 편입 + launch gate 해제 재판단 | 예정                                                             | 2026-07-13 |

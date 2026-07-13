@@ -521,7 +521,9 @@ BEGIN
   EXCEPTION
     WHEN raise_exception THEN
       IF SQLERRM = 'client logged dater_verified' THEN RAISE; END IF;
-      IF SQLERRM NOT LIKE 'unknown analytics event:%' THEN RAISE; END IF;
+      -- 0033: verification outcomes are server-recorded, not client events.
+      IF SQLERRM NOT LIKE 'unknown analytics event:%'
+         AND SQLERRM NOT LIKE '%recorded by the server%' THEN RAISE; END IF;
   END;
   BEGIN
     PERFORM track_event('interest_verified', '{}');
@@ -529,7 +531,8 @@ BEGIN
   EXCEPTION
     WHEN raise_exception THEN
       IF SQLERRM = 'client logged interest_verified' THEN RAISE; END IF;
-      IF SQLERRM NOT LIKE 'unknown analytics event:%' THEN RAISE; END IF;
+      IF SQLERRM NOT LIKE 'unknown analytics event:%'
+         AND SQLERRM NOT LIKE '%recorded by the server%' THEN RAISE; END IF;
   END;
 END;
 $$;

@@ -19,6 +19,8 @@ import {
   type PitchDraftService,
 } from './pitchDrafts';
 import {
+  EMPTY_PITCH_STRUCTURE,
+  PitchDraftListSchema,
   PitchReviewSchema,
   type PitchDraft,
   type PitchDraftId,
@@ -63,9 +65,24 @@ const RELATIONSHIP_DURATION_MAP: Record<RelationshipDuration, ServerRelationship
   '10+ years': 'gt10y',
 };
 
+const MOBILE_RELATIONSHIP_TYPE: Record<ServerRelationshipType, RelationshipKind> = {
+  friend: 'Friend',
+  coworker: 'Coworker',
+  family: 'Family',
+  roommate: 'Roommate',
+  other: 'Other',
+};
+
+const MOBILE_RELATIONSHIP_DURATION: Record<ServerRelationshipDuration, RelationshipDuration> = {
+  lt1y: 'Less than 1 year',
+  y1to3: '1–3 years',
+  y3to10: '3–10 years',
+  gt10y: '10+ years',
+};
+
 export class HybridPitchDraftService implements PitchDraftService {
   constructor(
-    client: BrowserSupabaseClient | null,
+    private readonly client: BrowserSupabaseClient | null,
     private readonly local = new MockPitchDraftService(),
     private readonly repo: PitchDraftRepository | null = client === null
       ? null
@@ -94,25 +111,48 @@ export class HybridPitchDraftService implements PitchDraftService {
 
   async getMyDrafts(): Promise<readonly PitchDraft[]> {
     const localDrafts = await this.local.getMyDrafts();
-    if (this.repo === null || localDrafts.every((draft) => draft.server === null)) {
+    if (this.repo === null) {
       return localDrafts;
     }
-    const [serverDrafts, requests] = await Promise.all([
-      this.repo.listMyDrafts(),
-      this.repo.listMyConsentRequests(),
-    ]);
-    for (const draft of localDrafts) {
-      const serverDraft = serverDrafts.find((row) => row.id === draft.server?.draftId);
-      if (serverDraft === undefined) {
-        continue;
+    try {
+      const [visibleServerDrafts, requests, currentUserId] = await Promise.all([
+        this.repo.listMyDrafts(),
+        this.repo.listMyConsentRequests(),
+        this.getCurrentUserId(),
+      ]);
+      const serverDrafts =
+        currentUserId === null
+          ? visibleServerDrafts
+          : visibleServerDrafts.filter((row) => row.created_by_user_id === currentUserId);
+      for (const draft of localDrafts) {
+        const serverDraft = serverDrafts.find((row) => row.id === draft.server?.draftId);
+        if (serverDraft === undefined) {
+          continue;
+        }
+        const request = requests.find((row) => row.pitch_draft_id === serverDraft.id);
+        await this.local.syncServerReview(draft.id, {
+          status: serverDraft.status,
+          review: reviewFromServer(serverDraft, draft.review, request),
+          updatedAt: serverDraft.updated_at,
+        });
       }
-      const request = requests.find((row) => row.pitch_draft_id === serverDraft.id);
-      await this.local.syncServerReview(draft.id, {
-        status: serverDraft.status,
-        review: reviewFromServer(serverDraft, draft.review, request),
-      });
+      const knownServerIds = new Set(
+        localDrafts.flatMap((draft) => (draft.server === null ? [] : [draft.server.draftId])),
+      );
+      for (const serverDraft of serverDrafts) {
+        if (knownServerIds.has(serverDraft.id)) {
+          continue;
+        }
+        const request = requests.find((row) => row.pitch_draft_id === serverDraft.id);
+        await this.local.restoreServerDraft(recoverServerDraft(serverDraft, request));
+      }
+      return this.local.getMyDrafts();
+    } catch (error: unknown) {
+      if (error instanceof UnauthenticatedError) {
+        return localDrafts;
+      }
+      throw error;
     }
-    return this.local.getMyDrafts();
   }
 
   async prepareForReview(id: PitchDraftId): Promise<PitchDraft> {
@@ -236,6 +276,17 @@ export class HybridPitchDraftService implements PitchDraftService {
       );
     }
   }
+
+  private async getCurrentUserId(): Promise<string | null> {
+    if (this.client === null) {
+      return null;
+    }
+    const { data, error } = await this.client.auth.getSession();
+    if (error !== null) {
+      throw error;
+    }
+    return data.session?.user.id ?? null;
+  }
 }
 
 function toDraftInputs(relationship: PitchRelationship | null): DraftInputs {
@@ -285,4 +336,58 @@ function reviewFromServer(
         : fallback.generationMode,
     responseNote: request?.response_note ?? null,
   });
+}
+
+function recoverServerDraft(
+  row: PitchDraftRow,
+  request: ConsentRequestRow | undefined,
+): PitchDraft {
+  const relationship = recoverRelationship(row, request);
+  const fallbackReview: PitchReview = {
+    headline: '',
+    body: '',
+    structure: EMPTY_PITCH_STRUCTURE,
+    generationMode: 'manual',
+    responseNote: null,
+  };
+  return PitchDraftListSchema.element.parse({
+    id: row.id,
+    status: row.status,
+    contextRole: 'INTRODUCER',
+    relationship,
+    photos: [],
+    recording: null,
+    review: reviewFromServer(row, fallbackReview, request),
+    server: {
+      draftId: row.id,
+      consentRequestId: request?.id ?? null,
+      consentToken: null,
+    },
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function recoverRelationship(
+  row: PitchDraftRow,
+  request: ConsentRequestRow | undefined,
+): PitchRelationship | null {
+  if (
+    row.relationship_type === null ||
+    row.relationship_duration === null ||
+    request?.invite_friend_name === null ||
+    request?.invite_friend_name === undefined
+  ) {
+    return null;
+  }
+  return {
+    kind: MOBILE_RELATIONSHIP_TYPE[row.relationship_type],
+    duration: MOBILE_RELATIONSHIP_DURATION[row.relationship_duration],
+    friendFirstName: request.invite_friend_name,
+    contact: { kind: 'sent' },
+  };
+}
+
+export function isRecoveredServerDraft(draft: PitchDraft): boolean {
+  return draft.server !== null && draft.id === draft.server.draftId;
 }

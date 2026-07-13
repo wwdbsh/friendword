@@ -10,7 +10,6 @@ import {
   ensureUserRow,
   getDisplayNameStatus,
   signInWithOtp,
-  trackEvent,
   type BrowserSupabaseClient,
   type ConsentPreview,
   type ConsentReview,
@@ -359,15 +358,13 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         locationPrecision,
         publishDays,
       });
-      const { campaignId, campaignSlug } = await repo.approveAndPublish({
+      const { campaignSlug } = await repo.approveAndPublish({
         draftId: review.revision.pitch_draft_id,
         campaignDays: publishDays,
         revisionId: review.revision.id,
         includedAssetIds,
         hardClaimsConfirmed,
       });
-      trackEvent(client, 'pitch_approved', { pitch_draft_id: review.revision.pitch_draft_id });
-      trackEvent(client, 'campaign_published', { campaign_id: campaignId });
       router.push(`/p/${campaignSlug}`);
     } catch (error: unknown) {
       if (!(error instanceof Error)) {
@@ -520,9 +517,6 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         'request_changes',
         responseNote,
       );
-      trackEvent(client, 'draft_changes_requested', {
-        pitch_draft_id: state.review.revision.pitch_draft_id,
-      });
       setState({ step: 'responded', action: 'request_changes' });
     } catch (error: unknown) {
       if (!(error instanceof Error)) {

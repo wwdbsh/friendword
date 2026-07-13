@@ -11,6 +11,7 @@ import { spawnSync } from 'node:child_process';
 const apply = process.argv.includes('--apply');
 
 const passes = [
+  { label: 'campaign expiration', args: ['scripts/expire-campaigns.mjs'] },
   { label: 'account deletions', args: ['scripts/process-deletions.mjs'] },
   {
     label: 'orphan media sweep',

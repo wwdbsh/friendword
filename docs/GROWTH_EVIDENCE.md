@@ -6,6 +6,8 @@
 
 이 문서는 예측이나 목표를 실제 성과처럼 기록하지 않습니다. 출시 후 재현 가능한 dashboard/export와 원천 이벤트를 근거로 각 항목을 채웁니다.
 
+**증거 원천 규칙 (2026-07-13, Slice 9):** 전환·발행·결제·수락 지표는 `analytics_events`에서 `properties.recorded_by = "server"`인 행(0033 트리거 기록)만 사용합니다. client가 보낼 수 있는 interaction 이벤트(`pitch_viewed_unique` 등)는 노출·유입 지표로만 쓰고, 조작 가능성 한계를 함께 표기합니다. 지표 정의는 `docs/ANALYTICS_PLAN.md`의 "지표 정의" 절을 따릅니다.
+
 ## 제품 퍼널
 
 - [ ] 출시일부터 일별·주별 verified users

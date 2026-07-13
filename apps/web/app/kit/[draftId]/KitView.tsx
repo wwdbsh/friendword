@@ -7,6 +7,7 @@ import {
   CreatorCreditRequiredError,
   KitNotPublishedError,
   PitchDraftRepo,
+  trackEvent,
   type BrowserSupabaseClient,
 } from '@friendword/data';
 
@@ -36,7 +37,8 @@ type KitState =
  */
 function captions(headline: string | null, slug: string | null): readonly string[] {
   const origin = typeof window === 'undefined' ? '' : window.location.origin;
-  const link = slug === null || origin === '' ? '' : ` ${origin}/p/${slug}`;
+  // ?src=creator-kit ties public views back to the kit (H-4 attribution).
+  const link = slug === null || origin === '' ? '' : ` ${origin}/p/${slug}?src=creator-kit`;
   const hook = headline ?? 'My friend, in my own words.';
 
   return [
@@ -223,6 +225,12 @@ export function KitView({ draftId }: { readonly draftId: string }) {
                     className={styles.secondary}
                     href={state.imageUrl}
                     download="friendword-launch-card.png"
+                    onClick={() => {
+                      trackEvent(client, 'campaign_shared', {
+                        campaign_slug: state.slug,
+                        channel: 'kit_card_download',
+                      });
+                    }}
                   >
                     Download the share card
                   </a>
@@ -242,6 +250,10 @@ export function KitView({ draftId }: { readonly draftId: string }) {
                     type="button"
                     onClick={() => {
                       void navigator.clipboard.writeText(caption).then(() => setCopied(index));
+                      trackEvent(client, 'campaign_shared', {
+                        campaign_slug: state.slug,
+                        channel: 'kit_caption_copy',
+                      });
                     }}
                   >
                     {copied === index ? 'Copied!' : 'Copy'}

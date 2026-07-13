@@ -7,7 +7,6 @@ import {
   BenefitsRepo,
   InterestRepo,
   SafetyRepo,
-  trackEvent,
   type BrowserSupabaseClient,
   type CampaignFunnelRow,
   type CampaignInterest,
@@ -29,8 +28,28 @@ type OwnedCampaign = {
   readonly id: string;
   readonly slug: string | null;
   readonly status: string;
+  readonly endsAt: string | null;
   readonly pass: CampaignPassState;
 };
+
+/**
+ * H-5 consistency: the public page 404s once ends_at passes even before
+ * the expiration job runs, so the inbox must never offer Live/Resume for
+ * a campaign whose window ended.
+ */
+function displayStatus(campaign: Pick<OwnedCampaign, 'status' | 'endsAt'>): string {
+  if (campaign.status === 'expired') {
+    return 'expired';
+  }
+  if (
+    (campaign.status === 'published' || campaign.status === 'paused') &&
+    campaign.endsAt !== null &&
+    new Date(campaign.endsAt).getTime() <= Date.now()
+  ) {
+    return 'expired';
+  }
+  return campaign.status;
+}
 
 const FUNNEL_LABELS: Record<string, string> = {
   pitch_viewed_unique: 'Unique views',
@@ -141,9 +160,6 @@ export function InboxView() {
     }
     try {
       await new InterestRepo(client).setCampaignStatus(campaignId, nextStatus);
-      if (nextStatus === 'paused') {
-        trackEvent(client, 'campaign_paused', { campaign_id: campaignId });
-      }
       setDecisionNote(
         nextStatus === 'published'
           ? 'Your page is live again.'
@@ -166,12 +182,6 @@ export function InboxView() {
     try {
       const repo = new InterestRepo(client);
       const { introRoomId } = await repo.decideInterest(interestId, decision);
-      if (decision === 'accepted') {
-        trackEvent(client, 'interest_accepted', { interest_id: interestId });
-        if (introRoomId !== null) {
-          trackEvent(client, 'intro_room_created', { intro_room_id: introRoomId });
-        }
-      }
       setOpenedRoomId(decision === 'accepted' ? introRoomId : null);
       setDecisionNote(
         decision === 'accepted'
@@ -214,7 +224,6 @@ export function InboxView() {
         targetId: interestId,
         reason: reportReason,
       });
-      trackEvent(client, 'report_submitted', { target_type: 'interest' });
       setDecisionNote('Report received. Our team reviews every report.');
       setReportingInterestId(null);
     } catch {
@@ -321,114 +330,119 @@ export function InboxView() {
               )}
             </section>
 
-            {state.campaigns.map((campaign) => (
-              <section key={campaign.id} className={styles.card}>
-                <span
-                  className={campaign.status === 'published' ? styles.badgeFresh : styles.badge}
-                >
-                  {campaign.status === 'published'
-                    ? 'Live'
-                    : campaign.status === 'paused'
-                      ? 'Paused'
-                      : 'Down'}
-                </span>
-                <h2 className={styles.subTitle}>Your page</h2>
-                <p className={styles.muted}>
-                  {campaign.slug === null
-                    ? 'No public link yet.'
-                    : `friendword — /p/${campaign.slug}`}
-                </p>
-                <div className={styles.actionRow}>
-                  {campaign.slug !== null && campaign.status === 'published' && (
-                    <Link className={styles.secondary} href={`/p/${campaign.slug}`}>
-                      View my page
-                    </Link>
-                  )}
-                  {campaign.status === 'published' && (
-                    <button
-                      className={styles.secondary}
-                      type="button"
-                      onClick={() => {
-                        void changeCampaignStatus(campaign.id, 'paused');
-                      }}
-                    >
-                      Pause my page
-                    </button>
-                  )}
-                  {campaign.status === 'paused' && (
-                    <button
-                      className={styles.primary}
-                      type="button"
-                      onClick={() => {
-                        void changeCampaignStatus(campaign.id, 'published');
-                      }}
-                    >
-                      Resume my page
-                    </button>
-                  )}
-                  {(campaign.status === 'published' || campaign.status === 'paused') && (
-                    <button
-                      className={styles.danger}
-                      type="button"
-                      onClick={() => {
-                        void changeCampaignStatus(campaign.id, 'archived');
-                      }}
-                    >
-                      Take it down for good
-                    </button>
-                  )}
-                </div>
-
-                <h3 className={styles.subTitle}>Campaign Pass</h3>
-                {campaign.pass.active ? (
-                  <>
-                    <p className={styles.muted}>
-                      Active
-                      {campaign.pass.expiresAt !== null
-                        ? ` until ${new Date(campaign.pass.expiresAt).toLocaleDateString()}`
-                        : ''}
-                      . Your page runs 30 days and the funnel below is unlocked.
-                    </p>
-                    {(() => {
-                      const funnel = funnels[campaign.id];
-                      if (funnel === undefined) {
-                        return (
-                          <button
-                            className={styles.secondary}
-                            type="button"
-                            disabled={loadingFunnel === campaign.id}
-                            onClick={() => {
-                              void loadFunnel(campaign.id);
-                            }}
-                          >
-                            {loadingFunnel === campaign.id ? 'Loading…' : 'View my funnel'}
-                          </button>
-                        );
-                      }
-                      if (funnel.length === 0) {
-                        return <p className={styles.muted}>No activity recorded yet.</p>;
-                      }
-                      return (
-                        <ul className={styles.claimList}>
-                          {funnel.map((row) => (
-                            <li key={`${row.eventName}-${row.source}`}>
-                              {FUNNEL_LABELS[row.eventName] ?? row.eventName} · {row.source}:{' '}
-                              {row.total}
-                            </li>
-                          ))}
-                        </ul>
-                      );
-                    })()}
-                  </>
-                ) : (
+            {state.campaigns.map((campaign) => {
+              const shownStatus = displayStatus(campaign);
+              return (
+                <section key={campaign.id} className={styles.card}>
+                  <span className={shownStatus === 'published' ? styles.badgeFresh : styles.badge}>
+                    {shownStatus === 'published'
+                      ? 'Live'
+                      : shownStatus === 'paused'
+                        ? 'Paused'
+                        : shownStatus === 'expired'
+                          ? 'Ended'
+                          : 'Down'}
+                  </span>
+                  <h2 className={styles.subTitle}>Your page</h2>
                   <p className={styles.muted}>
-                    Not active. The Pass extends your page to 30 days and unlocks the
-                    view-and-interest funnel — purchase it in the Friendword app. Accepting
-                    interest, chat, and safety tools are always free.
+                    {campaign.slug === null
+                      ? 'No public link yet.'
+                      : `friendword — /p/${campaign.slug}`}
                   </p>
-                )}
-              </section>
-            ))}
+                  <div className={styles.actionRow}>
+                    {campaign.slug !== null && shownStatus === 'published' && (
+                      <Link className={styles.secondary} href={`/p/${campaign.slug}`}>
+                        View my page
+                      </Link>
+                    )}
+                    {shownStatus === 'published' && (
+                      <button
+                        className={styles.secondary}
+                        type="button"
+                        onClick={() => {
+                          void changeCampaignStatus(campaign.id, 'paused');
+                        }}
+                      >
+                        Pause my page
+                      </button>
+                    )}
+                    {shownStatus === 'paused' && (
+                      <button
+                        className={styles.primary}
+                        type="button"
+                        onClick={() => {
+                          void changeCampaignStatus(campaign.id, 'published');
+                        }}
+                      >
+                        Resume my page
+                      </button>
+                    )}
+                    {(shownStatus === 'published' ||
+                      shownStatus === 'paused' ||
+                      shownStatus === 'expired') && (
+                      <button
+                        className={styles.danger}
+                        type="button"
+                        onClick={() => {
+                          void changeCampaignStatus(campaign.id, 'archived');
+                        }}
+                      >
+                        Take it down for good
+                      </button>
+                    )}
+                  </div>
+
+                  <h3 className={styles.subTitle}>Campaign Pass</h3>
+                  {campaign.pass.active ? (
+                    <>
+                      <p className={styles.muted}>
+                        Active
+                        {campaign.pass.expiresAt !== null
+                          ? ` until ${new Date(campaign.pass.expiresAt).toLocaleDateString()}`
+                          : ''}
+                        . Your page runs 30 days and the funnel below is unlocked.
+                      </p>
+                      {(() => {
+                        const funnel = funnels[campaign.id];
+                        if (funnel === undefined) {
+                          return (
+                            <button
+                              className={styles.secondary}
+                              type="button"
+                              disabled={loadingFunnel === campaign.id}
+                              onClick={() => {
+                                void loadFunnel(campaign.id);
+                              }}
+                            >
+                              {loadingFunnel === campaign.id ? 'Loading…' : 'View my funnel'}
+                            </button>
+                          );
+                        }
+                        if (funnel.length === 0) {
+                          return <p className={styles.muted}>No activity recorded yet.</p>;
+                        }
+                        return (
+                          <ul className={styles.claimList}>
+                            {funnel.map((row) => (
+                              <li key={`${row.eventName}-${row.source}`}>
+                                {FUNNEL_LABELS[row.eventName] ?? row.eventName} · {row.source}:{' '}
+                                {row.total}
+                              </li>
+                            ))}
+                          </ul>
+                        );
+                      })()}
+                    </>
+                  ) : (
+                    <p className={styles.muted}>
+                      Not active. The Pass extends your page to 30 days and unlocks the
+                      view-and-interest funnel — purchase it in the Friendword app. Accepting
+                      interest, chat, and safety tools are always free.
+                    </p>
+                  )}
+                </section>
+              );
+            })}
 
             {state.interests.length === 0 && (
               <section className={styles.card}>

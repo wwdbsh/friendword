@@ -163,9 +163,44 @@ export class MockPitchDraftService implements PitchDraftService {
 
   async syncServerReview(
     id: PitchDraftId,
-    state: Pick<PitchDraft, 'status' | 'review'>,
+    state: Pick<PitchDraft, 'status' | 'review'> & Partial<Pick<PitchDraft, 'updatedAt'>>,
   ): Promise<PitchDraft> {
-    return this.updateDraft(id, (draft) => ({ ...draft, ...state }));
+    return this.runExclusive(async () => {
+      const drafts = await this.readDrafts();
+      const current = drafts.find((draft) => draft.id === id);
+      if (current === undefined) {
+        throw new PitchDraftNotFoundError(id);
+      }
+      const synced = PitchDraftListSchema.element.parse({
+        ...current,
+        ...state,
+        updatedAt:
+          state.updatedAt === undefined || current.updatedAt > state.updatedAt
+            ? current.updatedAt
+            : state.updatedAt,
+      });
+      await this.writeDrafts(drafts.map((draft) => (draft.id === id ? synced : draft)));
+      return synced;
+    });
+  }
+
+  async restoreServerDraft(draft: PitchDraft): Promise<PitchDraft> {
+    return this.runExclusive(async () => {
+      const drafts = await this.readDrafts();
+      const existing = drafts.find(
+        (candidate) =>
+          candidate.id === draft.id ||
+          (candidate.server !== null &&
+            draft.server !== null &&
+            candidate.server.draftId === draft.server.draftId),
+      );
+      if (existing !== undefined) {
+        return existing;
+      }
+      const restored = PitchDraftListSchema.element.parse(draft);
+      await this.writeDrafts([...drafts, restored]);
+      return restored;
+    });
   }
 
   async purgeInvitationContact(id: PitchDraftId): Promise<PitchDraft> {

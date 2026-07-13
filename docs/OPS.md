@@ -173,8 +173,10 @@ SELECT date_trunc('month', now()) AS month,
 ## 정기 운영 실행 (수동 스케줄 — 자동화는 배포 환경 결정 대기)
 
 ```bash
-node scripts/run-scheduled-ops.mjs          # 삭제 처리 + orphan dry-run
+node scripts/run-scheduled-ops.mjs          # 캠페인 만료 + 삭제 처리 + orphan dry-run
 node scripts/run-scheduled-ops.mjs --apply  # orphan 실제 삭제 포함
+node scripts/expire-campaigns.mjs           # 만료만 단독 실행
 ```
 
+- 캠페인 만료(Slice 9, 0033): `expire_due_campaigns()`는 service role 전용이며 `ends_at`이 지난 published/paused 캠페인을 `expired`로 전환한다. 공개 페이지는 `ends_at` 기준으로 이미 404이므로 잡이 늦어도 노출 사고는 없지만, inbox 상태·`campaign_expired` 이벤트·재개 차단의 일관성을 위해 최소 일 1회 실행한다. 만료된 캠페인은 재개 불가, 아카이브만 가능하다.
 - 권장 주기: 최소 일 1회. 실제 cron/스케줄러 연결은 배포 환경(호스팅·시크릿) 확정 후 설정하고 이 문서에 기록합니다. "account deletion automated"는 스케줄러가 실제로 물릴 때까지 주장하지 않습니다.

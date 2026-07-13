@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { HypeButton, StickerCard, TrustCard } from '../../src/components';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
+import { isRecoveredServerDraft } from '../../src/services/pitchDraftsSupabase';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 import type { PitchDraft } from '../../src/services/types';
 
@@ -192,9 +193,7 @@ export default function CampaignsScreen() {
         {drafts.map((draft) => (
           <StickerCard key={draft.id}>
             <View style={styles.draftHeader}>
-              <Text style={styles.friendName}>
-                {draft.relationship?.friendFirstName ?? 'Untitled pitch'}
-              </Text>
+              <Text style={styles.friendName}>{getIntroducerDraftName(draft)}</Text>
               <View style={styles.statusBadge}>
                 <Text style={styles.status}>{formatStatus(draft.status)}</Text>
               </View>
@@ -208,6 +207,15 @@ export default function CampaignsScreen() {
               {draft.photos.length} photo{draft.photos.length === 1 ? '' : 's'} ·{' '}
               {draft.recording ? formatDuration(draft.recording.durationMillis) : 'No voice track'}
             </Text>
+            {isRecoveredServerDraft(draft) ? (
+              <View style={styles.recoveredNotice}>
+                <Text style={styles.recoveredTitle}>Recovered from your account</Text>
+                <Text style={styles.message}>
+                  Local voice and photo files are not on this device. You can review the server
+                  copy; rerecording or replacing media requires the original device.
+                </Text>
+              </View>
+            ) : null}
             {draft.status === 'changes_requested' && draft.review.responseNote ? (
               <View style={styles.changeNote}>
                 <Text style={styles.changeNoteTitle}>Requested update</Text>
@@ -218,9 +226,11 @@ export default function CampaignsScreen() {
             (draft.status === 'draft' || draft.status === 'changes_requested') ? (
               <HypeButton
                 label={
-                  draft.status === 'changes_requested'
-                    ? 'Review requested changes'
-                    : 'Continue editing'
+                  isRecoveredServerDraft(draft) && draft.status === 'draft'
+                    ? 'Review server draft'
+                    : draft.status === 'changes_requested'
+                      ? 'Review requested changes'
+                      : 'Continue editing'
                 }
                 onPress={() =>
                   router.push({ pathname: '/pitch/review', params: { draftId: draft.id } })
@@ -253,6 +263,15 @@ export default function CampaignsScreen() {
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+export function getIntroducerDraftName(draft: PitchDraft): string {
+  const friendName = draft.relationship?.friendFirstName.trim();
+  if (friendName !== undefined && friendName.length > 0) {
+    return friendName;
+  }
+  const headline = draft.review.headline.trim();
+  return headline.length > 0 ? headline : 'Untitled server pitch';
 }
 
 function formatStatus(status: PitchDraft['status']): string {
@@ -378,6 +397,17 @@ const styles = StyleSheet.create({
   },
   changeNoteTitle: {
     color: colors.fresh,
+    fontFamily: 'BricolageGrotesqueBold',
+    fontSize: fontSizes.sm,
+  },
+  recoveredNotice: {
+    gap: spacing.xs,
+    borderLeftColor: colors.textSecondary,
+    borderLeftWidth: 1,
+    paddingLeft: spacing.md,
+  },
+  recoveredTitle: {
+    color: colors.ink,
     fontFamily: 'BricolageGrotesqueBold',
     fontSize: fontSizes.sm,
   },

@@ -1,4 +1,4 @@
-import { trackEvent, UnauthenticatedError } from '@friendword/data';
+import { UnauthenticatedError } from '@friendword/data';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text } from 'react-native';
@@ -20,7 +20,6 @@ import {
 import { HypeButton } from '../../src/components';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
 import { NeedsSignInError } from '../../src/services/pitchDraftsSupabase';
-import { getSupabaseClient } from '../../src/services/supabaseClient';
 import type { PitchDraft, PitchReview } from '../../src/services/types';
 
 export default function PitchReviewScreen() {
@@ -122,10 +121,6 @@ export default function PitchReviewScreen() {
       await pitchDraftService.saveReview(draft.id, review);
       const wasChangesRequested = draft.status === 'changes_requested';
       const finalized = await pitchDraftService.finalizeConsent(draft.id);
-      trackEvent(getSupabaseClient(), 'consent_sent', {
-        platform: 'mobile',
-        pitch_draft_id: finalized.server?.draftId ?? null,
-      });
       setErrorMessage(null);
       if (finalized.server === null) {
         router.replace('/campaigns');

@@ -3,9 +3,11 @@
 
 BEGIN;
 
--- 1. Anonymous viewers can log a whitelisted event.
+-- 1. Anonymous viewers can log a whitelisted interaction event with a
+-- real campaign reference (0033 validates properties).
 SET LOCAL ROLE anon;
-SELECT track_event('pitch_viewed_unique', '{"campaign_slug": "demo", "source": "instagram"}');
+SELECT track_event('pitch_viewed_unique',
+  '{"campaign_id": "20000000-0000-0000-0000-000000000001", "source": "instagram"}');
 
 -- 2. Unknown event names are rejected.
 DO $$
@@ -38,10 +40,26 @@ BEGIN
 END;
 $$;
 
--- 4. Signed-in events are stamped with the caller's user id.
+-- 4. Signed-in interaction events are stamped with the caller's user id;
+-- outcome events are server-recorded and rejected from clients (0033).
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000003';
-SELECT track_event('interest_submitted', '{"campaign_id": "20000000-0000-0000-0000-000000000001"}');
+SELECT track_event('interest_started', '{"campaign_id": "20000000-0000-0000-0000-000000000001"}');
+
+DO $$
+BEGIN
+  BEGIN
+    PERFORM track_event('interest_submitted',
+      '{"campaign_id": "20000000-0000-0000-0000-000000000001"}');
+    RAISE EXCEPTION 'client outcome event accepted';
+  EXCEPTION
+    WHEN raise_exception THEN
+      IF SQLERRM = 'client outcome event accepted' THEN
+        RAISE;
+      END IF;
+  END;
+END;
+$$;
 
 RESET ROLE;
 DO $$
@@ -59,7 +77,7 @@ BEGIN
 
   SELECT user_id INTO signed_user
     FROM analytics_events
-   WHERE event_name = 'interest_submitted'
+   WHERE event_name = 'interest_started'
    ORDER BY created_at DESC LIMIT 1;
   IF signed_user IS DISTINCT FROM '00000000-0000-0000-0000-000000000003' THEN
     RAISE EXCEPTION 'signed-in event missing the caller id, got %', signed_user;

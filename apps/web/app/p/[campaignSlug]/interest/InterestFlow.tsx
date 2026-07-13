@@ -301,10 +301,6 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
         return;
       }
       await repo.submitInterest(campaignId, trimmedNote === '' ? null : trimmedNote);
-      trackEvent(client, 'interest_submitted', {
-        campaign_id: campaignId,
-        source: window.sessionStorage.getItem('fw_attribution'),
-      });
       setSubmitted(true);
     } catch (submitError: unknown) {
       if (!(submitError instanceof Error)) {

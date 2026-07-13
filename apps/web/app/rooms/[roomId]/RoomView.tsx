@@ -6,7 +6,6 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 
 import {
   IntroRoomRepo,
-  trackEvent,
   type BrowserSupabaseClient,
   type IntroRoomSummary,
   type MessageRow,
@@ -100,11 +99,7 @@ export function RoomView({ roomId }: RoomViewProps) {
     setSending(true);
     try {
       const repo = new IntroRoomRepo(client);
-      const isFirstMessage = messages.length === 0;
       await repo.sendMessage(roomId, draft);
-      if (isFirstMessage) {
-        trackEvent(client, 'first_message_sent', { intro_room_id: roomId });
-      }
       setDraft('');
       await refreshMessages();
     } catch {
@@ -116,6 +111,13 @@ export function RoomView({ roomId }: RoomViewProps) {
 
   async function handleLeave() {
     if (client === null) {
+      return;
+    }
+    if (
+      !window.confirm(
+        'Leave this room for good? The conversation closes for both of you and cannot be reopened.',
+      )
+    ) {
       return;
     }
     try {
@@ -130,9 +132,15 @@ export function RoomView({ roomId }: RoomViewProps) {
     if (client === null || room === null || room === undefined) {
       return;
     }
+    if (
+      !window.confirm(
+        'Block this person? You will be hidden from each other everywhere, immediately.',
+      )
+    ) {
+      return;
+    }
     try {
       await new IntroRoomRepo(client).blockUser(room.otherUserId);
-      trackEvent(client, 'user_blocked', { intro_room_id: roomId });
       router.push('/rooms');
     } catch {
       setActionNote('Blocking did not go through. Refresh and try again.');
@@ -150,7 +158,6 @@ export function RoomView({ roomId }: RoomViewProps) {
         campaignId: room.campaignId,
         reason: reportReason,
       });
-      trackEvent(client, 'report_submitted', { intro_room_id: roomId });
       setReportReason('');
       setShowSafety(false);
       setActionNote('Report received. Our team reviews every report.');
@@ -261,7 +268,7 @@ export function RoomView({ roomId }: RoomViewProps) {
               </div>
             )}
 
-            <div className={styles.messages} aria-live="polite">
+            <div className={styles.messages} role="log" aria-label="Messages">
               {messages.length === 0 && (
                 <p className={flowStyles.muted}>
                   Say hi — you were introduced by someone who knows you both deserve a good

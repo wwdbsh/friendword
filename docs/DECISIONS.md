@@ -151,3 +151,10 @@
 - **이유**: 2차 감사 CP-3(가짜 재생은 Grand Prize 대표 데모에서 불허)·CP-4(북미 영어권 타깃)·§7 Slice 8(Creator 결과물 e2e). E2E가 한국어를 기대하던 잘못된 고정도 함께 제거.
 - **검토 대안**: TTS 데모 음성(원본 음성 경계 위반·기만 위험 — 기각), 데모 유지+각주(Play가 동작하는 것처럼 보이는 한 기만 — 기각), 한국어 병행 기본(북미 acquisition 불일치 — 기각).
 - **영향**: `PitchPlayer`가 no-audio 모드를 얻고 fixture 데모가 서면 프리뷰가 된다. landing/pitch Playwright 스펙 영어 전환+한글 회귀 추가(39 passed). 프로덕션 E2E 10e~10j 추가. 남은 한글은 코드 주석의 한국어 문서 섹션명 인용뿐(제품 카피 아님). App Store/email 카피는 해당 표면 구축 시 영어 기준으로 작성한다.
+
+## 2026-07-13: 성장 지표 서버 권위·만료 상태기계·컨텍스트 내비 (Slice 9, H-4·H-5·CP-7·H-8)
+
+- **결정**: (1) **outcome 분석 이벤트는 상태가 바뀌는 테이블의 AFTER 트리거가 기록한다**(0033: campaigns/consent_requests/interests/intro_rooms/messages/reports/blocks/purchase_credit_ledger/campaign_entitlements, `recorded_by: "server"` 스탬프). RPC 재정의에도 살아남고 direct insert 경로까지 커버한다. `track_event`는 client interaction 이벤트 9종만 받고 속성 allowlist+실재 검증을 강제하며, 익명은 `pitch_viewed_unique`/`interest_started`만 보낼 수 있다. 웹·모바일의 outcome 전송 코드는 전부 제거했고, 모바일의 동의 초대 공유는 `consent_invite_shared`로 분리해 `campaign_shared`를 공개 캠페인 공유(kit download/copy, `?src=creator-kit` attribution)에만 쓴다. (2) **만료 상태기계**: `expire_due_campaigns()`(service role 전용)가 `ends_at` 경과 캠페인을 `expired`로 전환하고, `set_campaign_status`는 창이 끝난 캠페인의 재개를 거부하며 expired→archived만 허용한다. 인박스는 `ends_at` 경과를 클라이언트에서도 'Ended'로 표시해 잡 지연 중에도 Live/Resume를 보여주지 않는다. 만료 잡은 `run-scheduled-ops.mjs`에 편입. (3) **CP-7**: `list_my_interests()` RPC(blocked 제외)+모바일 My interests 실화면, Introducer work의 서버 draft 병합 복구(codex-1). (4) **H-8**: 채팅 메시지 목록 `aria-live=polite`→`role="log"`, block/leave에 명시적 confirm 추가.
+- **이유**: 2차 감사 H-4(조작 가능한 analytics로는 Grand Prize 증거 불가)·H-5(만료 불일치)·CP-7(컨텍스트 UI 낙후)·H-8. K-factor·전환 지표 정의와 한계는 ANALYTICS_PLAN "지표 정의" 절에 문서화.
+- **검토 대안**: RPC 내부 기록(재정의 소실 위험 — 트리거 채택), client 이벤트 전면 금지(유입·노출 지표 소실 — interaction만 허용), 읽기 시 lazy 만료 전환(public read는 이미 ends_at 기준 — 상태·이벤트 일관성은 잡이 담당).
+- **영향**: audit2 **14/14 전부 그린**(b10·b14 포함). 스위트 09/12를 새 계약으로 갱신. `AnalyticsEventName` 타입이 client 이벤트로 축소. verification_pending/blocked 상태 계약을 RPC·repo·모바일 라벨에 정렬. 남은 H-8 항목(터치 타깃 전수 측정·스크린리더 실기기 QA·TrustCard 대비 측정)은 Slice 10 기기 패스에서 수행.

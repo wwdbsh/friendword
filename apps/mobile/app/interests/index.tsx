@@ -1,5 +1,265 @@
-import { PlaceholderScreen } from '../../src/components';
+import { InterestRepo, UnauthenticatedError, type MyInterest } from '@friendword/data';
+import { colors, fonts, fontSizes, spacing } from '@friendword/ui-tokens';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { TrustCard } from '../../src/components';
+import { getSupabaseClient } from '../../src/services/supabaseClient';
+
+export type InterestsLoadState = 'loading' | 'ready' | 'signed_out' | 'error';
+
+type InterestsContentProps = {
+  readonly state: InterestsLoadState;
+  readonly interests: readonly MyInterest[];
+};
+
+export function getInterestTitle(interest: MyInterest): string {
+  return (
+    interest.daterDisplayName?.trim() || interest.campaignHeadline?.trim() || 'Untitled campaign'
+  );
+}
+
+export function getInterestStatusLabel(interest: MyInterest): string {
+  if (interest.campaignStatus === 'expired') {
+    return 'Campaign expired';
+  }
+  if (interest.campaignStatus === 'archived') {
+    return 'Campaign archived';
+  }
+  if (interest.campaignStatus === 'paused') {
+    return 'Campaign paused';
+  }
+  switch (interest.interestStatus) {
+    case 'started':
+      return 'Started';
+    case 'verification_pending':
+      return 'Verifying';
+    case 'submitted':
+      return 'Submitted';
+    case 'accepted':
+      return 'Accepted';
+    case 'declined':
+      return 'Declined';
+    case 'withdrawn':
+      return 'Withdrawn';
+    default:
+      return assertNever(interest.interestStatus);
+  }
+}
+
+export function InterestsContent({ state, interests }: InterestsContentProps) {
+  if (state === 'loading') {
+    return <Text style={styles.message}>Loading your interests…</Text>;
+  }
+  if (state === 'signed_out') {
+    return (
+      <TrustCard>
+        <Text style={styles.cardTitle}>Sign in to see your interests</Text>
+        <Text style={styles.message}>
+          Interests are private and only appear for the account that sent them.
+        </Text>
+      </TrustCard>
+    );
+  }
+  if (state === 'error') {
+    return (
+      <TrustCard tone="danger">
+        <Text style={styles.cardTitle}>Interests could not be loaded</Text>
+        <Text style={styles.message}>Check your connection and reopen this screen.</Text>
+      </TrustCard>
+    );
+  }
+  if (interests.length === 0) {
+    return (
+      <TrustCard>
+        <Text style={styles.cardTitle}>No interests sent yet</Text>
+        <Text style={styles.message}>
+          When you submit interest in a friend’s campaign, its status will appear here.
+        </Text>
+      </TrustCard>
+    );
+  }
+
+  return interests.map((interest) => (
+    <TrustCard key={interest.interestId}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardTitle}>{getInterestTitle(interest)}</Text>
+        <View style={styles.statusBadge}>
+          <Text style={styles.statusText}>{getInterestStatusLabel(interest)}</Text>
+        </View>
+      </View>
+      {interest.daterDisplayName !== null && interest.campaignHeadline !== null ? (
+        <Text style={styles.headline}>{interest.campaignHeadline}</Text>
+      ) : null}
+      <Text style={styles.meta}>{formatSubmittedAt(interest.submittedAt)}</Text>
+      <Text style={styles.message}>{getInterestDecisionCopy(interest.interestStatus)}</Text>
+      {interest.interestStatus === 'accepted' ? (
+        <Text style={styles.roomNote}>
+          Open intro rooms on the Friendword web app to continue the introduction.
+        </Text>
+      ) : null}
+      {interest.campaignStatus === 'expired' || interest.campaignStatus === 'archived' ? (
+        <Text style={styles.message}>
+          This campaign is no longer public, but your decision history stays visible here.
+        </Text>
+      ) : null}
+    </TrustCard>
+  ));
+}
 
 export default function InterestsScreen() {
-  return <PlaceholderScreen title="My interests" />;
+  const [state, setState] = useState<InterestsLoadState>('loading');
+  const [interests, setInterests] = useState<readonly MyInterest[]>([]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      const client = getSupabaseClient();
+      setInterests([]);
+      if (client === null) {
+        setState('signed_out');
+        return () => {
+          active = false;
+        };
+      }
+
+      setState('loading');
+      const repo = new InterestRepo(client);
+      void repo
+        .listMyInterests()
+        .then((rows) => {
+          if (active) {
+            setInterests(rows);
+            setState('ready');
+          }
+        })
+        .catch((error: unknown) => {
+          if (active) {
+            setInterests([]);
+            setState(error instanceof UnauthenticatedError ? 'signed_out' : 'error');
+          }
+        });
+
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.heading}>
+          <Text style={styles.eyebrow}>MY CONTEXT</Text>
+          <Text style={styles.title}>My interests</Text>
+          <Text style={styles.subtitle}>
+            Follow the campaigns you reached out to and see each decision clearly.
+          </Text>
+        </View>
+        <InterestsContent state={state} interests={interests} />
+      </ScrollView>
+    </SafeAreaView>
+  );
 }
+
+function formatSubmittedAt(submittedAt: string | null): string {
+  if (submittedAt === null) {
+    return 'Not submitted yet';
+  }
+  const date = new Date(submittedAt);
+  if (Number.isNaN(date.getTime())) {
+    return 'Submission date unavailable';
+  }
+  return `Submitted ${date.toLocaleDateString('en-US', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })}`;
+}
+
+function getInterestDecisionCopy(status: MyInterest['interestStatus']): string {
+  switch (status) {
+    case 'started':
+      return 'Your interest has not been submitted yet.';
+    case 'verification_pending':
+      return 'Finish verification to submit this interest.';
+    case 'submitted':
+      return 'Waiting for the dater to decide.';
+    case 'accepted':
+      return 'Your interest was accepted.';
+    case 'declined':
+      return 'The dater decided not to continue this introduction.';
+    case 'withdrawn':
+      return 'You withdrew this interest.';
+    default:
+      return assertNever(status);
+  }
+}
+
+function assertNever(value: never): never {
+  return value;
+}
+
+const styles = StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: colors.background },
+  content: { gap: spacing.lg, padding: spacing.lg, paddingBottom: spacing.xxl },
+  heading: { gap: spacing.sm },
+  eyebrow: {
+    color: colors.pop,
+    fontFamily: 'BricolageGrotesqueBold',
+    fontSize: fontSizes.xs,
+    letterSpacing: 1,
+  },
+  title: { color: colors.ink, fontFamily: fonts.display, fontSize: fontSizes.xl, lineHeight: 32 },
+  subtitle: {
+    color: colors.textSecondary,
+    fontFamily: fonts.body,
+    fontSize: fontSizes.md,
+    lineHeight: 24,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  cardTitle: {
+    flex: 1,
+    color: colors.ink,
+    fontFamily: 'BricolageGrotesqueBold',
+    fontSize: fontSizes.lg,
+  },
+  statusBadge: {
+    borderColor: colors.textSecondary,
+    borderWidth: 1,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  statusText: {
+    color: colors.ink,
+    fontFamily: 'BricolageGrotesqueBold',
+    fontSize: fontSizes.xs,
+  },
+  headline: {
+    color: colors.ink,
+    fontFamily: fonts.body,
+    fontSize: fontSizes.md,
+    lineHeight: 24,
+  },
+  meta: { color: colors.fresh, fontFamily: 'BricolageGrotesqueSemiBold', fontSize: fontSizes.sm },
+  message: {
+    color: colors.textSecondary,
+    fontFamily: fonts.body,
+    fontSize: fontSizes.md,
+    lineHeight: 24,
+  },
+  roomNote: {
+    color: colors.ink,
+    fontFamily: 'BricolageGrotesqueSemiBold',
+    fontSize: fontSizes.md,
+    lineHeight: 24,
+  },
+});

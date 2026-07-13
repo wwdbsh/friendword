@@ -47,11 +47,45 @@ export type InterestDecision = {
   readonly introRoomId: string | null;
 };
 
+export type MyInterest = {
+  readonly interestId: string;
+  readonly interestStatus:
+    'started' | 'verification_pending' | 'submitted' | 'accepted' | 'declined' | 'withdrawn';
+  readonly submittedAt: string | null;
+  readonly decidedAt: string | null;
+  readonly campaignId: string;
+  readonly campaignSlug: string | null;
+  readonly campaignStatus: 'published' | 'paused' | 'expired' | 'archived';
+  readonly daterDisplayName: string | null;
+  readonly campaignHeadline: string | null;
+};
+
 const submitRowSchema = z.array(
   z.object({ interest_id: z.string().uuid(), interest_status: z.string() }),
 );
 
 const decideRowSchema = z.array(z.object({ intro_room_id: z.string().uuid().nullable() }));
+
+const myInterestRowsSchema = z.array(
+  z.object({
+    interest_id: z.string().uuid(),
+    interest_status: z.enum([
+      'started',
+      'verification_pending',
+      'submitted',
+      'accepted',
+      'declined',
+      'withdrawn',
+    ]),
+    submitted_at: z.string().datetime({ offset: true }).nullable(),
+    decided_at: z.string().datetime({ offset: true }).nullable(),
+    campaign_id: z.string().uuid(),
+    campaign_slug: z.string().min(1).nullable(),
+    campaign_status: z.enum(['published', 'paused', 'expired', 'archived']),
+    dater_display_name: z.string().trim().min(1).nullable(),
+    campaign_headline: z.string().trim().min(1).nullable(),
+  }),
+);
 
 /**
  * Flow C client surface. Profile writes use the client-writable columns and
@@ -158,6 +192,31 @@ export class InterestRepo {
     return { interestId: row.interest_id, interestStatus: row.interest_status };
   }
 
+  /** Interests sent by the caller, newest submission first (0033 RPC). */
+  async listMyInterests(): Promise<readonly MyInterest[]> {
+    await this.getRequiredSession();
+    const { data, error } = await callUntypedRpc(this.client, 'list_my_interests');
+    if (error !== null) {
+      throw new DataLayerError('interest.listMyInterests', error);
+    }
+    const parsed = myInterestRowsSchema.safeParse(data);
+    if (!parsed.success) {
+      throw new DataLayerError('interest.listMyInterests', parsed.error);
+    }
+
+    return parsed.data.map((row) => ({
+      interestId: row.interest_id,
+      interestStatus: row.interest_status,
+      submittedAt: row.submitted_at,
+      decidedAt: row.decided_at,
+      campaignId: row.campaign_id,
+      campaignSlug: row.campaign_slug,
+      campaignStatus: row.campaign_status,
+      daterDisplayName: row.dater_display_name,
+      campaignHeadline: row.campaign_headline,
+    }));
+  }
+
   /** The dater's inbox for one campaign (owner-only RPC). */
   async listCampaignInterests(campaignId: string): Promise<readonly CampaignInterest[]> {
     await this.getRequiredSession();
@@ -218,7 +277,12 @@ export class InterestRepo {
 
   /** Campaigns the signed-in user owns (their inbox scope). */
   async listMyOwnedCampaigns(): Promise<
-    readonly { readonly id: string; readonly slug: string | null; readonly status: string }[]
+    readonly {
+      readonly id: string;
+      readonly slug: string | null;
+      readonly status: string;
+      readonly endsAt: string | null;
+    }[]
   > {
     const session = await this.getRequiredSession();
     const { data, error } = await this.client
@@ -229,7 +293,12 @@ export class InterestRepo {
       throw new DataLayerError('interest.listMyOwnedCampaigns', error);
     }
 
-    return data.map((row) => ({ id: row.id, slug: row.slug, status: row.status }));
+    return data.map((row) => ({
+      id: row.id,
+      slug: row.slug,
+      status: row.status,
+      endsAt: row.ends_at,
+    }));
   }
 
   private async getRequiredSession(): Promise<Session> {
@@ -243,4 +312,31 @@ export class InterestRepo {
 
     return data.session;
   }
+}
+
+type RpcEnvelope = {
+  readonly data: unknown;
+  readonly error: unknown | null;
+};
+
+async function callUntypedRpc(
+  client: BrowserSupabaseClient,
+  functionName: 'list_my_interests',
+): Promise<RpcEnvelope> {
+  const rpc: unknown = Reflect.get(client, 'rpc');
+  if (typeof rpc !== 'function') {
+    throw new DataLayerError('interest.rpc', new Error('Supabase RPC client is unavailable'));
+  }
+  const result: unknown = await Reflect.apply(rpc, client, [functionName, {}]);
+  if (
+    typeof result !== 'object' ||
+    result === null ||
+    !('data' in result) ||
+    !('error' in result)
+  ) {
+    throw new DataLayerError('interest.rpc', new Error('Supabase RPC returned an invalid result'));
+  }
+  const data: unknown = Reflect.get(result, 'data');
+  const error: unknown = Reflect.get(result, 'error');
+  return { data, error };
 }

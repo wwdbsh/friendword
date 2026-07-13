@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { PitchDraftRow } from '@friendword/data';
+import type { ConsentRequestRow, PitchDraftRow } from '@friendword/data';
 
 import { hasFinalizedConsent, MockPitchDraftService, type PitchDraftStorage } from './pitchDrafts';
-import { HybridPitchDraftService } from './pitchDraftsSupabase';
+import { HybridPitchDraftService, isRecoveredServerDraft } from './pitchDraftsSupabase';
 import { EMPTY_PITCH_STRUCTURE, type PitchDraftId, type PitchReview } from './types';
 
 const REVIEW: PitchReview = {
@@ -31,6 +31,22 @@ const SERVER_ROW: PitchDraftRow = {
   publish_days: null,
   relationship_type: 'friend',
   relationship_duration: 'y3to10',
+  created_at: '2026-07-13T00:00:00.000Z',
+  updated_at: '2026-07-13T00:00:00.000Z',
+};
+
+const CONSENT_REQUEST: ConsentRequestRow = {
+  id: '30000000-0000-4000-8000-000000000001',
+  pitch_draft_id: SERVER_ROW.id,
+  subject_user_id: '00000000-0000-4000-8000-000000000002',
+  token_hash: 'hashed-token',
+  status: 'claimed',
+  responded_at: null,
+  invite_contact_channel: 'email',
+  invite_contact_hash: 'hashed-contact',
+  invite_friend_name: 'Jordan',
+  revision_id: '60000000-0000-4000-8000-000000000001',
+  response_note: 'Please clarify the story.',
   created_at: '2026-07-13T00:00:00.000Z',
   updated_at: '2026-07-13T00:00:00.000Z',
 };
@@ -176,5 +192,115 @@ describe('pitch draft AI review flow', () => {
     expect(finalized.status).toBe('consent_pending');
     expect(finalized.server?.consentToken).toBe('a'.repeat(32));
     expect(finalized.review.responseNote).toBeNull();
+  });
+
+  it('restores a server-only introducer draft and persists it without duplication', async () => {
+    const local = createService();
+    const unexpected = async (): Promise<never> => {
+      throw new Error('Unexpected repository method');
+    };
+    const service = new HybridPitchDraftService(null, local, {
+      createDraft: unexpected,
+      getDraft: unexpected,
+      listMyConsentRequests: async () => [CONSENT_REQUEST],
+      listMyDrafts: async () => [SERVER_ROW],
+      registerAsset: unexpected,
+      requestAssetUpload: unexpected,
+      submitForConsent: unexpected,
+      updateDraft: unexpected,
+    });
+
+    const firstLoad = await service.getMyDrafts();
+    const secondLoad = await service.getMyDrafts();
+    const restored = firstLoad[0];
+    if (restored === undefined) {
+      throw new Error('Expected a recovered server draft');
+    }
+
+    expect(firstLoad).toHaveLength(1);
+    expect(secondLoad).toHaveLength(1);
+    expect(firstLoad[0]).toEqual(
+      expect.objectContaining({
+        id: SERVER_ROW.id,
+        status: 'changes_requested',
+        relationship: expect.objectContaining({
+          friendFirstName: 'Jordan',
+          contact: { kind: 'sent' },
+        }),
+        review: expect.objectContaining({
+          headline: REVIEW.headline,
+          body: REVIEW.body,
+          generationMode: 'manual',
+          responseNote: 'Please clarify the story.',
+        }),
+        server: expect.objectContaining({
+          draftId: SERVER_ROW.id,
+          consentRequestId: CONSENT_REQUEST.id,
+        }),
+      }),
+    );
+    expect(isRecoveredServerDraft(restored)).toBe(true);
+    await expect(local.getMyDrafts()).resolves.toHaveLength(1);
+  });
+
+  it('deduplicates by server draft id while retaining richer local media', async () => {
+    const local = createService();
+    const localId = await createCompleteDraft(local);
+    await local.attachServerDraft(localId, SERVER_ROW.id);
+    const unexpected = async (): Promise<never> => {
+      throw new Error('Unexpected repository method');
+    };
+    const service = new HybridPitchDraftService(null, local, {
+      createDraft: unexpected,
+      getDraft: unexpected,
+      listMyConsentRequests: async () => [CONSENT_REQUEST],
+      listMyDrafts: async () => [SERVER_ROW],
+      registerAsset: unexpected,
+      requestAssetUpload: unexpected,
+      submitForConsent: unexpected,
+      updateDraft: unexpected,
+    });
+
+    const drafts = await service.getMyDrafts();
+    const merged = drafts[0];
+    if (merged === undefined) {
+      throw new Error('Expected a merged draft');
+    }
+
+    expect(drafts).toHaveLength(1);
+    expect(merged.id).toBe(localId);
+    expect(merged.photos).toHaveLength(1);
+    expect(merged.recording?.uri).toBe('file:///voice.m4a');
+    expect(merged.status).toBe('changes_requested');
+    expect(isRecoveredServerDraft(merged)).toBe(false);
+  });
+
+  it('sorts recovered server drafts by their latest update', async () => {
+    const local = createService();
+    const olderServerRow: PitchDraftRow = {
+      ...SERVER_ROW,
+      id: '10000000-0000-4000-8000-000000000002',
+      created_at: '2026-07-11T00:00:00.000Z',
+      updated_at: '2026-07-12T00:00:00.000Z',
+    };
+    const unexpected = async (): Promise<never> => {
+      throw new Error('Unexpected repository method');
+    };
+    const service = new HybridPitchDraftService(null, local, {
+      createDraft: unexpected,
+      getDraft: unexpected,
+      listMyConsentRequests: async () => [CONSENT_REQUEST],
+      listMyDrafts: async () => [olderServerRow, SERVER_ROW],
+      registerAsset: unexpected,
+      requestAssetUpload: unexpected,
+      submitForConsent: unexpected,
+      updateDraft: unexpected,
+    });
+
+    const drafts = await service.getMyDrafts();
+    const draftsAfterSync = await service.getMyDrafts();
+
+    expect(drafts.map((draft) => draft.id)).toEqual([SERVER_ROW.id, olderServerRow.id]);
+    expect(draftsAfterSync.map((draft) => draft.id)).toEqual([SERVER_ROW.id, olderServerRow.id]);
   });
 });

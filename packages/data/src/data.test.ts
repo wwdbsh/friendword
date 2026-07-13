@@ -25,6 +25,7 @@ import {
   UnauthenticatedError,
 } from './errors';
 import { buildPitchMediaPath, PitchDraftRepo } from './pitchDraftRepo';
+import { InterestRepo } from './interestRepo';
 import { getPublishedPitchBySlug } from './publishedPitchRepo';
 
 const mocks = vi.hoisted(() => ({
@@ -903,6 +904,75 @@ describe('ConsentRepo', () => {
       action: 'decline',
       note: 'I do not consent to publication.',
     });
+  });
+});
+
+describe('InterestRepo.listMyInterests', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    configureMockClient();
+    mocks.getSession.mockResolvedValue({
+      data: { session: { user: { id: '00000000-0000-0000-0000-000000000002' } } },
+      error: null,
+    });
+  });
+
+  it('maps the authenticated sender RPC rows into mobile-friendly fields', async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [
+        {
+          interest_id: '50000000-0000-4000-8000-000000000001',
+          interest_status: 'accepted',
+          submitted_at: '2026-07-13T10:00:00+00:00',
+          decided_at: '2026-07-13T11:00:00+00:00',
+          campaign_id: '20000000-0000-4000-8000-000000000001',
+          campaign_slug: 'blair-summer',
+          campaign_status: 'published',
+          dater_display_name: 'Blair',
+          campaign_headline: 'A thoughtful person worth meeting',
+        },
+      ],
+      error: null,
+    });
+    const repo = new InterestRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await expect(repo.listMyInterests()).resolves.toEqual([
+      {
+        interestId: '50000000-0000-4000-8000-000000000001',
+        interestStatus: 'accepted',
+        submittedAt: '2026-07-13T10:00:00+00:00',
+        decidedAt: '2026-07-13T11:00:00+00:00',
+        campaignId: '20000000-0000-4000-8000-000000000001',
+        campaignSlug: 'blair-summer',
+        campaignStatus: 'published',
+        daterDisplayName: 'Blair',
+        campaignHeadline: 'A thoughtful person worth meeting',
+      },
+    ]);
+    expect(mocks.rpc).toHaveBeenCalledWith('list_my_interests', {});
+  });
+
+  it('rejects malformed RPC rows instead of rendering ambiguous states', async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [
+        {
+          interest_id: 'not-a-uuid',
+          interest_status: 'mystery',
+        },
+      ],
+      error: null,
+    });
+    const repo = new InterestRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await expect(repo.listMyInterests()).rejects.toBeInstanceOf(DataLayerError);
+  });
+
+  it('does not call the RPC while signed out', async () => {
+    mocks.getSession.mockResolvedValue({ data: { session: null }, error: null });
+    const repo = new InterestRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await expect(repo.listMyInterests()).rejects.toBeInstanceOf(UnauthenticatedError);
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 });
 

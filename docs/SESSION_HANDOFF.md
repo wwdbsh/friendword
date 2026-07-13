@@ -1,6 +1,14 @@
 # PROJECT HANDOFF
 
-> 갱신: 2026-07-13 KST · 2차 감사 대응 (Slice 0~**8** 완료 · Slice 9 진행 예정)
+> 갱신: 2026-07-13 KST · 2차 감사 대응 (Slice 0~**9** 완료 · Slice 10 release gate 진행 예정)
+
+## Slice 9 완료 (H-4·H-5·CP-7·H-8)
+
+- **0033**: outcome 분석 이벤트 트리거 기록(`recorded_by:"server"`)·track_event interaction 축소+속성 검증·`expire_due_campaigns`(service role 전용)·resume 차단·`list_my_interests`. hosted 배포 필요 시점: 이 슬라이스 커밋 직후.
+- 클라이언트 outcome 전송 전부 제거, `consent_invite_shared` 분리, kit `?src=creator-kit` attribution, 인박스 Ended 표시, 채팅 `role="log"`, block/leave confirm.
+- 모바일(codex-1, `.briefs/30`): My interests 실화면 + Introducer 서버 draft 복구.
+- 만료 잡 `scripts/expire-campaigns.mjs` → `run-scheduled-ops.mjs` 편입(OPS.md).
+- 검증: **audit2 14/14 전부 그린** · DB 01~18 그린 · data 47/mobile 59 · Playwright 39/39 · 지표 정의는 ANALYTICS_PLAN "지표 정의" 절.
 
 ## Slice 8 완료 (CP-3·CP-4·Creator kit e2e)
 

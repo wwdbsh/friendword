@@ -27,6 +27,8 @@
 | Advisor              | Slice 7 완결: `/p` 승인 body+transcript 렌더·trust 카피·b13·E2E 확장·문서                                 | b13 그린 + audit2 red는 b10뿐 + 전 게이트 그린 + 브라우저 QA                | 승인 (audit2 12/13, 프로덕션 E2E 전 체크 PASS, 브라우저 QA 완료) | 2026-07-13 |
 | `friendword-codex-1` | Slice 7: 웹 ConsentFlow Dater 통제 UI — 텍스트 수정·사진 업로드·공개 설정·프로필 확인 (`.briefs/29`)      | 완료 조건 5종 + data/web 게이트 그린 + Advisor 재실행·브라우저 QA           | 승인 (Advisor 재실행 전 게이트 그린 + 실브라우저 편집→발행 검증) | 2026-07-13 |
 | Advisor              | Slice 8: CP-3 정직한 데모(가짜 Play 제거)·CP-4 영어 기본 locale·OG/모바일 문자열·Creator kit e2e(10g~10j) | 한글 0자 회귀+데모 무재생 회귀 그린 + 전 게이트 그린 + E2E 전 체크 PASS     | 승인 (Playwright 39/39, E2E 전 체크 PASS, 브라우저 QA 완료)      | 2026-07-13 |
+| Advisor              | Slice 9: 0033(트리거 분석·만료 상태기계·list_my_interests)·b14·클라이언트 outcome 제거·H-8 웹             | b10·b14 그린(audit2 14/14) + 기본 스위트 그린 + E2E 전 체크 PASS            | 승인 (audit2 14/14, DB 01~18 그린, 전 게이트 그린)               | 2026-07-13 |
+| `friendword-codex-1` | Slice 9: 모바일 My interests 실화면·Introducer 서버 draft 복구 (`.briefs/30`)                             | data 47·모바일 59 테스트 + 게이트 그린 + Advisor 재실행                     | 승인 (Advisor 재실행 그린·status 계약 정렬 후 통합)              | 2026-07-13 |
 | 예정                 | Slice 1~9: 감사 §7 순서대로 (신고→media→RevenueCat→유료가치→identity→비용→Dater→데모·영어→growth)         | 각 슬라이스의 audit2 테스트 그린 전환 + §12 승인 형식 보고                  | 예정                                                             | 2026-07-13 |
 | 예정                 | Slice 10: release gate                                                                                    | 감사 §7 Slice 10 체크리스트 전부 + audit2 CI 편입 + launch gate 해제 재판단 | 예정                                                             | 2026-07-13 |
 

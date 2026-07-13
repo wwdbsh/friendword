@@ -135,7 +135,7 @@ export default function SharePitchScreen() {
         message: `I recorded a Friendword pitch about you — it only goes live if you approve it. Take a listen: ${consentUrl}`,
       });
       if (result.action === Share.sharedAction) {
-        trackEvent(getSupabaseClient(), 'campaign_shared', {
+        trackEvent(getSupabaseClient(), 'consent_invite_shared', {
           platform: 'mobile',
           pitch_draft_id: draft?.server?.draftId ?? null,
         });

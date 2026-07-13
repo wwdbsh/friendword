@@ -1112,17 +1112,26 @@ try {
   );
 
   // ── Analytics ingestion ────────────────────────────────────────────────
-  // 21. Anonymous + signed-in events land; junk names are rejected.
+  // 21. Analytics: interaction events ingest, outcome forgery is rejected,
+  // and the real outcomes were server-recorded by the 0033 triggers.
   const { error: anonTrackError } = await anonClient.rpc('track_event', {
     event_name: 'pitch_viewed_unique',
     properties: { campaign_slug: slug, source: analyticsSource },
   });
   const { error: userTrackError } = await dater.client.rpc('track_event', {
-    event_name: 'campaign_paused',
+    event_name: 'interest_started',
     properties: { campaign_id: campaignId, source: analyticsSource },
   });
   const { error: junkTrackError } = await anonClient.rpc('track_event', {
     event_name: 'not_a_real_event',
+  });
+  const { error: forgedOutcomeError } = await dater.client.rpc('track_event', {
+    event_name: 'campaign_published',
+    properties: { campaign_id: campaignId },
+  });
+  const { error: forgedPropertyError } = await dater.client.rpc('track_event', {
+    event_name: 'interest_started',
+    properties: { campaign_id: '99999999-9999-9999-9999-999999999999' },
   });
   const { data: trackedRows } = await admin
     .from('analytics_events')
@@ -1130,14 +1139,37 @@ try {
     .contains('properties', { source: analyticsSource });
   created.analyticsSeeded = true;
   check(
-    '21. analytics events ingest (anon + user) and reject junk names',
+    '21. interaction analytics ingest; junk, forged outcomes, fake ids rejected',
     !anonTrackError &&
       !userTrackError &&
       Boolean(junkTrackError) &&
+      Boolean(forgedOutcomeError) &&
+      forgedOutcomeError.message.includes('recorded by the server') &&
+      Boolean(forgedPropertyError) &&
       (trackedRows ?? []).length === 2 &&
       trackedRows.some((row) => row.user_id === dater.id) &&
       trackedRows.some((row) => row.user_id === null),
     anonTrackError?.message ?? userTrackError?.message,
+  );
+
+  // 21b. §8-17: the funnel outcomes exist as server-recorded events.
+  const { data: serverEventRows } = await admin
+    .from('analytics_events')
+    .select('event_name, properties')
+    .contains('properties', { recorded_by: 'server', campaign_id: campaignId });
+  const serverEventNames = new Set((serverEventRows ?? []).map((row) => row.event_name));
+  const { data: serverInterestRows } = await admin
+    .from('analytics_events')
+    .select('event_name')
+    .contains('properties', { recorded_by: 'server' })
+    .in('event_name', ['interest_submitted', 'interest_accepted'])
+    .eq('user_id', stranger.id);
+  check(
+    '21b. publish/pause/expire-relevant outcomes are server-recorded',
+    serverEventNames.has('campaign_published') &&
+      serverEventNames.has('campaign_paused') &&
+      (serverInterestRows ?? []).some((row) => row.event_name === 'interest_submitted'),
+    [...serverEventNames].join(','),
   );
 } catch (error) {
   failures += 1;
@@ -1195,7 +1227,29 @@ try {
     // first trips the owner-must-match-DATER_OWNER consistency trigger.
     await cleanup('campaign', admin.from('campaigns').delete().eq('id', created.campaignId));
   }
+  if (created.users.length > 0) {
+    await cleanup(
+      'user analytics',
+      admin.from('analytics_events').delete().in('user_id', created.users),
+    );
+  }
+  if (created.campaignId) {
+    await cleanup(
+      'campaign analytics',
+      admin
+        .from('analytics_events')
+        .delete()
+        .contains('properties', { campaign_id: created.campaignId }),
+    );
+  }
   if (created.draftId) {
+    await cleanup(
+      'draft analytics',
+      admin
+        .from('analytics_events')
+        .delete()
+        .contains('properties', { pitch_draft_id: created.draftId }),
+    );
     await cleanup(
       'purchase analytics',
       admin.from('analytics_events').delete().contains('properties', {

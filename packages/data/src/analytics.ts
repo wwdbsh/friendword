@@ -1,30 +1,22 @@
 import type { BrowserSupabaseClient } from './client';
 import type { Json } from './database.types';
 
+/**
+ * Client-sendable interaction events only. Outcomes the server already
+ * knows (publish, interest decisions, purchases, safety actions) are
+ * recorded by database triggers (0033) and the RPC rejects them from
+ * clients — see docs/ANALYTICS_PLAN.md.
+ */
 export type AnalyticsEventName =
   | 'introducer_started'
   | 'voice_recorded'
   | 'draft_generated'
-  | 'consent_sent'
-  | 'draft_changes_requested'
-  | 'pitch_approved'
-  | 'campaign_published'
+  | 'consent_invite_shared'
   | 'campaign_shared'
   | 'pitch_viewed_unique'
   | 'interest_started'
-  | 'interest_submitted'
-  | 'interest_accepted'
-  | 'intro_room_created'
-  | 'first_message_sent'
   | 'creator_launch_paywall_viewed'
-  | 'creator_launch_purchased'
-  | 'creator_launch_credit_consumed'
-  | 'campaign_pass_paywall_viewed'
-  | 'campaign_pass_purchased'
-  | 'report_submitted'
-  | 'user_blocked'
-  | 'campaign_paused'
-  | 'campaign_expired';
+  | 'campaign_pass_paywall_viewed';
 
 /**
  * Fire-and-forget funnel event. Analytics must never break product flows,

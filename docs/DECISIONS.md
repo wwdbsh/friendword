@@ -158,3 +158,11 @@
 - **이유**: 2차 감사 H-4(조작 가능한 analytics로는 Grand Prize 증거 불가)·H-5(만료 불일치)·CP-7(컨텍스트 UI 낙후)·H-8. K-factor·전환 지표 정의와 한계는 ANALYTICS_PLAN "지표 정의" 절에 문서화.
 - **검토 대안**: RPC 내부 기록(재정의 소실 위험 — 트리거 채택), client 이벤트 전면 금지(유입·노출 지표 소실 — interaction만 허용), 읽기 시 lazy 만료 전환(public read는 이미 ends_at 기준 — 상태·이벤트 일관성은 잡이 담당).
 - **영향**: audit2 **14/14 전부 그린**(b10·b14 포함). 스위트 09/12를 새 계약으로 갱신. `AnalyticsEventName` 타입이 client 이벤트로 축소. verification_pending/blocked 상태 계약을 RPC·repo·모바일 라벨에 정렬. 남은 H-8 항목(터치 타깃 전수 측정·스크린리더 실기기 QA·TrustCard 대비 측정)은 Slice 10 기기 패스에서 수행.
+
+## 2026-07-13: Slice 10 release gate 판정 — launch gate는 유지(off)
+
+- **결정**: 2차 감사 §7 Slice 10 체크리스트를 실행한 결과, **`real_payments_enabled`/`public_beta_enabled`는 계속 off로 유지**한다. 코드·스키마·테스트 게이트는 전부 통과했으나, 감사 §13의 일곱 조건 중 세 가지가 사용자 게이트 뒤에 남아 있어 실결제·외부 공개 조건이 충족되지 않았다.
+- **통과한 게이트 (Advisor 직접 재실행)**: 전체 CI 세트(lint/typecheck/unit/format/web build/Playwright 39/웹 audit 11+audit2 8) · clean DB에서 migrations 0001~~0033 전체 적용+스위트 01~~18 그린 · **audit2 14/14 그린 및 CI 편입**(웹 test:audit2 + DB test-db-audit2.sh) · 프로덕션 E2E 신규 사용자 full loop 전 체크 PASS · 만료/삭제/orphan 정기 ops hosted 드릴 클린 · provider kill switch hosted 드릴(on→차단, off→복구, 원복 확인) · 신고 남용 방어(b01+E2E+Slice 1 브라우저 검증) · 영어 공개 데모(가짜 재생 없음) · GROWTH_EVIDENCE는 "수집 전" 정직 상태 유지.
+- **미충족(사용자 게이트) — 해제 전 필수**: (1) RevenueCat 셋업+dev build 후 sandbox 실왕복(purchase→restore→refund→transfer), (2) identity 벤더 계약+키 후 enforcement on 실증(현재는 로컬 fixture 증명뿐), (3) OPENAI 키 후 moderation enforcement on 실증, (4) 실기기 iOS flow QA(시뮬레이터·웹 검증만 존재), (5) Resend 도메인·`EXPO_PUBLIC_WEB_ORIGIN`.
+- **검토 대안**: public_beta만 선해제(관심 표현은 identity gate 미실증 상태에서 성인 증거 없이 열림 — 기각), sandbox 없이 real_payments 해제(감사 P0-3/4 acceptance 위반 — 기각).
+- **영향**: 제품 판정은 "기능성 베타 — 실결제·외부 공개 서버 차단"을 유지한다. 사용자 키 게이트가 채워지는 시점에 위 다섯 항목을 순서대로 실증한 뒤 launch gate 해제를 다시 판단한다(그때 이 문서에 기록). §11 금지 표현은 계속 사용하지 않는다.

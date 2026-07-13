@@ -19,6 +19,8 @@
 | Advisor              | Slice 1: 0024(신고 dedupe·distinct pause·restrictive read)·proxy trust·계정 가드·b11              | b01/b11 그린 + 기존 스위트 그린 유지 + E2E·브라우저 신고 QA                 | 승인 (236d5de, hosted 0024·E2E 21체크·브라우저 dedupe 실검증)    | 2026-07-13 |
 | Advisor              | Slice 2: 0026 text_moderations·transcribe voice moderation·moderate-text API·모바일/웹 배선·b12   | b12 그린 + 16/b02 정합 + 라우트 QA + hosted 배포                            | 승인 (0d66cd7, hosted 0025~0026 배포·orphan dry-run 클린)        | 2026-07-13 |
 | `friendword-codex-1` | Slice 2: 0025 길이·rate·quota, suite 18, orphan cleanup, 웹 interest cap/rollback (`.briefs/25`)  | suite 01~18 그린 + audit2 red set 불변 + build/lint 그린                    | 승인 (5a59b4e, Advisor 재실행 전체 그린)                         | 2026-07-13 |
+| Advisor              | Slice 3: 0027 실이벤트 계약·review 큐·route 재작성·b03·구계약 테스트 4곳 갱신                     | b03 그린 + 웹 audit/audit2 그린 + DB 01~18 그린                             | 승인 (hosted 0027 배포)                                          | 2026-07-13 |
+| `friendword-codex-1` | Slice 3: RevenueCat identity 동기화 서비스·auth 배선·구매 전 일치 보증 (`.briefs/26`)             | identity 시나리오 6종 테스트 + 모바일 35 테스트 그린                        | 승인 (Advisor 재실행 그린; sandbox 실기기는 사용자 게이트 잔존)  | 2026-07-13 |
 | 예정                 | Slice 1~9: 감사 §7 순서대로 (신고→media→RevenueCat→유료가치→identity→비용→Dater→데모·영어→growth) | 각 슬라이스의 audit2 테스트 그린 전환 + §12 승인 형식 보고                  | 예정                                                             | 2026-07-13 |
 | 예정                 | Slice 10: release gate                                                                            | 감사 §7 Slice 10 체크리스트 전부 + audit2 CI 편입 + launch gate 해제 재판단 | 예정                                                             | 2026-07-13 |
 

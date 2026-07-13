@@ -54,3 +54,8 @@ npx expo run:ios   # 또는 EAS: eas build --profile development --platform ios
 - **실결제는 launch gate(0023)로 서버에서 차단되어 있습니다.** `real_payments_enabled=off`인 동안 purchase intent 발급 자체가 거부되고 PRODUCTION 이벤트는 효익을 만들지 않습니다. 해제는 2차 감사 §7 Slice 10 release gate 통과 후입니다.
 - 2차 감사가 확인한 **미해소 코드 결함**(키 입력만으로 해결되지 않음): 웹훅이 실제 RevenueCat 이벤트 계약(TRANSFER/lifecycle의 선택 필드)과 불일치(P0-3), 모바일 SDK가 auth 전환 시 `logIn`/`logOut`을 호출하지 않음(P0-4), Creator Launch 재구매 trap(P0-5), Campaign Pass 정상 구매 진입 부재(P0-6). Slice 3~4에서 수정 예정이며, 그 전까지 "RevenueCat complete"/"real payments ready" 표현을 어떤 문서에도 쓰지 않습니다.
 - sandbox 실검증(구매→restore→refund→transfer)은 Slice 3 코드 수정 + 사용자 대시보드 셋업 + dev build 이후에만 수행 가능합니다.
+
+## Slice 3 갱신 (2026-07-13)
+
+- P0-3(웹훅 실이벤트 계약)·P0-4(SDK identity 동기화)의 **코드 게이트는 해소**되었습니다: 이벤트 타입별 schema, transaction lineage 귀속, `purchase_event_reviews` durable 큐(운영 절차는 `docs/OPS.md`), auth lifecycle `logIn`/`logOut` 동기화와 구매 전 identity 일치 보증.
+- 여전히 남은 것: 대시보드 셋업+dev build 후 **실제 sandbox 왕복 검증**(purchase→restore→refund→transfer, 계정 전환 A→B). 이것이 끝나기 전 "RevenueCat complete"를 주장하지 않습니다. 실결제는 launch gate(`real_payments_enabled=off`)로 계속 차단됩니다.

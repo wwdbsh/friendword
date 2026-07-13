@@ -8,6 +8,7 @@
 | ----------------------------------- | --------- | ------------------------------------------------------------------------- | ------------------ |
 | `b01_anon_report_abuse.sql`         | P0-1      | 익명 신고 distinct identity·dedupe, 단독 신고자의 auto-pause 불가         | Slice 1            |
 | `b02_media_voice_enforcement.sql`   | P0-2      | asset kind별 validation matrix, enforcement on에서 정상 voice 제출 가능   | Slice 2            |
+| `b03_webhook_event_contract.sql`    | P0-3      | 실이벤트 계약: TRANSFER·속성누락 lifecycle·미귀속 구매의 durable review   | Slice 3            |
 | `b04_paid_value_delivery.sql`       | P0-5·P0-6 | 중복 intent 거부, unlocked kit 재진입, 결제 1건=효익 1회                  | Slice 4            |
 | `b05_contact_binding_invariant.sql` | P0-7      | 신규 consent request의 verified contact 필수, legacy null claim 불가      | Slice 5            |
 | `b06_identity_evidence.sql`         | P0-8      | verification type/provider/photo hash/expiry 기반 publish·interest 게이트 | Slice 5            |
@@ -18,6 +19,6 @@
 | `b11_account_read_enforcement.sql`  | H-1       | suspended/deleted 계정의 민감 read 철회 (0024 restrictive 정책)           | Slice 1            |
 | `b12_text_moderation_gate.sql`      | H-3       | content-addressed 텍스트 moderation 게이트 (0026)                         | Slice 2            |
 
-웹훅 DB 계약(P0-3)은 Slice 3에서 RPC 재설계와 함께 `b03_*.sql`로 추가합니다. route 레벨 계약은 `apps/web/tests-audit2/revenuecat-realistic.audit2.test.ts`가 선행 인코딩합니다.
+route 레벨 계약은 `apps/web/tests-audit2/revenuecat-realistic.audit2.test.ts`가 인코딩하며 Slice 3부터 그린이다.
 
 후속 슬라이스는 실제 실행 결과가 바뀔 때 이 표의 상태도 함께 갱신해야 합니다.

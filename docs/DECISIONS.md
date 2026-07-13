@@ -109,3 +109,10 @@
 - **이유**: 2차 감사 P0-2(enforcement 음성 deadlock)·H-3·H-7. 전사는 pitch 파이프라인에서 이미 필요하므로 moderation을 그 транscript에 얹으면 provider 이중 지출이 없다. content-addressed 원장은 재호출을 무료로 만들고(P0-9 대비) 클라이언트 편집 우회를 구조적으로 막는다.
 - **검토 대안**: 별도 audio moderation provider(비용·중복), submit RPC 재정의로 게이트(후속 재정의 시 소실 위험 — 트리거 채택), 채팅 실시간 provider moderation(비용·지연 대비 효과 낮음, 잔여 위험으로 기록).
 - **영향**: migration 0025(워커)·0026(Advisor), suite 18 그린, audit2 b12 그린, suite 16·b02는 enforcement-on 성공 경로에 text verdict 픽스처 추가. 모바일 제출과 웹 interest가 moderation API를 선호출(501은 게이트에 위임). `EXPO_PUBLIC_WEB_ORIGIN` 미설정 시 모바일은 localhost 폴백으로 호출한다.
+
+## 2026-07-13: RevenueCat 실이벤트 계약과 durable review 큐 (Slice 3, P0-3·P0-4)
+
+- **결정**: (1) 웹훅 route는 이벤트 타입별 shape만 검증한다 — purchase류는 app_user+product+transaction ids, lifecycle은 product+original_transaction_id, TRANSFER·미지원 타입은 id/type만. (2) `record_revenuecat_event`(0027)는 purchase를 intent 속성 → original transaction lineage 순으로 귀속하고, lifecycle은 purchase_events lineage → intent 바인딩 → (out-of-order 안전용) intent 속성 순으로 귀속한다. (3) 귀속 불가·unknown product·TRANSFER·미지원 타입 등 "돈은 실재하나 자동 처리 불가" 이벤트는 예외 대신 `purchase_event_reviews`(provider_event_id 유니크, open/resolved/discarded)에 저장하고 `needs_review:true`로 응답한다. route는 어떤 RPC 오류도 terminal 200으로 삼키지 않는다(전부 5xx 재시도). (4) 모바일은 단일 identity 서비스가 auth lifecycle(콜드 스타트·SIGNED_IN/OUT·user 변경)과 RevenueCat `logIn`/`logOut`을 동기화하고, purchase/restore는 intent 발급 전 `getAppUserID()==세션 uid`를 보증하며 불일치 시 구매를 시작하지 않는다.
+- **이유**: 2차 감사 P0-3(TRANSFER 400, 전 이벤트 intent 강요, terminal 200 유실)·P0-4(anonymous 귀속·계정 전환 오염). 돈을 받은 이벤트는 어떤 경우에도 조용히 사라지면 안 된다.
+- **검토 대안**: TRANSFER 자동 이관(잘못된 자동 병합 위험 — MVP는 ops review), lifecycle에 intent 필수 유지(실계약 위반), route에서 salvage 로직(서버 권위 원칙 위반).
+- **영향**: 1차 계약 테스트 중 "예외" 기대 4곳(14_commerce 3, a04 1, tests-audit 웹 2)을 review-큐 계약으로 갱신 — 1차 감사 acceptance의 의도(효익 미지급·유실 금지)는 유지되고 처리 방식만 durable해졌다. audit2 b03 그린, 웹 audit2 8/8 그린. 실기기 sandbox(구매→restore→refund→transfer)는 여전히 사용자 게이트(RevenueCat 셋업+dev build) 뒤 — 코드 게이트만 해소된 상태로 "real payments ready"를 주장하지 않는다.

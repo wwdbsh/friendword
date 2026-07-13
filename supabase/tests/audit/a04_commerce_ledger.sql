@@ -127,7 +127,6 @@ DO $$
 DECLARE
   purchase_count INTEGER;
   ledger_count INTEGER;
-  unknown_product_rejected BOOLEAN := false;
   revoked_count INTEGER;
 BEGIN
   PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(jsonb_build_object(
@@ -161,8 +160,12 @@ BEGIN
       ledger_count;
   END IF;
 
+  -- Second-audit contract (0027): an unknown product with real money is
+  -- parked in the durable review queue — no benefit, no silent drop.
+  DECLARE
+    unknown_result JSONB;
   BEGIN
-    PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(jsonb_build_object(
+    unknown_result := record_revenuecat_event(pg_temp.revenuecat_payload(jsonb_build_object(
       'provider_event_id', 'audit-p04-unknown-product',
       'event_type', 'INITIAL_PURCHASE',
       'app_user_id', '00000000-0000-0000-0000-000000000004',
@@ -171,20 +174,23 @@ BEGIN
       'transaction_id', 'audit-p04-unknown-transaction',
       'original_transaction_id', 'audit-p04-unknown-original'
     )));
-    RAISE EXCEPTION 'audit_unknown_product_was_accepted';
-  EXCEPTION
-    WHEN raise_exception THEN
-      IF SQLERRM = 'audit_unknown_product_was_accepted' THEN
-        unknown_product_rejected := false;
-      ELSIF SQLERRM ~* 'unknown|product' THEN
-        unknown_product_rejected := true;
-      ELSE
-        RAISE;
-      END IF;
+    IF (unknown_result ->> 'needs_review')::BOOLEAN IS DISTINCT FROM true THEN
+      RAISE EXCEPTION 'AUDIT-P04: unknown product_id was not routed to review';
+    END IF;
+    IF EXISTS (
+      SELECT 1 FROM purchase_credit_ledger
+       WHERE idempotency_key = 'audit-p04-unknown-original'
+    ) THEN
+      RAISE EXCEPTION 'AUDIT-P04: unknown product granted a credit';
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM purchase_event_reviews
+       WHERE provider_event_id = 'audit-p04-unknown-product'
+         AND reason = 'unknown_product'
+    ) THEN
+      RAISE EXCEPTION 'AUDIT-P04: unknown product left no review row';
+    END IF;
   END;
-  IF NOT unknown_product_rejected THEN
-    RAISE EXCEPTION 'AUDIT-P04: unknown product_id was accepted';
-  END IF;
 
   PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(jsonb_build_object(
     'provider_event_id', 'audit-p04-cancellation',

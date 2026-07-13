@@ -42,6 +42,8 @@ function eventFixture(overrides: Partial<RevenueCatEvent> = {}): RevenueCatEvent
     product_id: CREATOR_PRODUCT,
     purchased_at_ms: 1_752_384_000_000,
     expiration_at_ms: null,
+    transaction_id: 'rc-transaction-1',
+    original_transaction_id: 'rc-original-transaction-1',
     subscriber_attributes: {
       pitch_draft_id: { value: PITCH_DRAFT_ID },
       campaign_id: { value: CAMPAIGN_ID },
@@ -78,10 +80,12 @@ describe('RevenueCat webhook audit contract', () => {
   });
 
   // Audit P0-4a: unknown products must never inherit Campaign Pass behavior.
-  it('[P0-4a] rejects an unknown product without any benefit write', async () => {
-    // Given
-    const unknownProductError = { code: 'P0001', message: 'unknown product unknown_product' };
-    const fake = createAuditSupabaseFake({ rpcError: unknownProductError });
+  it('[P0-4a] parks an unknown product in the durable review queue', async () => {
+    // Given — second-audit contract (0027): the RPC answers needs_review
+    // instead of raising; nothing money-related is terminally dropped.
+    const fake = createAuditSupabaseFake({
+      rpcData: { recorded: true, deduplicated: false, benefit: null, needs_review: true },
+    });
     mocks.getSupabaseServiceClient.mockReturnValue(fake.client);
 
     // When
@@ -89,18 +93,20 @@ describe('RevenueCat webhook audit contract', () => {
 
     // Then
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      recorded: false,
-      reason: 'unknown product',
+    await expect(response.json()).resolves.toMatchObject({
+      recorded: true,
+      needs_review: true,
     });
     expect(fake.calls).toHaveLength(1);
   });
 
-  // Audit P0-4a: rejected intents are terminal attribution failures.
-  it('[P0-4a] returns recorded false for an invalid purchase intent', async () => {
+  // Second-audit contract: attribution failures are not terminal — the DB
+  // parks the event for ops review and the route reports needs_review.
+  it('[P0-4a] surfaces an unattributed purchase as needs_review', async () => {
     // Given
-    const intentError = { code: 'P0001', message: 'purchase intent mismatch' };
-    const fake = createAuditSupabaseFake({ rpcError: intentError });
+    const fake = createAuditSupabaseFake({
+      rpcData: { recorded: true, deduplicated: false, benefit: null, needs_review: true },
+    });
     mocks.getSupabaseServiceClient.mockReturnValue(fake.client);
 
     // When
@@ -108,9 +114,9 @@ describe('RevenueCat webhook audit contract', () => {
 
     // Then
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      recorded: false,
-      reason: 'invalid purchase intent',
+    await expect(response.json()).resolves.toMatchObject({
+      recorded: true,
+      needs_review: true,
     });
   });
 

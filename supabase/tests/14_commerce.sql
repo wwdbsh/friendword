@@ -125,61 +125,75 @@ VALUES (
 );
 
 SET LOCAL ROLE service_role;
+-- Second-audit contract (0027): money-received events that cannot be
+-- auto-attributed are parked in the durable review queue instead of
+-- raising. Each case must grant no benefit and leave a review row.
 DO $$
 DECLARE
-  expired_rejected BOOLEAN := false;
-  mismatch_rejected BOOLEAN := false;
-  unknown_product_rejected BOOLEAN := false;
+  result JSONB;
 BEGIN
-  BEGIN
-    PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(
-      'commerce-expired',
-      'NON_RENEWING_PURCHASE',
-      '00000000-0000-0000-0000-000000000004',
-      'creator_launch_credit_499',
-      '14000000-0000-0000-0000-000000000001',
-      'commerce-expired-tx',
-      'commerce-expired-original'
-    ));
-  EXCEPTION WHEN raise_exception THEN
-    expired_rejected := SQLERRM ~* 'intent';
-  END;
-  IF NOT expired_rejected THEN
-    RAISE EXCEPTION 'expired purchase intent was accepted';
+  result := record_revenuecat_event(pg_temp.revenuecat_payload(
+    'commerce-expired',
+    'NON_RENEWING_PURCHASE',
+    '00000000-0000-0000-0000-000000000004',
+    'creator_launch_credit_499',
+    '14000000-0000-0000-0000-000000000001',
+    'commerce-expired-tx',
+    'commerce-expired-original'
+  ));
+  IF (result ->> 'needs_review')::BOOLEAN IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'expired purchase intent did not go to review';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM purchase_credit_ledger
+     WHERE idempotency_key = 'commerce-expired-original'
+  ) THEN
+    RAISE EXCEPTION 'expired purchase intent granted a credit';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM purchase_event_reviews
+     WHERE provider_event_id = 'commerce-expired' AND status = 'open'
+  ) THEN
+    RAISE EXCEPTION 'expired purchase intent left no review row';
   END IF;
 
-  BEGIN
-    PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(
-      'commerce-mismatch',
-      'NON_RENEWING_PURCHASE',
-      '00000000-0000-0000-0000-000000000001',
-      'creator_launch_credit_499',
-      (SELECT value FROM commerce_test_state WHERE key = 'creator_intent'),
-      'commerce-mismatch-tx',
-      'commerce-mismatch-original'
-    ));
-  EXCEPTION WHEN raise_exception THEN
-    mismatch_rejected := SQLERRM ~* 'intent';
-  END;
-  IF NOT mismatch_rejected THEN
-    RAISE EXCEPTION 'purchase intent accepted a mismatched app user';
+  result := record_revenuecat_event(pg_temp.revenuecat_payload(
+    'commerce-mismatch',
+    'NON_RENEWING_PURCHASE',
+    '00000000-0000-0000-0000-000000000001',
+    'creator_launch_credit_499',
+    (SELECT value FROM commerce_test_state WHERE key = 'creator_intent'),
+    'commerce-mismatch-tx',
+    'commerce-mismatch-original'
+  ));
+  IF (result ->> 'needs_review')::BOOLEAN IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'mismatched app user did not go to review';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM purchase_credit_ledger
+     WHERE idempotency_key = 'commerce-mismatch-original'
+  ) THEN
+    RAISE EXCEPTION 'mismatched app user granted a credit';
   END IF;
 
-  BEGIN
-    PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(
-      'commerce-unknown',
-      'NON_RENEWING_PURCHASE',
-      '00000000-0000-0000-0000-000000000004',
-      'unknown_product',
-      (SELECT value FROM commerce_test_state WHERE key = 'creator_intent'),
-      'commerce-unknown-tx',
-      'commerce-unknown-original'
-    ));
-  EXCEPTION WHEN raise_exception THEN
-    unknown_product_rejected := SQLERRM ~* 'unknown product';
-  END;
-  IF NOT unknown_product_rejected THEN
-    RAISE EXCEPTION 'record_revenuecat_event accepted an unknown product';
+  result := record_revenuecat_event(pg_temp.revenuecat_payload(
+    'commerce-unknown',
+    'NON_RENEWING_PURCHASE',
+    '00000000-0000-0000-0000-000000000004',
+    'unknown_product',
+    (SELECT value FROM commerce_test_state WHERE key = 'creator_intent'),
+    'commerce-unknown-tx',
+    'commerce-unknown-original'
+  ));
+  IF (result ->> 'needs_review')::BOOLEAN IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'unknown product did not go to review';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM purchase_event_reviews
+     WHERE provider_event_id = 'commerce-unknown'
+       AND reason = 'unknown_product'
+  ) THEN
+    RAISE EXCEPTION 'unknown product left no review row';
   END IF;
 END;
 $$;
@@ -188,7 +202,6 @@ DO $$
 DECLARE
   first_result JSONB;
   retry_result JSONB;
-  reused_intent_rejected BOOLEAN := false;
   creator_intent UUID := (SELECT value FROM commerce_test_state WHERE key = 'creator_intent');
 BEGIN
   first_result := record_revenuecat_event(pg_temp.revenuecat_payload(
@@ -240,8 +253,12 @@ BEGIN
     RAISE EXCEPTION 'authoritative purchase analytics was not recorded';
   END IF;
 
+  -- Second-audit contract (0027): reusing a consumed intent for a
+  -- different transaction goes to the review queue and grants nothing.
+  DECLARE
+    reused_result JSONB;
   BEGIN
-    PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(
+    reused_result := record_revenuecat_event(pg_temp.revenuecat_payload(
       'commerce-reused-intent',
       'NON_RENEWING_PURCHASE',
       '00000000-0000-0000-0000-000000000004',
@@ -250,17 +267,15 @@ BEGIN
       'commerce-reused-intent-tx',
       'commerce-reused-intent-original'
     ));
-  EXCEPTION WHEN raise_exception THEN
-    reused_intent_rejected := SQLERRM ~* 'intent.*transaction';
+    IF (reused_result ->> 'needs_review')::BOOLEAN IS DISTINCT FROM true
+       OR EXISTS (
+         SELECT 1
+           FROM purchase_credit_ledger
+          WHERE idempotency_key = 'commerce-reused-intent-original'
+       ) THEN
+      RAISE EXCEPTION 'a consumed purchase intent was reused for another transaction';
+    END IF;
   END;
-  IF NOT reused_intent_rejected
-     OR EXISTS (
-       SELECT 1
-         FROM purchase_credit_ledger
-        WHERE idempotency_key = 'commerce-reused-intent-original'
-     ) THEN
-    RAISE EXCEPTION 'a consumed purchase intent was reused for another transaction';
-  END IF;
 END;
 $$;
 RESET ROLE;

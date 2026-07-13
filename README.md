@@ -23,9 +23,9 @@ The end-to-end flow is:
 
 ## Repository layout and current state
 
-pnpm monorepo: `apps/mobile` (Expo), `apps/web` (Next.js 15), `packages/{domain,contracts,config,ui-tokens,data,adapters}`, `supabase/` (migrations 0001–0022, all state transitions behind SECURITY DEFINER RPCs). Web surfaces: the acquisition landing `/`, public pitch `/p/[slug]` (+ `/api/og` campaign image), interest flow, consent flow `/consent/[token]`, inbox with campaign management and Campaign Pass funnel, intro rooms, the Creator Launch kit `/kit/[draftId]`, and the APIs `/api/transcribe`, `/api/revenuecat`, `/api/media/validate`, `/api/report`.
+pnpm monorepo: `apps/mobile` (Expo), `apps/web` (Next.js 15), `packages/{domain,contracts,config,ui-tokens,data,adapters}`, `supabase/` (migrations 0001–0023, all state transitions behind SECURITY DEFINER RPCs). Web surfaces: the acquisition landing `/`, public pitch `/p/[slug]` (+ `/api/og` campaign image), interest flow, consent flow `/consent/[token]`, inbox with campaign management and Campaign Pass funnel, intro rooms, the Creator Launch kit `/kit/[draftId]`, and the APIs `/api/transcribe`, `/api/revenuecat`, `/api/media/validate`, `/api/report`.
 
-Working status lives in [`docs/SESSION_HANDOFF.md`](docs/SESSION_HANDOFF.md); the 2026-07-13 full audit and its resolution are recorded in [`docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md`](docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md) and [`docs/TASKS.md`](docs/TASKS.md).
+**Current verdict (second audit, 2026-07-13): functional beta.** The product is not ready for an external beta, real payments, or Grand Prize submission. [`docs/FRIENDWORD_SECOND_AUDIT_HANDOFF_2026-07-13.md`](docs/FRIENDWORD_SECOND_AUDIT_HANDOFF_2026-07-13.md) is the acceptance source of truth; real payments and public interest submission are blocked server-side by the launch gates in migration 0023 until its Slice 10 release gate passes. The first audit and its resolution are recorded in [`docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md`](docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md); working status lives in [`docs/SESSION_HANDOFF.md`](docs/SESSION_HANDOFF.md) and [`docs/TASKS.md`](docs/TASKS.md).
 
 ## Local development
 
@@ -34,7 +34,8 @@ pnpm install
 pnpm lint && pnpm typecheck && pnpm test && pnpm format:check
 bash scripts/test-db.sh          # migrations + DB/RLS suites 01–17 on local PostgreSQL 17
 bash scripts/test-db-audit.sh    # audit regression suite (7 files)
-pnpm test:audit                  # DB audit runner + webhook contract suite
+pnpm test:audit                  # DB audit runner + webhook contract suite (first audit, green)
+pnpm test:audit2                 # second-audit regression suite (red by design until Slices 1–9 land)
 pnpm --filter @friendword/web test:e2e   # Playwright (reuses :3000, boots a dev server otherwise)
 node scripts/e2e-production.mjs  # full-funnel E2E against hosted Supabase (mutating — advisor-run)
 node scripts/export-growth-evidence.mjs  # anonymized aggregate metrics

@@ -54,6 +54,39 @@ const created = {
 };
 let failures = 0;
 
+// Launch gates (0023): this advisor-run E2E is internal QA, so it opens the
+// gates for the run window and restores the previous values afterwards.
+// Hosted defaults stay 'off' until the second-audit Slice 10 release gate.
+const LAUNCH_GATE_KEYS = ['real_payments_enabled', 'public_beta_enabled'];
+let previousGateValues = null;
+
+async function openLaunchGates() {
+  const { data, error } = await admin
+    .from('app_config')
+    .select('key, value')
+    .in('key', LAUNCH_GATE_KEYS);
+  if (error) throw new Error(`launch gate read: ${error.message}`);
+  previousGateValues = new Map((data ?? []).map((row) => [row.key, row.value]));
+  for (const key of LAUNCH_GATE_KEYS) {
+    const { error: updateError } = await admin
+      .from('app_config')
+      .update({ value: 'on' })
+      .eq('key', key);
+    if (updateError) throw new Error(`launch gate open ${key}: ${updateError.message}`);
+  }
+}
+
+async function restoreLaunchGates() {
+  if (previousGateValues === null) return;
+  for (const key of LAUNCH_GATE_KEYS) {
+    const previous = previousGateValues.get(key) ?? 'off';
+    await cleanup(
+      `launch gate restore ${key}=${previous}`,
+      admin.from('app_config').update({ value: previous }).eq('key', key),
+    );
+  }
+}
+
 const initialHeadline = 'E2E Blair makes ordinary plans memorable.';
 const revisedHeadline = 'E2E Blair makes every gathering feel welcoming.';
 const pitchStructure = {
@@ -119,6 +152,8 @@ async function makeUser(email, displayName) {
 }
 
 try {
+  await openLaunchGates();
+
   // 1. Users
   const introducer = await makeUser(introducerEmail, 'E2E Maya');
   const dater = await makeUser(daterEmail, 'E2E Blair');
@@ -916,6 +951,7 @@ try {
   failures += 1;
   console.error('FATAL', error.message);
 } finally {
+  await restoreLaunchGates();
   if (process.env.KEEP_CAMPAIGN === '1' && failures === 0) {
     console.log('KEEP_CAMPAIGN=1: leaving data in place for manual QA');
     console.log(JSON.stringify(created));

@@ -54,6 +54,9 @@ function errorCopy(error: unknown): string {
   if (detail.includes('not open for interest')) {
     return 'This campaign is not accepting interest right now.';
   }
+  if (detail.includes('private beta')) {
+    return 'Friendword is in a private beta. Expressing interest is not open yet — check back soon.';
+  }
   if (detail.includes('adult birth date')) {
     return 'Friendword is 18+. Add your real birth date to continue.';
   }

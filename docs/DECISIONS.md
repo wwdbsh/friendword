@@ -74,3 +74,24 @@
 - **이유**: 개발 환경에 Docker가 없고 Homebrew에 `pgtap` formula가 없습니다.
 - **검토 대안**: Supabase local Docker stack, pgTAP 기반 테스트.
 - **영향**: 현재 DB 검증은 로컬 PostgreSQL 17에서 실행합니다. Supabase local stack을 도입할 때 pgTAP과 실행 하니스를 재검토합니다.
+
+## 2026-07-13: 2차 전수 감사 채택과 실행 순서 고정 (Slice 0→10)
+
+- **결정**: `docs/FRIENDWORD_SECOND_AUDIT_HANDOFF_2026-07-13.md`(2차 전수 감사, `941ef55` 기준)를 acceptance source of truth로 채택하고 실행 순서를 감사 §7의 Slice 0→10으로 고정합니다. 제품 상태 판정은 "기능성 베타 — 외부 베타·실결제·Grand Prize 제출 준비 미완"입니다. 완료 판정이 기존 문서와 충돌하면 2차 감사가 우선합니다.
+- **이유**: 2차 감사가 1차 대응에서 해소된 것(웹 bootstrap, consent 불변성 등)과 여전히 출시를 막는 네 축(Trust/Safety, Commerce, Core product, Operations/Growth)을 증거 라인 단위로 판별했고, Advisor가 해당 코드를 직접 재확인해 전부 재현됨을 검증했습니다.
+- **검토 대안**: 1차 감사 잔여 목록 기준 진행(2차가 코드 게이트로 재분류한 결함을 사용자 키 게이트로 오분류하게 됨).
+- **영향**: `docs/TASKS.md`에 Slice 0~10 원장 추가. 감사 §11 완료 주장 금지 목록이 README·Devpost·앱 카피·핸드오프에 적용됩니다.
+
+## 2026-07-13: Launch gate 스위치 도입 (real payments·public beta 서버 차단)
+
+- **결정**: migration 0023이 `app_config`에 `real_payments_enabled`/`public_beta_enabled`(기본 `off`, service role 전용)를 추가하고 BEFORE INSERT 트리거로 강제합니다: `purchase_intents`(구매 시작 자체 차단), `purchase_events`(PRODUCTION environment 이벤트 차단 — SANDBOX는 허용), `interests`(공개 베타 전 관심 표현 차단). RPC 수정이 아닌 트리거인 이유는 후속 슬라이스의 RPC 재정의에도 게이트가 살아남고 direct insert 경로까지 잡기 위함입니다.
+- **이유**: 2차 감사 §7 Slice 0 "P0가 해결되기 전 real payments/public beta를 feature flag로 차단한다".
+- **검토 대안**: 웹훅 route에서 environment 차단(클라이언트 우회 가능, DB가 authoritative해야 함), `issue_purchase_intent`/`submit_interest` RPC 수정(후속 재정의 시 게이트 소실 위험).
+- **영향**: 로컬 테스트 DB는 `seed.sql`에서 두 게이트를 켭니다(hosted는 seed 미적용이라 기본 off 유지). `scripts/e2e-production.mjs`는 실행 창 동안 게이트를 열고 종료 시 원복합니다. 게이트 해제는 Slice 10 release gate 통과 후에만 합니다(`docs/OPS.md` 절차).
+
+## 2026-07-13: 2차 감사 회귀 스위트(audit2)는 기대 동작 인코딩 (초기 FAIL 정상)
+
+- **결정**: `supabase/tests/audit2/`(DB, `b*.sql`)와 `apps/web/tests-audit2/`(웹훅 route 계약)에 2차 감사 P0/CP/H acceptance를 수정 완료 후 기대 동작으로 작성합니다. 러너는 `scripts/test-db-audit2.sh`/`pnpm test:audit2`이며, 전부 그린이 되는 Slice 10에서 CI에 편입합니다. `b09_launch_gates.sql`만 Slice 0부터 그린입니다.
+- **이유**: 1차와 동일한 패턴 — 합격 기준을 실행 가능한 형태로 먼저 고정하고 슬라이스 완료 정의를 "해당 테스트 그린 전환"으로 관찰 가능하게 만듭니다.
+- **검토 대안**: 슬라이스별 테스트 후행 작성(감사 §7 Slice 0 지시 위반).
+- **영향**: b06(identity evidence schema), b07(provider usage RPC), b08(ai consent), b10(만료 상태 기계)은 Advisor가 확정한 미래 계약(테이블·RPC 시그니처)을 선인코딩하며, 해당 슬라이스 설계가 계약을 바꾸면 테스트와 이 기록을 함께 갱신합니다.

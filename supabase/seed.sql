@@ -1,6 +1,13 @@
 -- Local development only: these rows directly seed Supabase Auth with fixed identities.
 BEGIN;
 
+-- Local test databases opt into the launch gates (0023) so the suites can
+-- exercise interest and purchase flows. Hosted never runs seed.sql: there
+-- the gates stay 'off' until the second-audit Slice 10 release gate.
+UPDATE app_config
+   SET value = 'on'
+ WHERE key IN ('real_payments_enabled', 'public_beta_enabled');
+
 INSERT INTO auth.users (id, email)
 VALUES
   ('00000000-0000-0000-0000-000000000001', 'introducer@example.test'),

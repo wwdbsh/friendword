@@ -23,7 +23,7 @@
 | `a03_consent_immutability.sql`       | PASS |
 | `a04_commerce_ledger.sql`            | PASS |
 | `a08_verified_interest_evidence.sql` | PASS |
-| `a09_publish_photo_guard.sql`        | FAIL |
+| `a09_publish_photo_guard.sql`        | PASS |
 | `a10_account_status_enforcement.sql` | PASS |
 
 후속 slice는 실제 실행 결과가 바뀔 때 이 표도 함께 갱신해야 합니다.

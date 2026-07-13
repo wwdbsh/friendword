@@ -70,3 +70,28 @@ request의 `note`에 기록합니다. 실패한 요청은 `failed`와 제한된 
 - 모든 조치는 이 문서의 쿼리로 수행하고, 애매한 케이스는 결정 기록에 남긴다
 - mock 처리 금지 원칙(CLAUDE.md 9)에 따라 이 런북이 최소 실물 운영 도구다 —
   전용 운영자 UI는 출시 후 P1
+
+## Launch gates (0023 — 2차 감사 Slice 0)
+
+`app_config`의 두 스위치가 실결제와 외부 공개 베타를 서버에서 차단합니다. 기본값은 둘 다 `off`이며 **Slice 10 release gate(2차 감사 §7) 통과 전에는 hosted에서 켜지 않습니다.**
+
+| key                     | off일 때 차단되는 것                                                                      |
+| ----------------------- | ----------------------------------------------------------------------------------------- |
+| `real_payments_enabled` | `purchase_intents` INSERT(구매 시작), PRODUCTION environment `purchase_events`(효익 지급) |
+| `public_beta_enabled`   | `interests` INSERT(외부 사용자의 관심 표현 제출)                                          |
+
+- SANDBOX environment 결제 이벤트는 `real_payments_enabled=off`여도 처리됩니다(내부 sandbox 검증용).
+- 로컬 테스트 DB는 `supabase/seed.sql`이 두 게이트를 켭니다. hosted에는 seed가 적용되지 않으므로 기본 off가 유지됩니다.
+- `scripts/e2e-production.mjs`는 실행 시작 시 게이트를 열고 종료 시(finally) 이전 값으로 원복합니다. 중단으로 원복이 누락됐는지 확인하려면:
+
+```sql
+SELECT key, value, updated_at FROM app_config
+ WHERE key IN ('real_payments_enabled', 'public_beta_enabled');
+```
+
+- 게이트 상태 변경은 service role SQL로만 하며, 변경 시 이 문서와 `docs/DECISIONS.md`에 날짜·이유를 남깁니다:
+
+```sql
+UPDATE app_config SET value = 'on'  -- 또는 'off'
+ WHERE key = 'real_payments_enabled';
+```

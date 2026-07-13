@@ -8,6 +8,17 @@
 
 상태는 Worker의 자체 보고와 Advisor 승인을 구분합니다. Worker 완료는 Advisor가 diff, 동일 테스트와 matching-surface manual QA를 재실행하기 전까지 통합 승인이 아닙니다. 범위가 바뀌면 작업 전에 이 표를 갱신합니다.
 
+## 2026-07-13 2차 감사 대응 (source of truth: docs/FRIENDWORD_SECOND_AUDIT_HANDOFF_2026-07-13.md §7, 순서 Slice 0→10 고정)
+
+운영 메모: Advisor(직접 구현 병행) + `friendword-codex-1` 2인 체제 유지. 제품 상태 판정은 "기능성 베타 — 실결제·외부 공개 차단"이며 launch gate(0023)가 서버에서 강제한다. audit2 스위트는 초기 FAIL이 정상(기대 동작 인코딩), Slice 10에서 CI 편입.
+
+| Session              | 작업                                                                                              | Acceptance criteria                                                         | Status  | Updated    |
+| -------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------- | ---------- |
+| Advisor              | Slice 0: launch gates(0023)·seed 게이트·e2e 토글·audit2 러너·b09·문서 truth reset                 | b09 그린 + 기존 DB 스위트/audit 7/7 그린 유지 + 문서 5종 동기화             | 진행 중 | 2026-07-13 |
+| `friendword-codex-1` | Slice 0: audit2 실패 회귀 스위트 b01~b08·b10 + 웹훅 실payload 테스트 (`.briefs/24`)               | 각 파일 단독 실행 가능, FAIL 사유가 감사 항목과 일치, lint/format 통과      | 진행 중 | 2026-07-13 |
+| 예정                 | Slice 1~9: 감사 §7 순서대로 (신고→media→RevenueCat→유료가치→identity→비용→Dater→데모·영어→growth) | 각 슬라이스의 audit2 테스트 그린 전환 + §12 승인 형식 보고                  | 예정    | 2026-07-13 |
+| 예정                 | Slice 10: release gate                                                                            | 감사 §7 Slice 10 체크리스트 전부 + audit2 CI 편입 + launch gate 해제 재판단 | 예정    | 2026-07-13 |
+
 ## 2026-07-13 감사 대응 (source of truth: docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md §7, 순서 A→J 고정)
 
 운영 메모: 오후부터 사용자 지시로 2인 체제(Advisor 직접 구현 + codex-1). codex-2는 A·C-DB·D-DB·E-DB·G-DB 승인 후 대기, codex-3는 A-웹훅·E-Web·C-Mobile·D-Mobile 승인 후 대기.

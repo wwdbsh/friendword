@@ -123,7 +123,10 @@ export default function CampaignsScreen() {
                 onPress={() =>
                   router.push({
                     pathname: '/paywall',
-                    params: { pitchDraftId: draft.server?.draftId ?? '' },
+                    params: {
+                      intent: 'creator_launch',
+                      draftId: draft.server?.draftId ?? '',
+                    },
                   })
                 }
                 secondary

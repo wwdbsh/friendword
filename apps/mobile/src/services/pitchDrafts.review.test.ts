@@ -1,4 +1,4 @@
-import { describe, expect, it } from '../../../../packages/data/node_modules/vitest';
+import { describe, expect, it } from 'vitest';
 import type { PitchDraftRow } from '@friendword/data';
 
 import { hasFinalizedConsent, MockPitchDraftService, type PitchDraftStorage } from './pitchDrafts';

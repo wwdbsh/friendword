@@ -11,6 +11,7 @@ import type {
   RelationshipType as ServerRelationshipType,
 } from '@friendword/contracts';
 
+import { requestMediaValidation } from './mediaValidation';
 import {
   MockPitchDraftService,
   PitchDraftSubmissionError,
@@ -217,6 +218,12 @@ export class HybridPitchDraftService implements PitchDraftService {
     });
     if (!response.ok) {
       throw new PitchDraftSubmissionError(`Upload of ${fileName} failed (${response.status}).`);
+    }
+    const verdict = await requestMediaValidation(`${draftId}/${fileName}`);
+    if (verdict === 'rejected') {
+      throw new PitchDraftSubmissionError(
+        `${fileName} is not a supported photo or audio file. Pick a different one.`,
+      );
     }
   }
 }

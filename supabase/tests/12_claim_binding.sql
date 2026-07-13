@@ -22,6 +22,17 @@ VALUES
   ('c1200000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000004', 'draft', 'Verification pitch', 'Publishing is provider-gated when enforcement is on.'),
   ('c1200000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000004', 'draft', 'Suspended claim pitch', 'Suspended accounts cannot claim.');
 
+-- Publishing requires at least one reviewed photo (0017); give every
+-- finalizable fixture draft a photo so revisions snapshot it.
+INSERT INTO pitch_assets (id, pitch_draft_id, uploaded_by_user_id, asset_type, storage_path)
+SELECT
+  ('c1200000-0000-0000-0000-00000000030' || draft_ordinal)::UUID,
+  ('c1200000-0000-0000-0000-00000000000' || draft_ordinal)::UUID,
+  '00000000-0000-0000-0000-000000000004',
+  'photo',
+  'c1200000-0000-0000-0000-00000000000' || draft_ordinal || '/fixture-photo.jpg'
+FROM generate_series(1, 5) AS draft_ordinal;
+
 CREATE TEMP TABLE slice_c_tokens (kind TEXT PRIMARY KEY, raw_token TEXT NOT NULL) ON COMMIT DROP;
 GRANT ALL ON slice_c_tokens TO authenticated;
 

@@ -609,6 +609,11 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                 <p className={styles.muted}>
                   Choose which photos to include. Nothing is removed until you approve.
                 </p>
+                {includedAssetIds.length === 0 && (
+                  <p className={styles.muted} role="status">
+                    Your page needs at least one photo — keep one to publish.
+                  </p>
+                )}
               </div>
             )}
 
@@ -652,7 +657,11 @@ export function ConsentFlow({ token }: { readonly token: string }) {
             <button
               className={styles.primary}
               type="button"
-              disabled={responding || (state.review.hardClaims.length > 0 && !hardClaimsConfirmed)}
+              disabled={
+                responding ||
+                includedAssetIds.length === 0 ||
+                (state.review.hardClaims.length > 0 && !hardClaimsConfirmed)
+              }
               onClick={handleApprove}
             >
               Approve &amp; publish my page

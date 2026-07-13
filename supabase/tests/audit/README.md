@@ -12,7 +12,7 @@
 | `a09_publish_photo_guard.sql`        | P0-9      | 포함 사진이 없는 실제 pitch publish 거부                                   |
 | `a10_account_status_enforcement.sql` | §10       | suspended 계정의 draft·interest·chat mutation 거부                         |
 
-## 2026-07-13 최초 실행 현황
+## 실행 현황 (최신: 2026-07-13, 0017 이후 7/7 전체 PASS)
 
 명령: `bash scripts/test-db-audit.sh`
 

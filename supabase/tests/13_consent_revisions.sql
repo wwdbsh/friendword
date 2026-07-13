@@ -412,6 +412,16 @@ VALUES
     'Suspended finalize headline',
     'Suspended finalize body'
   );
+-- The identity-gated draft carries a reviewed photo so the 0017 photo
+-- floor is satisfied and the identity error stays observable.
+INSERT INTO pitch_assets (id, pitch_draft_id, uploaded_by_user_id, asset_type, storage_path)
+VALUES (
+  'd1300000-0000-0000-0000-000000000031',
+  'd1300000-0000-0000-0000-000000000003',
+  '00000000-0000-0000-0000-000000000004',
+  'photo',
+  'd1300000-0000-0000-0000-000000000003/identity-photo.jpg'
+);
 INSERT INTO consent_revisions (
   id,
   pitch_draft_id,
@@ -430,7 +440,7 @@ VALUES
     'Identity-gated headline',
     'Identity-gated body',
     '{}'::JSONB,
-    ARRAY[]::UUID[],
+    ARRAY['d1300000-0000-0000-0000-000000000031']::UUID[],
     encode(digest('identity-gated', 'sha256'), 'hex')
   ),
   (
@@ -478,7 +488,7 @@ BEGIN
       'd1300000-0000-0000-0000-000000000003',
       14,
       'd1300000-0000-0000-0000-000000000021',
-      ARRAY[]::UUID[],
+      ARRAY['d1300000-0000-0000-0000-000000000031']::UUID[],
       true
     );
     RAISE EXCEPTION 'identity enforcement gate was lost';

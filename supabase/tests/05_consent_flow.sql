@@ -10,6 +10,16 @@ RESET ROLE;
 CREATE TEMP TABLE consent_journey (consent_token TEXT) ON COMMIT DROP;
 GRANT ALL ON consent_journey TO anon, authenticated;
 SET LOCAL ROLE authenticated;
+-- Publishing requires at least one reviewed photo (0017), so the fixture
+-- draft carries one before finalize snapshots the revision.
+INSERT INTO pitch_assets (id, pitch_draft_id, uploaded_by_user_id, asset_type, storage_path)
+VALUES (
+  '30000000-0000-0000-0000-000000000501',
+  '10000000-0000-0000-0000-000000000002',
+  '00000000-0000-0000-0000-000000000004',
+  'photo',
+  '10000000-0000-0000-0000-000000000002/journey-photo.jpg'
+);
 INSERT INTO consent_journey
 SELECT consent_token FROM submit_pitch_for_consent('10000000-0000-0000-0000-000000000002');
 

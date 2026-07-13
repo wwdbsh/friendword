@@ -554,6 +554,28 @@ export type Database = {
           readonly deletion_status: 'queued' | 'processing' | 'done' | 'failed';
         }[];
       };
+      get_campaign_pass_state: {
+        Args: { readonly target_campaign_id: string };
+        Returns: readonly {
+          readonly pass_active: boolean;
+          readonly pass_expires_at: string | null;
+        }[];
+      };
+      get_campaign_analytics: {
+        Args: { readonly target_campaign_id: string };
+        Returns: readonly {
+          readonly event_name: string;
+          readonly source: string;
+          readonly total: number;
+        }[];
+      };
+      unlock_share_kit: {
+        Args: { readonly target_draft_id: string };
+        Returns: readonly {
+          readonly share_kit_id: string;
+          readonly already_unlocked: boolean;
+        }[];
+      };
       reassign_pitch_storage_owner: {
         Args: {
           readonly target_draft_id: string;

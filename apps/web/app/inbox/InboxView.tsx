@@ -4,11 +4,14 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
+  BenefitsRepo,
   InterestRepo,
   SafetyRepo,
   trackEvent,
   type BrowserSupabaseClient,
+  type CampaignFunnelRow,
   type CampaignInterest,
+  type CampaignPassState,
 } from '@friendword/data';
 
 import { EmailSignIn } from '@/components/EmailSignIn';
@@ -26,6 +29,14 @@ type OwnedCampaign = {
   readonly id: string;
   readonly slug: string | null;
   readonly status: string;
+  readonly pass: CampaignPassState;
+};
+
+const FUNNEL_LABELS: Record<string, string> = {
+  pitch_viewed_unique: 'Unique views',
+  interest_started: 'Interest started',
+  interest_submitted: 'Interest submitted',
+  campaign_shared: 'Shares',
 };
 
 type InboxState =
@@ -65,6 +76,8 @@ export function InboxView() {
   const [decisionNote, setDecisionNote] = useState<string | null>(null);
   const [openedRoomId, setOpenedRoomId] = useState<string | null>(null);
   const [reportingInterestId, setReportingInterestId] = useState<string | null>(null);
+  const [funnels, setFunnels] = useState<Record<string, readonly CampaignFunnelRow[]>>({});
+  const [loadingFunnel, setLoadingFunnel] = useState<string | null>(null);
   const [reportReason, setReportReason] = useState<string>(REPORT_REASONS[0].value);
   const [submittingReport, setSubmittingReport] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
@@ -75,8 +88,17 @@ export function InboxView() {
       return;
     }
     const repo = new InterestRepo(client);
+    const benefits = new BenefitsRepo(client);
     try {
-      const campaigns = await repo.listMyOwnedCampaigns();
+      const ownedCampaigns = await repo.listMyOwnedCampaigns();
+      const campaigns: OwnedCampaign[] = await Promise.all(
+        ownedCampaigns.map(async (campaign) => ({
+          ...campaign,
+          pass: await benefits
+            .getCampaignPassState(campaign.id)
+            .catch((): CampaignPassState => ({ active: false, expiresAt: null })),
+        })),
+      );
       const interests: InboxInterest[] = [];
       for (const campaign of campaigns) {
         const rows = await repo.listCampaignInterests(campaign.id).catch(() => []);
@@ -163,6 +185,21 @@ export function InboxView() {
       setDecisionNote('That decision did not go through. Refresh and try again.');
     } finally {
       setDeciding(null);
+    }
+  }
+
+  async function loadFunnel(campaignId: string) {
+    if (client === null) {
+      return;
+    }
+    setLoadingFunnel(campaignId);
+    try {
+      const rows = await new BenefitsRepo(client).getCampaignAnalytics(campaignId);
+      setFunnels((current) => ({ ...current, [campaignId]: rows }));
+    } catch {
+      setDecisionNote('The funnel could not load. Refresh and try again.');
+    } finally {
+      setLoadingFunnel(null);
     }
   }
 
@@ -341,6 +378,55 @@ export function InboxView() {
                     </button>
                   )}
                 </div>
+
+                <h3 className={styles.subTitle}>Campaign Pass</h3>
+                {campaign.pass.active ? (
+                  <>
+                    <p className={styles.muted}>
+                      Active
+                      {campaign.pass.expiresAt !== null
+                        ? ` until ${new Date(campaign.pass.expiresAt).toLocaleDateString()}`
+                        : ''}
+                      . Your page runs 30 days and the funnel below is unlocked.
+                    </p>
+                    {(() => {
+                      const funnel = funnels[campaign.id];
+                      if (funnel === undefined) {
+                        return (
+                          <button
+                            className={styles.secondary}
+                            type="button"
+                            disabled={loadingFunnel === campaign.id}
+                            onClick={() => {
+                              void loadFunnel(campaign.id);
+                            }}
+                          >
+                            {loadingFunnel === campaign.id ? 'Loading…' : 'View my funnel'}
+                          </button>
+                        );
+                      }
+                      if (funnel.length === 0) {
+                        return <p className={styles.muted}>No activity recorded yet.</p>;
+                      }
+                      return (
+                        <ul className={styles.claimList}>
+                          {funnel.map((row) => (
+                            <li key={`${row.eventName}-${row.source}`}>
+                              {FUNNEL_LABELS[row.eventName] ?? row.eventName} · {row.source}:{' '}
+                              {row.total}
+                            </li>
+                          ))}
+                        </ul>
+                      );
+                    })()}
+                  </>
+                ) : (
+                  <p className={styles.muted}>
+                    Not active. The Pass extends your page to 30 days and unlocks the
+                    view-and-interest funnel — purchase it in the Friendword app. Accepting
+                    interest, chat, and safety tools are always free.
+                  </p>
+                )}
               </section>
             ))}
 

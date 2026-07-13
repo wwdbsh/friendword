@@ -243,3 +243,10 @@
 .quietAction:hover {
   color: var(--color-ink);
 }
+
+.claimList {
+  margin: var(--space-xs) 0 var(--space-sm);
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 0.35rem;
+}

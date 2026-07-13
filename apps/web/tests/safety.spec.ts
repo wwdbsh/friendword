@@ -129,3 +129,39 @@ test('keeps the account when the deletion dialog is dismissed', async ({ page })
   await expect(page.getByRole('heading', { name: 'Your account' })).toBeVisible();
   expect(deletionCalls).toBe(0);
 });
+
+test('unlocks the campaign funnel only with an active pass', async ({ page }) => {
+  await seedSignedInSession(page);
+  await mockInbox(page);
+  await page.route('**/rest/v1/rpc/get_campaign_pass_state*', (route) =>
+    route.fulfill({ json: [{ pass_active: true, pass_expires_at: '2026-08-12T00:00:00Z' }] }),
+  );
+  await page.route('**/rest/v1/rpc/get_campaign_analytics*', (route) =>
+    route.fulfill({
+      json: [
+        { event_name: 'pitch_viewed_unique', source: 'instagram', total: 12 },
+        { event_name: 'interest_submitted', source: 'direct', total: 3 },
+      ],
+    }),
+  );
+
+  await page.goto('/inbox');
+  await expect(page.getByRole('heading', { name: 'Campaign Pass' })).toBeVisible();
+  await expect(page.getByText('Active until', { exact: false })).toBeVisible();
+
+  await page.getByRole('button', { name: 'View my funnel' }).click();
+  await expect(page.getByText('Unique views · instagram: 12')).toBeVisible();
+  await expect(page.getByText('Interest submitted · direct: 3')).toBeVisible();
+});
+
+test('shows the locked pass state without an entitlement', async ({ page }) => {
+  await seedSignedInSession(page);
+  await mockInbox(page);
+  await page.route('**/rest/v1/rpc/get_campaign_pass_state*', (route) =>
+    route.fulfill({ json: [{ pass_active: false, pass_expires_at: null }] }),
+  );
+
+  await page.goto('/inbox');
+  await expect(page.getByText('Not active.', { exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'View my funnel' })).toHaveCount(0);
+});

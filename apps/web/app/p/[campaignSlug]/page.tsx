@@ -165,10 +165,14 @@ export default async function PitchPage({ params }: PitchPageProps) {
         <div>
           <h2 id="trust-heading">{pitch.daterName} stays in control.</h2>
           {/* TODO(identity-provider): Restore identity-verification copy after verification ships. */}
+          {/* Copy honesty (second audit §11): full text/photo-replacement/audience
+              controls are not shipped yet, so this only claims the review steps
+              that actually gate publication today. */}
           <p>
-            {pitch.daterName} approved every photo, word, and audience choice before this page went
-            live. Interest requires signing in and completing a dating profile with 2 photos, a bio,
-            and dating intent. Contact details stay private.
+            {pitch.daterName} reviewed this pitch — the recording, the photos shown here, and its
+            claims — and approved it before this page went live. Interest requires signing in and
+            completing a dating profile with 2 photos, a bio, and dating intent. Contact details
+            stay private.
           </p>
         </div>
       </section>

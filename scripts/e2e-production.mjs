@@ -999,10 +999,8 @@ try {
       'interests',
       admin.from('interests').delete().eq('campaign_id', created.campaignId),
     );
-    await cleanup(
-      'campaign memberships',
-      admin.from('campaign_memberships').delete().eq('campaign_id', created.campaignId),
-    );
+    // Membership rows are removed by the campaigns FK cascade; deleting them
+    // first trips the owner-must-match-DATER_OWNER consistency trigger.
     await cleanup('campaign', admin.from('campaigns').delete().eq('id', created.campaignId));
   }
   if (created.draftId) {

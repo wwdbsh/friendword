@@ -524,6 +524,38 @@ BEGIN
 END;
 $$;
 
+-- Erasure path (0018): direct deletes stay rejected even for the service
+-- role, while erase_pitch_draft removes the draft and its snapshots.
+RESET ROLE;
+SET LOCAL ROLE service_role;
+DO $$
+BEGIN
+  BEGIN
+    DELETE FROM consent_revisions WHERE id = 'd1300000-0000-0000-0000-000000000022';
+    RAISE EXCEPTION 'service role deleted a revision without the erasure flag';
+  EXCEPTION
+    WHEN raise_exception THEN
+      IF SQLERRM = 'service role deleted a revision without the erasure flag' THEN RAISE; END IF;
+      IF SQLERRM <> 'consent revisions are immutable' THEN RAISE; END IF;
+    WHEN insufficient_privilege THEN
+      -- Local harness service_role has no table grants; hosted hits the trigger.
+      NULL;
+  END;
+
+  PERFORM erase_pitch_draft('d1300000-0000-0000-0000-000000000004');
+  IF EXISTS (SELECT 1 FROM pitch_drafts WHERE id = 'd1300000-0000-0000-0000-000000000004') THEN
+    RAISE EXCEPTION 'erase_pitch_draft left the draft behind';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM consent_revisions
+     WHERE pitch_draft_id = 'd1300000-0000-0000-0000-000000000004'
+  ) THEN
+    RAISE EXCEPTION 'erase_pitch_draft left revisions behind';
+  END IF;
+END;
+$$;
+RESET ROLE;
+
 ROLLBACK;
 
 SELECT '13_consent_revisions.sql passed' AS result;

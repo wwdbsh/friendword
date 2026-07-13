@@ -1,6 +1,6 @@
 // Full-funnel production E2E against hosted Supabase + the local web server.
-// Walks Flow A (submit with media), Flow B (consent, photo exclusion,
-// visibility window, publish), the public page, Flow C (verified interest,
+// Walks Flow A (submit with media), Flow B (revision consent, photo selection,
+// fixed visibility window, publish), commerce, the public page, Flow C (interest,
 // inbox, accept), intro rooms (chat/report/block/leave), campaign lifecycle,
 // and analytics ingestion — then cleans up everything it created.
 // Run: node scripts/e2e-production.mjs (repo root; needs .env + dev server).
@@ -42,9 +42,28 @@ const introducerEmail = `e2e-introducer-${stamp}@friendword.test`;
 const daterEmail = `e2e-dater-${stamp}@friendword.test`;
 const strangerEmail = `e2e-stranger-${stamp}@friendword.test`;
 const password = `E2e-${randomBytes(24).toString('base64url')}!`;
+const analyticsSource = `e2e-${stamp}`;
 
-const created = { users: [], draftId: null, campaignId: null, voicePath: null };
+const created = {
+  users: [],
+  draftId: null,
+  campaignId: null,
+  voicePath: null,
+  purchaseEventIds: [],
+  purchaseOriginalTransactionId: null,
+};
 let failures = 0;
+
+const initialHeadline = 'E2E Blair makes ordinary plans memorable.';
+const revisedHeadline = 'E2E Blair makes every gathering feel welcoming.';
+const pitchStructure = {
+  hook: initialHeadline,
+  relationship_context: 'Maya and Blair have been friends for years.',
+  three_specific_qualities: ['thoughtful', 'curious', 'reliable'],
+  evidence_or_anecdote: 'Blair once organized a last-minute dinner for a friend in need.',
+  good_match_for: 'Someone kind who enjoys building a steady relationship.',
+  hard_claims_requiring_confirmation: ['Blair owns a home.'],
+};
 
 function check(label, ok, extra = '') {
   const mark = ok ? 'PASS' : 'FAIL';
@@ -133,36 +152,54 @@ try {
   }
 
   async function registerAsset(assetType, fileName, sortOrder) {
-    const { error } = await introducer.client.from('pitch_assets').insert({
-      pitch_draft_id: draft.id,
-      uploaded_by_user_id: introducer.id,
-      asset_type: assetType,
-      storage_path: `pitch-media/${draft.id}/${fileName}`,
-      sort_order: sortOrder,
-    });
+    const { data, error } = await introducer.client
+      .from('pitch_assets')
+      .insert({
+        pitch_draft_id: draft.id,
+        uploaded_by_user_id: introducer.id,
+        asset_type: assetType,
+        storage_path: `pitch-media/${draft.id}/${fileName}`,
+        sort_order: sortOrder,
+      })
+      .select('id, asset_type, storage_path')
+      .single();
     if (error) throw new Error(`registerAsset ${fileName}: ${error.message}`);
+    return data;
   }
 
   const voiceObject = `${draft.id}/voice.m4a`;
   created.voicePath = voiceObject;
   created.photoPaths = [`${draft.id}/photo-1.jpg`, `${draft.id}/photo-2.jpg`];
   await uploadObject(voiceObject, 'audio/mp4', 'e2e-fake-voice-bytes');
-  await registerAsset('voice', 'voice.m4a', 0);
+  const voiceAsset = await registerAsset('voice', 'voice.m4a', 0);
   await uploadObject(created.photoPaths[0], 'image/jpeg', 'e2e-fake-photo-1');
-  await registerAsset('photo', 'photo-1.jpg', 0);
+  const photo1Asset = await registerAsset('photo', 'photo-1.jpg', 0);
   await uploadObject(created.photoPaths[1], 'image/jpeg', 'e2e-fake-photo-2');
-  await registerAsset('photo', 'photo-2.jpg', 1);
+  const photo2Asset = await registerAsset('photo', 'photo-2.jpg', 1);
+
+  const { error: contentError } = await introducer.client
+    .from('pitch_drafts')
+    .update({
+      headline: initialHeadline,
+      body: 'Blair brings warmth, follow-through, and genuine curiosity to every friendship.',
+      structure: pitchStructure,
+    })
+    .eq('id', draft.id);
+  if (contentError) throw new Error(`draft content update: ${contentError.message}`);
 
   const { data: submission, error: submitError } = await introducer.client.rpc(
     'submit_pitch_for_consent',
     {
       draft_id: draft.id,
+      invite_channel: 'email',
+      invite_contact: daterEmail.toUpperCase(),
+      invite_friend_name: 'E2E Blair',
     },
   );
   if (submitError) throw new Error(`submit: ${submitError.message}`);
   const rawToken = submission[0].consent_token;
   check(
-    '2. introducer submitted draft + voice + 2 photos + assets, got consent token',
+    '2. introducer finalized complete draft + media with an email-bound invite',
     typeof rawToken === 'string' && rawToken.length >= 24,
   );
 
@@ -187,6 +224,15 @@ try {
   });
   check('4a. introducer cannot claim own pitch', Boolean(selfClaimError), selfClaimError?.message);
 
+  const { error: strangerClaimError } = await stranger.client.rpc('claim_consent_request', {
+    raw_token: rawToken,
+  });
+  check(
+    '4b. email-bound invite rejects a different contact before claim',
+    Boolean(strangerClaimError) && strangerClaimError.message.includes('different contact'),
+    strangerClaimError?.message,
+  );
+
   // 5. Dater claims (web claim state)
   const { data: claimRows, error: claimError } = await dater.client.rpc('claim_consent_request', {
     raw_token: rawToken,
@@ -197,14 +243,36 @@ try {
     claimError?.message,
   );
 
-  // 5b. Stranger cannot claim after link
-  const { error: strangerClaimError } = await stranger.client.rpc('claim_consent_request', {
-    raw_token: rawToken,
-  });
+  // 5b. The claimed participant reads the exact immutable revision.
+  const { data: initialRequest, error: initialRequestError } = await dater.client
+    .from('consent_requests')
+    .select('revision_id, status')
+    .eq('pitch_draft_id', draft.id)
+    .single();
+  if (initialRequestError || !initialRequest?.revision_id) {
+    throw new Error(
+      `initial consent request: ${initialRequestError?.message ?? 'missing revision'}`,
+    );
+  }
+  const { data: initialRevision, error: initialRevisionError } = await dater.client
+    .from('consent_revisions')
+    .select('id, revision_number, headline, asset_ids')
+    .eq('id', initialRequest.revision_id)
+    .single();
+  if (initialRevisionError || !initialRevision) {
+    throw new Error(`initial revision: ${initialRevisionError?.message ?? 'missing row'}`);
+  }
+  const expectedAssetIds = [voiceAsset.id, photo1Asset.id, photo2Asset.id].sort().join(',');
+  const snapshottedAssetIds = [...initialRevision.asset_ids].sort().join(',');
   check(
-    '5b. different account is rejected after claim',
-    Boolean(strangerClaimError) && strangerClaimError.message.includes('linked to another account'),
-    strangerClaimError?.message,
+    '5b. claimed dater reads matching revision headline and asset snapshot',
+    !initialRequestError &&
+      !initialRevisionError &&
+      initialRequest.status === 'claimed' &&
+      initialRevision.id === initialRequest.revision_id &&
+      initialRevision.headline === initialHeadline &&
+      expectedAssetIds === snapshottedAssetIds,
+    initialRequestError?.message ?? initialRevisionError?.message,
   );
 
   // 6. Dater review reads (draft row + voice signed URL)
@@ -263,22 +331,75 @@ try {
     assetsError?.message ?? `assets=${reviewAssets?.length}`,
   );
 
-  // 6e. The dater excludes the second suggested photo before approving.
-  const photo2 = (reviewAssets ?? []).find((a) => a.storage_path.endsWith('photo-2.jpg'));
-  const { error: excludeError } = await dater.client.rpc('exclude_pitch_asset', {
-    target_asset_id: photo2?.id,
+  // 6e. Request changes, revise the draft, and finalize a new immutable revision.
+  const { error: requestChangesError } = await dater.client.rpc('respond_consent_request', {
+    draft_id: draft.id,
+    action: 'request_changes',
+    note: '사진 바꿔줘',
   });
-  const { error: introducerExcludeError } = await introducer.client.rpc('exclude_pitch_asset', {
-    target_asset_id: (reviewAssets ?? []).find((a) => a.storage_path.endsWith('photo-1.jpg'))?.id,
-  });
+  const { data: changesRequestedDraft, error: changesRequestedError } = await introducer.client
+    .from('pitch_drafts')
+    .select('status')
+    .eq('id', draft.id)
+    .single();
   check(
-    '6e. subject excludes a photo; introducer cannot',
-    !excludeError && Boolean(introducerExcludeError),
-    excludeError?.message,
+    '6e. dater requests changes and the draft becomes editable again',
+    !requestChangesError &&
+      !changesRequestedError &&
+      changesRequestedDraft.status === 'changes_requested',
+    requestChangesError?.message ?? changesRequestedError?.message,
   );
 
-  // 6f. Draft generation endpoint enforces auth+ownership, then reports its
-  //     provider gate honestly (501 until OPENAI_API_KEY is configured).
+  const { error: revisionUpdateError } = await introducer.client
+    .from('pitch_drafts')
+    .update({
+      headline: revisedHeadline,
+      structure: { ...pitchStructure, hook: revisedHeadline },
+    })
+    .eq('id', draft.id);
+  if (revisionUpdateError) throw new Error(`revision update: ${revisionUpdateError.message}`);
+
+  const { data: resubmission, error: resubmitError } = await introducer.client.rpc(
+    'submit_pitch_for_consent',
+    {
+      draft_id: draft.id,
+      invite_channel: 'email',
+      invite_contact: daterEmail,
+      invite_friend_name: 'E2E Blair',
+    },
+  );
+  if (resubmitError) throw new Error(`resubmit: ${resubmitError.message}`);
+  const { data: latestRequest, error: latestRequestError } = await dater.client
+    .from('consent_requests')
+    .select('revision_id, status')
+    .eq('pitch_draft_id', draft.id)
+    .single();
+  if (latestRequestError || !latestRequest?.revision_id) {
+    throw new Error(`latest consent request: ${latestRequestError?.message ?? 'missing revision'}`);
+  }
+  const { data: latestRevision, error: latestRevisionError } = await dater.client
+    .from('consent_revisions')
+    .select('id, revision_number, headline, asset_ids')
+    .eq('id', latestRequest.revision_id)
+    .single();
+  if (latestRevisionError || !latestRevision) {
+    throw new Error(`latest revision: ${latestRevisionError?.message ?? 'missing row'}`);
+  }
+  const replacementToken = resubmission?.[0]?.consent_token;
+  check(
+    '6f. introducer finalizes revision 2 and the claimed dater keeps access',
+    !latestRequestError &&
+      !latestRevisionError &&
+      replacementToken === null &&
+      latestRequest.status === 'claimed' &&
+      latestRevision.id !== initialRevision.id &&
+      latestRevision.revision_number === initialRevision.revision_number + 1 &&
+      latestRevision.headline === revisedHeadline &&
+      [...latestRevision.asset_ids].sort().join(',') === expectedAssetIds,
+    latestRequestError?.message ?? latestRevisionError?.message,
+  );
+
+  // 6g. Finalized drafts are locked against transcription while ownership stays private.
   const introducerToken = (await introducer.client.auth.getSession()).data.session?.access_token;
   const transcribeOwn = await fetch('http://localhost:3000/api/transcribe', {
     method: 'POST',
@@ -292,35 +413,163 @@ try {
     body: JSON.stringify({ draftId: draft.id }),
   });
   check(
-    '6f. transcribe API: owner passes gate (501/200), stranger 404',
-    (transcribeOwn.status === 501 || transcribeOwn.status === 200) &&
-      transcribeStranger.status === 404,
+    '6g. transcribe API: consent_pending owner gets 409 and stranger gets 404',
+    transcribeOwn.status === 409 && transcribeStranger.status === 404,
     `own=${transcribeOwn.status} stranger=${transcribeStranger.status}`,
   );
 
-  // 7. Approve & publish with a 7-day visibility window (web approve state)
+  // 7. Creator purchase intent and RevenueCat lifecycle are idempotent.
+  const { data: intentRows, error: intentError } = await introducer.client.rpc(
+    'issue_purchase_intent',
+    {
+      product_id: 'creator_launch_credit_499',
+      scope_id: draft.id,
+    },
+  );
+  const purchaseIntentId = intentRows?.[0]?.purchase_intent_id;
+  check(
+    '7a. introducer issues a creator credit purchase intent for the draft',
+    !intentError && typeof purchaseIntentId === 'string',
+    intentError?.message,
+  );
+  if (intentError || typeof purchaseIntentId !== 'string') {
+    throw new Error(`purchase intent: ${intentError?.message ?? 'missing id'}`);
+  }
+
+  const purchaseEventId = `e2e-creator-purchase-${stamp}`;
+  const cancellationEventId = `e2e-creator-cancellation-${stamp}`;
+  const transactionId = `e2e-creator-tx-${stamp}`;
+  const originalTransactionId = `e2e-creator-original-${stamp}`;
+  created.purchaseEventIds.push(purchaseEventId, cancellationEventId);
+  created.purchaseOriginalTransactionId = originalTransactionId;
+  const purchasePayload = {
+    id: purchaseEventId,
+    type: 'INITIAL_PURCHASE',
+    app_user_id: introducer.id,
+    product_id: 'creator_launch_credit_499',
+    purchased_at_ms: Date.now(),
+    expiration_at_ms: null,
+    transaction_id: transactionId,
+    original_transaction_id: originalTransactionId,
+    environment: 'SANDBOX',
+    aliases: [],
+    original_app_user_id: introducer.id,
+    subscriber_attributes: {
+      purchase_intent_id: { value: purchaseIntentId },
+    },
+  };
+  const { data: purchaseResult, error: purchaseError } = await admin.rpc(
+    'record_revenuecat_event',
+    { payload: purchasePayload },
+  );
+  const { data: firstPurchaseEvents, error: firstPurchaseEventsError } = await admin
+    .from('purchase_events')
+    .select('id, provider_event_id')
+    .eq('provider_event_id', purchaseEventId);
+  const { data: availableCredits, error: availableCreditsError } = await admin
+    .from('purchase_credit_ledger')
+    .select('id, credit_state')
+    .eq('idempotency_key', originalTransactionId);
+  check(
+    '7b. service role records one purchase event and one available creator credit',
+    !purchaseError &&
+      !firstPurchaseEventsError &&
+      !availableCreditsError &&
+      purchaseResult?.recorded === true &&
+      purchaseResult?.deduplicated === false &&
+      firstPurchaseEvents.length === 1 &&
+      availableCredits.length === 1 &&
+      availableCredits[0].credit_state === 'available',
+    purchaseError?.message ?? firstPurchaseEventsError?.message ?? availableCreditsError?.message,
+  );
+
+  const { data: duplicateResult, error: duplicateError } = await admin.rpc(
+    'record_revenuecat_event',
+    { payload: purchasePayload },
+  );
+  const { data: deduplicatedEvents, error: deduplicatedEventsError } = await admin
+    .from('purchase_events')
+    .select('id')
+    .eq('provider_event_id', purchaseEventId);
+  const { data: deduplicatedCredits, error: deduplicatedCreditsError } = await admin
+    .from('purchase_credit_ledger')
+    .select('id')
+    .eq('idempotency_key', originalTransactionId);
+  check(
+    '7c. replaying the same RevenueCat event deduplicates to one row',
+    !duplicateError &&
+      !deduplicatedEventsError &&
+      !deduplicatedCreditsError &&
+      duplicateResult?.deduplicated === true &&
+      deduplicatedEvents.length === 1 &&
+      deduplicatedCredits.length === 1,
+    duplicateError?.message ??
+      deduplicatedEventsError?.message ??
+      deduplicatedCreditsError?.message,
+  );
+
+  const cancellationPayload = {
+    ...purchasePayload,
+    id: cancellationEventId,
+    type: 'CANCELLATION',
+    transaction_id: `e2e-creator-cancellation-tx-${stamp}`,
+  };
+  const { error: cancellationError } = await admin.rpc('record_revenuecat_event', {
+    payload: cancellationPayload,
+  });
+  const { data: revokedCredits, error: revokedCreditsError } = await admin
+    .from('purchase_credit_ledger')
+    .select('id, credit_state')
+    .eq('idempotency_key', originalTransactionId);
+  check(
+    '7d. RevenueCat cancellation revokes the creator credit',
+    !cancellationError &&
+      !revokedCreditsError &&
+      revokedCredits.length === 1 &&
+      revokedCredits[0].credit_state === 'revoked',
+    cancellationError?.message ?? revokedCreditsError?.message,
+  );
+
+  // 8. Approval rejects unconfirmed claims, then publishes one selected photo for 14 days.
+  const approvalArgs = {
+    draft_id: draft.id,
+    campaign_days: 14,
+    revision_id: latestRevision.id,
+    included_asset_ids: [photo1Asset.id],
+    hard_claims_confirmed: false,
+  };
+  const { error: unconfirmedClaimsError } = await dater.client.rpc(
+    'approve_and_publish_pitch',
+    approvalArgs,
+  );
+  check(
+    '8a. approve rejects an unconfirmed hard claim',
+    Boolean(unconfirmedClaimsError) && unconfirmedClaimsError.message.includes('hard claims'),
+    unconfirmedClaimsError?.message,
+  );
+
   const { data: publishRows, error: publishError } = await dater.client.rpc(
     'approve_and_publish_pitch',
     {
-      draft_id: draft.id,
-      campaign_days: 7,
+      ...approvalArgs,
+      hard_claims_confirmed: true,
     },
   );
   const slug = publishRows?.[0]?.campaign_slug;
   created.campaignId = publishRows?.[0]?.campaign_id ?? null;
   check(
-    '7. approve_and_publish returns campaign slug',
+    '8b. approve_and_publish atomically publishes the latest revision and selected photo',
     !publishError && typeof slug === 'string' && slug.length > 0,
     publishError?.message ?? `slug=${slug}`,
   );
 
-  // 8. Post-publish visibility: dater is a member and sees the campaign
+  // 9. Post-publish visibility: dater is a member and sees the campaign.
   const { data: campaignRows, error: campaignError } = await dater.client
     .from('campaigns')
     .select('id, status, slug')
     .eq('id', created.campaignId);
   check(
-    '8. dater sees the published campaign via membership RLS',
+    '9a. dater sees the published campaign via membership RLS',
     !campaignError &&
       campaignRows.length === 1 &&
       campaignRows[0].status === 'published' &&
@@ -328,12 +577,13 @@ try {
     campaignError?.message,
   );
 
-  // 9. Idempotence guard: approving again fails cleanly
+  // 9b. Idempotence guard: approving again fails cleanly.
   const { error: reApproveError } = await dater.client.rpc('approve_and_publish_pitch', {
-    draft_id: draft.id,
+    ...approvalArgs,
+    hard_claims_confirmed: true,
   });
   check(
-    '9. second approve is rejected (no longer consent_pending)',
+    '9b. second approve is rejected because the draft is no longer consent_pending',
     Boolean(reApproveError),
     reApproveError?.message,
   );
@@ -358,10 +608,10 @@ try {
       .eq('id', created.campaignId)
       .single();
     const endsAt = windowRow?.ends_at ? new Date(windowRow.ends_at).getTime() : 0;
-    const inSevenDays = Date.now() + 7 * 24 * 3600 * 1000;
+    const inFourteenDays = Date.now() + 14 * 24 * 3600 * 1000;
     check(
-      '10c. approve stamped the 7-day visibility window',
-      Math.abs(endsAt - inSevenDays) < 3600 * 1000,
+      '10c. approve stamped the fixed 14-day visibility window',
+      Math.abs(endsAt - inFourteenDays) < 3600 * 1000,
       windowRow?.ends_at,
     );
     const missResponse = await fetch('http://localhost:3000/p/not-a-real-slug');
@@ -638,11 +888,11 @@ try {
   // 21. Anonymous + signed-in events land; junk names are rejected.
   const { error: anonTrackError } = await anonClient.rpc('track_event', {
     event_name: 'pitch_viewed_unique',
-    properties: { campaign_slug: slug, source: 'e2e' },
+    properties: { campaign_slug: slug, source: analyticsSource },
   });
   const { error: userTrackError } = await dater.client.rpc('track_event', {
     event_name: 'campaign_paused',
-    properties: { campaign_id: campaignId, source: 'e2e' },
+    properties: { campaign_id: campaignId, source: analyticsSource },
   });
   const { error: junkTrackError } = await anonClient.rpc('track_event', {
     event_name: 'not_a_real_event',
@@ -650,7 +900,7 @@ try {
   const { data: trackedRows } = await admin
     .from('analytics_events')
     .select()
-    .contains('properties', { source: 'e2e' });
+    .contains('properties', { source: analyticsSource });
   created.analyticsSeeded = true;
   check(
     '21. analytics events ingest (anon + user) and reject junk names',
@@ -686,7 +936,7 @@ try {
   if (created.analyticsSeeded) {
     await cleanup(
       'analytics events',
-      admin.from('analytics_events').delete().contains('properties', { source: 'e2e' }),
+      admin.from('analytics_events').delete().contains('properties', { source: analyticsSource }),
     );
   }
   if (created.campaignId) {
@@ -721,10 +971,35 @@ try {
   }
   if (created.draftId) {
     await cleanup(
-      'consent request',
-      admin.from('consent_requests').delete().eq('pitch_draft_id', created.draftId),
+      'purchase analytics',
+      admin.from('analytics_events').delete().contains('properties', {
+        scope_id: created.draftId,
+        product_id: 'creator_launch_credit_499',
+      }),
     );
-    await cleanup('pitch draft', admin.from('pitch_drafts').delete().eq('id', created.draftId));
+    if (created.purchaseEventIds.length > 0) {
+      await cleanup(
+        'purchase events',
+        admin.from('purchase_events').delete().in('provider_event_id', created.purchaseEventIds),
+      );
+    }
+    if (created.purchaseOriginalTransactionId) {
+      await cleanup(
+        'purchase credit ledger',
+        admin
+          .from('purchase_credit_ledger')
+          .delete()
+          .eq('idempotency_key', created.purchaseOriginalTransactionId),
+      );
+    }
+    await cleanup(
+      'purchase intents',
+      admin.from('purchase_intents').delete().eq('scope_id', created.draftId),
+    );
+    await cleanup(
+      'pitch draft erasure (requests + revisions cascade)',
+      admin.rpc('erase_pitch_draft', { target_draft_id: created.draftId }),
+    );
   }
   for (const userId of created.users) {
     await cleanup('auth user', admin.auth.admin.deleteUser(userId));

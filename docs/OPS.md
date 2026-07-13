@@ -9,7 +9,8 @@
 열려 있는 신고를 최신순으로 확인:
 
 ```sql
-SELECT r.id, r.created_at, r.reason, r.status,
+SELECT r.id, r.created_at, r.target_type, r.target_id,
+       r.reason, r.severity, r.status, r.anon_report,
        reporter.display_name AS reporter,
        reported.display_name AS reported,
        c.slug AS campaign_slug
@@ -39,11 +40,29 @@ UPDATE reports SET status = 'resolved' WHERE id = '<report-id>';
 
 ## 데이터 삭제 요청 (계정 삭제)
 
-1. `auth.users`에서 사용자 삭제(`supabase.auth.admin.deleteUser`) — public.users가
-   CASCADE로 profiles/dating_profiles 등을 정리
-2. 남는 참조(REFERENCES without CASCADE: pitch_drafts.created_by 등)는 삭제 전에
-   해당 캠페인·드래프트를 먼저 archived/삭제 처리
-3. Storage의 `profile-media/<user-id>/`와 사용자가 만든 draft 폴더 제거
+사용자가 `request_account_deletion()`을 호출하면 계정은 즉시 `deleted`가 되고
+`deletion_requests`에 한 건만 queued 됩니다. 운영자는 service role 환경에서 먼저
+dry-run 결과를 검토한 뒤 같은 processor를 실제 실행합니다.
+
+```sh
+node scripts/process-deletions.mjs --dry-run --limit=25
+node scripts/process-deletions.mjs --limit=25
+```
+
+dry-run은 변경 없이 다음 형식만 출력하며 사용자 ID나 Storage 경로를 노출하지 않습니다.
+
+```text
+DRY RUN request 1: drafts=<count> campaigns=<count> rooms=<count> storage_objects=<count>
+```
+
+processor는 관련 Storage 객체와 FK 종속 데이터를 역순으로 제거하고 Auth 사용자를
+삭제합니다. 타 사용자가 소유한 공동 캠페인은 보존하고 드래프트·업로드 참조를 해당
+소유자에게 이관하며, 삭제한 미디어 prefix의 검증 원장도 함께 제거합니다. 안전 신고는
+운영 감사 목적으로 보존하되 사용자 참조를 익명화하고, 그 보존 예외를 deletion
+request의 `note`에 기록합니다. 실패한 요청은 `failed`와 제한된 운영 로그 확인 안내를
+기록하고 로그에는 사용자 식별자 없이 실패 단계만 남기므로, 해당 단계를 확인한 뒤
+수동으로 `queued`로 되돌려 재시도합니다. 프로세스 강제 종료로 `processing`에 남은
+요청은 처리 시작 후 1시간이 지나면 다음 실행이 자동으로 다시 claim합니다.
 
 ## 원칙
 

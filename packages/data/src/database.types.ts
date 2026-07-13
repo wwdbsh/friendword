@@ -147,6 +147,30 @@ export type AppConfigRow = {
   readonly updated_at: string;
 };
 
+export type MediaValidationRow = {
+  readonly id: string;
+  readonly bucket_id: string;
+  readonly object_name: string;
+  readonly validated_at: string;
+  readonly mime_ok: boolean;
+  readonly magic_ok: boolean;
+  readonly size_ok: boolean;
+  readonly decode_ok: boolean;
+  readonly moderation_status: 'passed' | 'flagged' | 'skipped';
+  readonly moderation_ref: string | null;
+  readonly created_at: string;
+};
+
+export type DeletionRequestRow = {
+  readonly id: string;
+  readonly user_id: string;
+  readonly scope: 'account';
+  readonly status: 'queued' | 'processing' | 'done' | 'failed';
+  readonly requested_at: string;
+  readonly processed_at: string | null;
+  readonly note: string | null;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -263,24 +287,98 @@ export type Database = {
         };
         Relationships: [];
       };
+      media_validations: {
+        Row: MediaValidationRow;
+        Insert: {
+          readonly bucket_id: string;
+          readonly object_name: string;
+          readonly validated_at: string;
+          readonly mime_ok: boolean;
+          readonly magic_ok: boolean;
+          readonly size_ok: boolean;
+          readonly decode_ok: boolean;
+          readonly moderation_status: 'passed' | 'flagged' | 'skipped';
+          readonly moderation_ref?: string | null;
+        };
+        Update: {
+          readonly validated_at?: string;
+          readonly mime_ok?: boolean;
+          readonly magic_ok?: boolean;
+          readonly size_ok?: boolean;
+          readonly decode_ok?: boolean;
+          readonly moderation_status?: 'passed' | 'flagged' | 'skipped';
+          readonly moderation_ref?: string | null;
+        };
+        Relationships: [];
+      };
       reports: {
         Row: {
           readonly id: string;
-          readonly reporter_user_id: string;
+          readonly reporter_user_id: string | null;
           readonly reported_user_id: string | null;
           readonly campaign_id: string | null;
           readonly reason: string;
+          readonly target_type: 'campaign' | 'interest' | 'intro_room' | 'message' | null;
+          readonly target_id: string | null;
+          readonly severity: 'low' | 'high';
+          readonly detail: string | null;
+          readonly anon_report: boolean;
+          readonly reporter_ip_hash: string | null;
           readonly status: string;
           readonly created_at: string;
           readonly updated_at: string;
         };
         Insert: {
-          readonly reporter_user_id: string;
+          readonly reporter_user_id?: string | null;
           readonly reported_user_id?: string | null;
           readonly campaign_id?: string | null;
           readonly reason: string;
+          readonly target_type?: 'campaign' | 'interest' | 'intro_room' | 'message' | null;
+          readonly target_id?: string | null;
+          readonly severity?: 'low' | 'high';
+          readonly detail?: string | null;
+          readonly anon_report?: boolean;
+          readonly reporter_ip_hash?: string | null;
         };
         Update: Record<string, never>;
+        Relationships: [];
+      };
+      ops_alerts: {
+        Row: {
+          readonly id: string;
+          readonly alert_type: string;
+          readonly campaign_id: string | null;
+          readonly report_id: string | null;
+          readonly detail: Json;
+          readonly resolved_at: string | null;
+          readonly created_at: string;
+        };
+        Insert: {
+          readonly alert_type: string;
+          readonly campaign_id?: string | null;
+          readonly report_id?: string | null;
+          readonly detail?: Json;
+          readonly resolved_at?: string | null;
+        };
+        Update: {
+          readonly resolved_at?: string | null;
+        };
+        Relationships: [];
+      };
+      deletion_requests: {
+        Row: DeletionRequestRow;
+        Insert: {
+          readonly user_id: string;
+          readonly scope?: 'account';
+          readonly status?: 'queued' | 'processing' | 'done' | 'failed';
+          readonly processed_at?: string | null;
+          readonly note?: string | null;
+        };
+        Update: {
+          readonly status?: 'queued' | 'processing' | 'done' | 'failed';
+          readonly processed_at?: string | null;
+          readonly note?: string | null;
+        };
         Relationships: [];
       };
       blocks: {
@@ -440,6 +538,29 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: {
+      report_content: {
+        Args: {
+          readonly target_type: 'campaign' | 'interest' | 'intro_room' | 'message';
+          readonly target_id: string;
+          readonly reason: string;
+          readonly detail?: string | null;
+        };
+        Returns: string;
+      };
+      request_account_deletion: {
+        Args: Record<string, never>;
+        Returns: readonly {
+          readonly deletion_request_id: string;
+          readonly deletion_status: 'queued' | 'processing' | 'done' | 'failed';
+        }[];
+      };
+      reassign_pitch_storage_owner: {
+        Args: {
+          readonly target_draft_id: string;
+          readonly new_owner_id: string;
+        };
+        Returns: undefined;
+      };
       submit_pitch_for_consent: {
         Args: {
           readonly draft_id: string;

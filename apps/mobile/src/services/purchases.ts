@@ -1,8 +1,13 @@
-import Constants from 'expo-constants';
 import { z } from 'zod';
 
 import { PurchasesRepo, type PurchaseBenefitScope } from '@friendword/data';
 
+import {
+  ensurePurchasesIdentity,
+  getRevenueCatApiKey,
+  loadPurchasesModule,
+  syncPurchasesIdentity,
+} from './purchasesIdentity';
 import { getSupabaseClient } from './supabaseClient';
 
 export const PRODUCT_IDS = {
@@ -34,6 +39,7 @@ type RouteParams = {
 };
 
 export type PurchaseFlowDependencies = {
+  ensureIdentity(): Promise<void>;
   issueIntent(productId: ProductId, scopeId: string): Promise<string>;
   setAttributes(attributes: Readonly<Record<string, string | null>>): Promise<void>;
   purchase(packageIdentifier: string, productId: ProductId): Promise<void>;
@@ -66,42 +72,6 @@ const productIntentParamsSchema = z.discriminatedUnion('intent', [
   }),
 ]);
 
-const apiKeySchema = z.string().min(1);
-
-type PurchasesModule = typeof import('react-native-purchases').default;
-
-let configured = false;
-
-/**
- * RevenueCat is a hard Shipaton requirement, but the native module only
- * exists in a dev/EAS build and only works once the user has created the
- * products and pasted EXPO_PUBLIC_REVENUECAT_IOS_API_KEY. Every gap is
- * reported honestly — there is no mock purchase path anywhere.
- */
-function loadPurchases(): PurchasesModule | null {
-  try {
-    // Dynamic require so Expo Go (no native module) never crashes at import.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const module = require('react-native-purchases') as {
-      readonly default: PurchasesModule;
-    };
-    return module.default;
-  } catch {
-    return null;
-  }
-}
-
-async function ensureConfigured(purchases: PurchasesModule, apiKey: string): Promise<void> {
-  if (configured) {
-    return;
-  }
-
-  const client = getSupabaseClient();
-  const session = client === null ? null : (await client.auth.getSession()).data.session;
-  purchases.configure({ apiKey, appUserID: session?.user.id ?? null });
-  configured = true;
-}
-
 export function parseProductIntentParams(params: RouteParams): ProductIntent | null {
   const parsed = productIntentParamsSchema.safeParse(params);
   return parsed.success ? parsed.data : null;
@@ -114,17 +84,14 @@ export function getProductId(intent: ProductIntent): ProductId {
 }
 
 export async function getPaywallStatus(intent: ProductIntent): Promise<PurchasesStatus> {
-  const parsedKey = apiKeySchema.safeParse(
-    Constants.expoConfig?.extra?.['revenueCatIosApiKey'] ?? '',
-  );
-  if (!parsedKey.success) {
+  if (getRevenueCatApiKey() === null) {
     return {
       state: 'unconfigured',
       reason: 'RevenueCat API key is not set (EXPO_PUBLIC_REVENUECAT_IOS_API_KEY).',
     };
   }
 
-  const purchases = loadPurchases();
+  const purchases = loadPurchasesModule();
   if (purchases === null) {
     return {
       state: 'unconfigured',
@@ -133,7 +100,17 @@ export async function getPaywallStatus(intent: ProductIntent): Promise<Purchases
   }
 
   try {
-    await ensureConfigured(purchases, parsedKey.data);
+    const client = getSupabaseClient();
+    const session = client === null ? null : (await client.auth.getSession()).data.session;
+    const identityResult = await syncPurchasesIdentity(
+      session === null ? null : { userId: session.user.id },
+    );
+    if (identityResult.state === 'unconfigured') {
+      return { state: 'unconfigured', reason: identityResult.reason };
+    }
+    if (identityResult.state === 'error') {
+      return { state: 'unconfigured', reason: identityResult.error.message };
+    }
     const offerings = await purchases.getOfferings();
     const expectedProductId = getProductId(intent);
     const pkg = offerings.current?.availablePackages.find(
@@ -183,6 +160,8 @@ async function runFlow(
   const dependencies = options.dependencies ?? createProductionDependencies();
   const productId = getProductId(intent);
   const scopeId = intent.intent === 'creator_launch' ? intent.draftId : intent.campaignId;
+  await dependencies.ensureIdentity();
+  throwIfAborted(options.signal);
   const purchaseIntentId = await dependencies.issueIntent(productId, scopeId);
   throwIfAborted(options.signal);
 
@@ -248,25 +227,28 @@ function createProductionDependencies(): PurchaseFlowDependencies {
   if (client === null) {
     throw new Error('Sign in and configure Supabase before purchasing.');
   }
-  const purchases = loadPurchases();
+  const purchases = loadPurchasesModule();
   if (purchases === null) {
     throw new Error(
       'Purchases need the development build — Expo Go cannot load the native module.',
     );
   }
-  const parsedKey = apiKeySchema.safeParse(
-    Constants.expoConfig?.extra?.['revenueCatIosApiKey'] ?? '',
-  );
-  if (!parsedKey.success) {
+  if (getRevenueCatApiKey() === null) {
     throw new Error('RevenueCat API key is not set (EXPO_PUBLIC_REVENUECAT_IOS_API_KEY).');
   }
   const repo = new PurchasesRepo(client);
 
   return {
+    ensureIdentity: async () => {
+      const session = (await client.auth.getSession()).data.session;
+      if (session === null) {
+        throw new Error('Sign in before purchasing.');
+      }
+      await ensurePurchasesIdentity(session.user.id);
+    },
     issueIntent: async (productId, scopeId) =>
       (await repo.issuePurchaseIntent(productId, scopeId)).id,
     setAttributes: async (attributes) => {
-      await ensureConfigured(purchases, parsedKey.data);
       await purchases.setAttributes(attributes);
     },
     purchase: async (packageIdentifier, productId) => {

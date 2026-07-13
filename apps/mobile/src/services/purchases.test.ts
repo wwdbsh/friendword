@@ -47,6 +47,9 @@ describe('purchase confirmation sequence', () => {
     let now = 0;
     const hasConfirmedBenefit = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     const dependencies: PurchaseFlowDependencies = {
+      ensureIdentity: async () => {
+        events.push('identity');
+      },
       issueIntent: async (productId, scopeId) => {
         events.push(`intent:${productId}:${scopeId}`);
         return 'purchase-intent-id';
@@ -80,6 +83,7 @@ describe('purchase confirmation sequence', () => {
     ).resolves.toBe('confirmed');
 
     expect(events).toEqual([
+      'identity',
       `intent:creator_launch_credit_499:${DRAFT_ID}`,
       `attributes:${JSON.stringify({
         purchase_intent_id: 'purchase-intent-id',
@@ -104,6 +108,7 @@ describe('purchase confirmation sequence', () => {
     let now = 0;
     const hasConfirmedBenefit = vi.fn().mockResolvedValue(false);
     const dependencies: PurchaseFlowDependencies = {
+      ensureIdentity: vi.fn().mockResolvedValue(undefined),
       issueIntent: vi.fn().mockResolvedValue('purchase-intent-id'),
       setAttributes: vi.fn().mockResolvedValue(undefined),
       purchase: vi.fn().mockResolvedValue(undefined),
@@ -131,6 +136,7 @@ describe('purchase confirmation sequence', () => {
   it('keeps polling through a transient benefit read failure', async () => {
     let now = 0;
     const dependencies: PurchaseFlowDependencies = {
+      ensureIdentity: vi.fn().mockResolvedValue(undefined),
       issueIntent: vi.fn().mockResolvedValue('purchase-intent-id'),
       setAttributes: vi.fn().mockResolvedValue(undefined),
       purchase: vi.fn().mockResolvedValue(undefined),
@@ -161,6 +167,7 @@ describe('purchase confirmation sequence', () => {
     const restore = vi.fn().mockResolvedValue(undefined);
     const onAwaitingConfirmation = vi.fn();
     const dependencies: PurchaseFlowDependencies = {
+      ensureIdentity: vi.fn().mockResolvedValue(undefined),
       issueIntent,
       setAttributes,
       purchase: vi.fn().mockResolvedValue(undefined),
@@ -188,5 +195,28 @@ describe('purchase confirmation sequence', () => {
     });
     expect(restore).toHaveBeenCalledOnce();
     expect(onAwaitingConfirmation).toHaveBeenCalledOnce();
+  });
+
+  it('does not issue an intent when the pre-purchase identity check fails', async () => {
+    const issueIntent = vi.fn().mockResolvedValue('purchase-intent-id');
+    const dependencies: PurchaseFlowDependencies = {
+      ensureIdentity: vi.fn().mockRejectedValue(new Error('RevenueCat identity mismatch')),
+      issueIntent,
+      setAttributes: vi.fn().mockResolvedValue(undefined),
+      purchase: vi.fn().mockResolvedValue(undefined),
+      restore: vi.fn().mockResolvedValue(undefined),
+      hasConfirmedBenefit: vi.fn().mockResolvedValue(false),
+      wait: vi.fn().mockResolvedValue(undefined),
+      now: () => 0,
+    };
+
+    await expect(
+      runPurchaseFlow({ intent: 'creator_launch', draftId: DRAFT_ID }, 'creator-package', {
+        signal: new AbortController().signal,
+        onAwaitingConfirmation: vi.fn(),
+        dependencies,
+      }),
+    ).rejects.toThrow('RevenueCat identity mismatch');
+    expect(issueIntent).not.toHaveBeenCalled();
   });
 });

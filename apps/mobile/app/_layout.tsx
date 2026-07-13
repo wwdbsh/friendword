@@ -11,7 +11,30 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
+import {
+  syncPurchasesIdentity,
+  type PurchasesIdentitySyncResult,
+} from '../src/services/purchasesIdentity';
+import { getSupabaseClient } from '../src/services/supabaseClient';
+
 SplashScreen.preventAutoHideAsync();
+
+function reportIdentitySyncResult(result: PurchasesIdentitySyncResult): void {
+  if (result.state === 'error') {
+    console.warn('RevenueCat identity sync failed:', result.error.message);
+  }
+}
+
+function syncIdentityWithoutCrashing(userId: string | null): void {
+  void syncPurchasesIdentity(userId === null ? null : { userId })
+    .then(reportIdentitySyncResult)
+    .catch((error: unknown) => {
+      console.warn(
+        'RevenueCat identity sync failed:',
+        error instanceof Error ? error.message : 'Unknown identity sync error.',
+      );
+    });
+}
 
 export default function RootLayout() {
   const [loaded, error] = useFonts({
@@ -26,6 +49,57 @@ export default function RootLayout() {
       SplashScreen.hideAsync();
     }
   }, [error, loaded]);
+
+  useEffect(() => {
+    const client = getSupabaseClient();
+    if (client === null) {
+      syncIdentityWithoutCrashing(null);
+      return;
+    }
+
+    let disposed = false;
+    let relevantAuthEventSeen = false;
+    let lastObservedUserId: string | null | undefined;
+    const syncIfUserChanged = (userId: string | null) => {
+      if (disposed || lastObservedUserId === userId) {
+        return;
+      }
+      lastObservedUserId = userId;
+      syncIdentityWithoutCrashing(userId);
+    };
+    const {
+      data: { subscription },
+    } = client.auth.onAuthStateChange((event, session) => {
+      if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT' && event !== 'TOKEN_REFRESHED') {
+        return;
+      }
+      relevantAuthEventSeen = true;
+      syncIfUserChanged(session?.user.id ?? null);
+    });
+
+    void client.auth
+      .getSession()
+      .then(({ data, error: sessionError }) => {
+        if (sessionError !== null) {
+          console.warn('RevenueCat identity cold-start sync failed:', sessionError.message);
+          return;
+        }
+        if (!relevantAuthEventSeen) {
+          syncIfUserChanged(data.session?.user.id ?? null);
+        }
+      })
+      .catch((sessionError: unknown) => {
+        console.warn(
+          'RevenueCat identity cold-start sync failed:',
+          sessionError instanceof Error ? sessionError.message : 'Unknown auth session error.',
+        );
+      });
+
+    return () => {
+      disposed = true;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   if (!loaded && !error) {
     return null;

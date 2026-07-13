@@ -10,13 +10,16 @@
 
 ## 2026-07-13 감사 대응 (source of truth: docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md §7, 순서 A→J 고정)
 
-| Session              | Owned paths                                                                                                            | Dependency                   | Acceptance criteria                                                   | Status                  | Updated    |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------- | --------------------------------------------------------------------- | ----------------------- | ---------- |
-| Advisor              | Slice A(문서): `docs/**`, `.briefs/07~09`                                                                              | 없음                         | 감사 판정 반영한 truth reset + 결정 4건 기록 + 감사 문서 repo 편입    | 진행 중                 | 2026-07-13 |
-| `friendword-codex-2` | Slice A(DB 회귀): `supabase/tests/audit/**`, `scripts/test-db-audit.sh`                                                | `.briefs/07`                 | 러너가 파일별 PASS/FAIL 보고, 기존 test-db.sh 그린 유지               | 진행 중                 | 2026-07-13 |
-| `friendword-codex-3` | Slice A(웹훅 회귀): `apps/web/tests-audit/**`, `apps/web/vitest.audit.config.ts`, 루트 `package.json` test:audit 1줄   | `.briefs/09`                 | `pnpm test:audit` 실행 가능, 기본 `pnpm test` 그린 유지               | 진행 중                 | 2026-07-13 |
-| `friendword-codex-1` | Slice B: `supabase/migrations/0011`, `supabase/tests/11`, `packages/data`(auth), 웹 이름 확정 UI, E2E 수동 upsert 제거 | `.briefs/08`, Slice A 선통합 | fresh email이 수동 DB 작업 없이 claim/interest 완료, 전체 하니스 그린 | 진행 중 (통합은 A 이후) | 2026-07-13 |
-| (예정)               | Slice C~J                                                                                                              | 감사 §7 의존성 표            | 감사 §5·§8 acceptance + audit 회귀 스위트 그린 전환                   | 예정                    | 2026-07-13 |
+운영 메모: 오후부터 사용자 지시로 2인 체제(Advisor 직접 구현 + codex-1). codex-2는 A·C-DB·D-DB·E-DB·G-DB 승인 후 대기, codex-3는 A-웹훅·E-Web·C-Mobile·D-Mobile 승인 후 대기.
+
+| Session              | 작업                                                                                | Acceptance criteria                                 | Status                                      | Updated    |
+| -------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------- | ---------- |
+| Advisor+워커 3기     | Slice A~E (회귀 스위트, bootstrap, claim 바인딩, consent revision, 결제 원장)       | audit 회귀 그린 전환 + 프로덕션 E2E                 | 승인 (audit DB 7/7·웹훅 11/11, E2E 전 체크) | 2026-07-13 |
+| Advisor              | Slice F(효익), G-Web(검증 API·신고·삭제), H-DB(사진 가드), I(대비), J(CI), evidence | suite 17, safety/kit Playwright, CI 3잡 그린        | 승인 (CI run 29230035650 success)           | 2026-07-13 |
+| `friendword-codex-1` | E-Mobile(페이월 intent), H-Web(OG·랜딩)                                             | 페이월 intent·pending 확정, OG·랜딩·fixture 분리    | 승인                                        | 2026-07-13 |
+| `friendword-codex-1` | Slice I-Mobile: Trust Layer primitive·강도 조정·킷 진입 (`.briefs/23`)              | 강도 표 구현 + 시뮬레이터 스크린샷 + 320pt 무클리핑 | 진행 중                                     | 2026-07-13 |
+| 사용자 게이트        | identity 벤더, OPENAI 키, RevenueCat 셋업, Resend 도메인, EXPO_PUBLIC_WEB_ORIGIN    | 키 입력 후 enforcement 스위치 on + sandbox 검증     | 대기                                        | 2026-07-13 |
+| 보류(사용자 결정)    | 18+ 온보딩·법적 문서 표면·App Store 메타데이터                                      | 스토어 준비 착수 시(7월 중하순 재판단) 일괄         | 보류                                        | 2026-07-13 |
 
 ## 2026-07-12 진행 중 작업
 

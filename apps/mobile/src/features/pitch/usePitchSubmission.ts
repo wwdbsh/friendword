@@ -1,17 +1,28 @@
 import { useRouter } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { hasCurrentAiProcessingConsent } from '../../services/aiConsent';
 import { pitchDraftService } from '../../services/draftServiceInstance';
 import { NeedsSignInError } from '../../services/pitchDraftsSupabase';
 import type { PitchDraftId } from '../../services/types';
 import { handleSubmitError, requireDraftId } from './pitchFlowState';
-import { preparePitchReview } from './preparePitchReview';
+import type { AiConsentUiState } from './AiConsentDisclosure';
+import {
+  getAiDraftFailureMessage,
+  isAiConsentRequiredFailure,
+  preparePitchReview,
+  type PitchReviewPreparationChoice,
+} from './preparePitchReview';
 
 type PitchSubmissionState = {
   readonly submitting: boolean;
   readonly signInVisible: boolean;
+  readonly aiConsentState: AiConsentUiState;
   readonly closeSignIn: () => void;
-  readonly submit: () => Promise<void>;
+  readonly refreshAiConsent: () => Promise<void>;
+  readonly resumeAfterSignIn: () => Promise<void>;
+  readonly submitAi: () => Promise<void>;
+  readonly writeManually: () => Promise<void>;
 };
 
 export function usePitchSubmission(
@@ -21,17 +32,49 @@ export function usePitchSubmission(
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [signInVisible, setSignInVisible] = useState(false);
+  const [aiConsentState, setAiConsentState] = useState<AiConsentUiState>('checking');
   const inFlight = useRef(false);
+  const pendingChoice = useRef<PitchReviewPreparationChoice | null>(null);
 
-  const submit = async (): Promise<void> => {
+  const refreshAiConsent = useCallback(async (): Promise<void> => {
+    if (draftId === null) {
+      setAiConsentState('required');
+      return;
+    }
+    setAiConsentState('checking');
+    try {
+      const draft = (await pitchDraftService.getMyDrafts()).find(
+        (candidate) => candidate.id === draftId,
+      );
+      if (draft?.server === null || draft?.server === undefined) {
+        setAiConsentState('required');
+        return;
+      }
+      setAiConsentState(
+        (await hasCurrentAiProcessingConsent(draft.server.draftId)) ? 'existing' : 'required',
+      );
+      setErrorMessage(null);
+    } catch (error: unknown) {
+      setAiConsentState('error');
+      handleSubmitError(error, setErrorMessage);
+    }
+  }, [draftId, setErrorMessage]);
+
+  useEffect(() => {
+    void refreshAiConsent();
+  }, [refreshAiConsent]);
+
+  const submit = async (choice: PitchReviewPreparationChoice): Promise<void> => {
     if (inFlight.current) {
       return;
     }
     const activeDraftId = requireDraftId(draftId);
+    pendingChoice.current = choice;
     inFlight.current = true;
     setSubmitting(true);
     try {
-      await preparePitchReview(pitchDraftService, activeDraftId);
+      await preparePitchReview(pitchDraftService, activeDraftId, choice);
+      pendingChoice.current = null;
       setErrorMessage(null);
       router.push({ pathname: '/pitch/review', params: { draftId: activeDraftId } });
     } catch (error: unknown) {
@@ -39,7 +82,15 @@ export function usePitchSubmission(
         setSignInVisible(true);
         return;
       }
-      handleSubmitError(error, setErrorMessage);
+      if (isAiConsentRequiredFailure(error)) {
+        pendingChoice.current = null;
+        setAiConsentState('required');
+        setErrorMessage('External AI processing consent must be confirmed again.');
+        return;
+      }
+      pendingChoice.current = null;
+      setAiConsentState('error');
+      setErrorMessage(getAiDraftFailureMessage(error));
     } finally {
       inFlight.current = false;
       setSubmitting(false);
@@ -49,7 +100,17 @@ export function usePitchSubmission(
   return {
     submitting,
     signInVisible,
+    aiConsentState,
     closeSignIn: () => setSignInVisible(false),
-    submit,
+    refreshAiConsent,
+    resumeAfterSignIn: async () => {
+      const choice = pendingChoice.current;
+      if (choice !== null) {
+        await submit(choice);
+      }
+    },
+    submitAi: () =>
+      submit(aiConsentState === 'existing' ? 'use_existing_ai_consent' : 'affirm_ai_consent'),
+    writeManually: () => submit('write_manually'),
   };
 }

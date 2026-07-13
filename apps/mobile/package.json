@@ -15,6 +15,7 @@
     "@expo-google-fonts/bricolage-grotesque": "^0.4.1",
     "@expo-google-fonts/unbounded": "^0.4.1",
     "@friendword/contracts": "workspace:*",
+    "@friendword/config": "workspace:*",
     "@friendword/data": "workspace:*",
     "@friendword/domain": "workspace:*",
     "@friendword/ui-tokens": "workspace:*",

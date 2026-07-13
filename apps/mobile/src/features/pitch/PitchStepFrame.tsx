@@ -101,7 +101,7 @@ export function PitchStepFrame({
           </Animated.View>
         </ScrollView>
 
-        <View style={styles.footer}>{footer}</View>
+        {footer === null ? null : <View style={styles.footer}>{footer}</View>}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

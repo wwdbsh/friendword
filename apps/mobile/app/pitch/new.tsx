@@ -226,12 +226,19 @@ export default function NewPitchScreen() {
       return (
         <>
           <ReviewStep
+            aiConsentState={submission.aiConsentState}
             errorMessage={errorMessage}
-            progressMessage={submission.submitting ? '친구 자랑을 글로 정리하는 중…' : null}
+            progressMessage={submission.submitting ? 'Preparing your draft…' : null}
             onBack={goBack}
+            onCreateAiDraft={() => {
+              void submission.submitAi();
+            }}
             onRerecord={() => setTrack(4)}
-            onSubmit={() => {
-              void submission.submit();
+            onRetryAiConsent={() => {
+              void submission.refreshAiConsent();
+            }}
+            onWriteManually={() => {
+              void submission.writeManually();
             }}
             photos={photos}
             recording={review.recording}
@@ -243,7 +250,7 @@ export default function NewPitchScreen() {
             onClose={submission.closeSignIn}
             onSignedIn={() => {
               submission.closeSignIn();
-              void submission.submit();
+              void submission.resumeAfterSignIn();
             }}
           />
         </>

@@ -1,7 +1,16 @@
-import { describe, expect, it } from '../../../../../packages/data/node_modules/vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+vi.mock('../../services/supabaseClient', () => ({ getSupabaseClient: () => null }));
+
+import { AiConsentRequiredError } from '../../services/aiConsent';
+import { DraftGenerationError } from '../../services/draftGeneration';
 import { PitchDraftSchema, type PitchDraft, type PitchReview } from '../../services/types';
-import { preparePitchReview } from './preparePitchReview';
+import {
+  getAiDraftFailureMessage,
+  isAiConsentRequiredFailure,
+  preparePitchReview,
+  type PitchReviewPreparationDependencies,
+} from './preparePitchReview';
 
 function draftWithServer(): PitchDraft {
   return PitchDraftSchema.parse({
@@ -21,6 +30,17 @@ function draftWithServer(): PitchDraft {
   });
 }
 
+function dependencies(
+  overrides: Partial<PitchReviewPreparationDependencies> = {},
+): PitchReviewPreparationDependencies {
+  return {
+    generateDraft: async () => ({ kind: 'generated' }),
+    hasAiConsent: async () => true,
+    recordAiConsent: async () => undefined,
+    ...overrides,
+  };
+}
+
 describe('preparePitchReview', () => {
   it('persists a pending state until generation returns a terminal result', async () => {
     const draft = draftWithServer();
@@ -34,9 +54,12 @@ describe('preparePitchReview', () => {
           saveReview: async () => draft,
         },
         draft.id,
-        async () => {
-          throw new Error('temporary generation failure');
-        },
+        'use_existing_ai_consent',
+        dependencies({
+          generateDraft: async () => {
+            throw new Error('temporary generation failure');
+          },
+        }),
       ),
     ).rejects.toThrow('temporary generation failure');
     expect(draft.review.generationMode).toBe('pending');
@@ -58,13 +81,24 @@ describe('preparePitchReview', () => {
         saveReview: async () => draft,
       },
       draft.id,
-      async () => {
-        events.push('generation awaited');
-        return { kind: 'generated' };
-      },
+      'affirm_ai_consent',
+      dependencies({
+        recordAiConsent: async () => {
+          events.push('consent recorded');
+        },
+        generateDraft: async () => {
+          events.push('generation awaited');
+          return { kind: 'generated' };
+        },
+      }),
     );
 
-    expect(events).toEqual(['draft prepared', 'generation awaited', 'review loaded']);
+    expect(events).toEqual([
+      'draft prepared',
+      'consent recorded',
+      'generation awaited',
+      'review loaded',
+    ]);
     expect(result.id).toBe(draft.id);
   });
 
@@ -81,11 +115,110 @@ describe('preparePitchReview', () => {
         },
       },
       draft.id,
-      async () => ({ kind: 'not_configured' }),
+      'affirm_ai_consent',
+      dependencies({ generateDraft: async () => ({ kind: 'not_configured' }) }),
     );
 
     expect(savedReview).toEqual(
       expect.objectContaining({ headline: '', body: '', generationMode: 'manual' }),
+    );
+  });
+
+  it('does not call transcribe when recording affirmative consent fails', async () => {
+    const draft = draftWithServer();
+    const generateDraft = vi.fn().mockResolvedValue({ kind: 'generated' });
+
+    await expect(
+      preparePitchReview(
+        {
+          prepareForReview: async () => draft,
+          loadGeneratedReview: async () => draft,
+          saveReview: async () => draft,
+        },
+        draft.id,
+        'affirm_ai_consent',
+        dependencies({
+          generateDraft,
+          recordAiConsent: async () => {
+            throw new Error('consent write failed');
+          },
+        }),
+      ),
+    ).rejects.toThrow('consent write failed');
+    expect(generateDraft).not.toHaveBeenCalled();
+  });
+
+  it('uses existing current-revision consent without recording it again', async () => {
+    const draft = draftWithServer();
+    const recordAiConsent = vi.fn().mockResolvedValue(undefined);
+    const generateDraft = vi.fn().mockResolvedValue({ kind: 'generated' });
+
+    await preparePitchReview(
+      {
+        prepareForReview: async () => draft,
+        loadGeneratedReview: async () => draft,
+        saveReview: async () => draft,
+      },
+      draft.id,
+      'use_existing_ai_consent',
+      dependencies({ generateDraft, recordAiConsent }),
+    );
+
+    expect(recordAiConsent).not.toHaveBeenCalled();
+    expect(generateDraft).toHaveBeenCalledOnce();
+  });
+
+  it('requires disclosure again when current-revision consent is absent', async () => {
+    const draft = draftWithServer();
+    const generateDraft = vi.fn().mockResolvedValue({ kind: 'generated' });
+
+    await expect(
+      preparePitchReview(
+        {
+          prepareForReview: async () => draft,
+          loadGeneratedReview: async () => draft,
+          saveReview: async () => draft,
+        },
+        draft.id,
+        'use_existing_ai_consent',
+        dependencies({ generateDraft, hasAiConsent: async () => false }),
+      ),
+    ).rejects.toBeInstanceOf(AiConsentRequiredError);
+    expect(generateDraft).not.toHaveBeenCalled();
+  });
+
+  it('maps the authoritative 409 response back to the disclosure', () => {
+    expect(isAiConsentRequiredFailure(new DraftGenerationError(409))).toBe(true);
+    expect(isAiConsentRequiredFailure(new DraftGenerationError(429))).toBe(false);
+  });
+
+  it('keeps manual writing free of consent records and AI generation', async () => {
+    const draft = draftWithServer();
+    const recordAiConsent = vi.fn().mockResolvedValue(undefined);
+    const generateDraft = vi.fn().mockResolvedValue({ kind: 'generated' });
+
+    const result = await preparePitchReview(
+      {
+        prepareForReview: async () => draft,
+        loadGeneratedReview: async () => draft,
+        saveReview: async (_id, review) => ({ ...draft, review }),
+      },
+      draft.id,
+      'write_manually',
+      dependencies({ generateDraft, recordAiConsent }),
+    );
+
+    expect(result.review.generationMode).toBe('manual');
+    expect(recordAiConsent).not.toHaveBeenCalled();
+    expect(generateDraft).not.toHaveBeenCalled();
+  });
+
+  it('shows distinct usage-limit and kill-switch messages', () => {
+    expect(getAiDraftFailureMessage(new DraftGenerationError(429))).toBe(
+      'AI usage limit reached — try again later',
+    );
+    expect(getAiDraftFailureMessage(new DraftGenerationError(503))).toBe(
+      'AI features are temporarily disabled',
     );
   });
 });

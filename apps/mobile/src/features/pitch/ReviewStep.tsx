@@ -10,6 +10,7 @@ import type {
   PitchRelationship,
 } from '../../services/types';
 import { PitchStepFrame } from './PitchStepFrame';
+import { AiConsentDisclosure, type AiConsentUiState } from './AiConsentDisclosure';
 
 type ReviewStepProps = {
   readonly relationship: PitchRelationship;
@@ -18,9 +19,12 @@ type ReviewStepProps = {
   readonly submitting: boolean;
   readonly errorMessage: string | null;
   readonly progressMessage: string | null;
+  readonly aiConsentState: AiConsentUiState;
   readonly onBack: () => void;
+  readonly onCreateAiDraft: () => void;
   readonly onRerecord: () => void;
-  readonly onSubmit: () => void;
+  readonly onRetryAiConsent: () => void;
+  readonly onWriteManually: () => void;
 };
 
 export function ReviewStep({
@@ -30,9 +34,12 @@ export function ReviewStep({
   submitting,
   errorMessage,
   progressMessage,
+  aiConsentState,
   onBack,
+  onCreateAiDraft,
   onRerecord,
-  onSubmit,
+  onRetryAiConsent,
+  onWriteManually,
 }: ReviewStepProps) {
   const player = useAudioPlayer(recording.uri);
   const playerStatus = useAudioPlayerStatus(player);
@@ -44,13 +51,7 @@ export function ReviewStep({
       title="Your mix is ready"
       subtitle={`One last listen before ${relationship.friendFirstName} gets the private approval invite.`}
       onBack={onBack}
-      footer={
-        <HypeButton
-          disabled={!isLongEnough || submitting}
-          label={submitting ? 'Preparing…' : errorMessage ? 'Try again' : 'Create my draft'}
-          onPress={onSubmit}
-        />
-      }
+      footer={null}
     >
       <StickerCard>
         <Text style={styles.sectionTitle}>The setup</Text>
@@ -96,6 +97,15 @@ export function ReviewStep({
           Nothing goes public until your friend approves or replaces every photo.
         </Text>
       </StickerCard>
+
+      <AiConsentDisclosure
+        busy={!isLongEnough || submitting}
+        errorMessage={errorMessage}
+        onCreateAiDraft={onCreateAiDraft}
+        onRetry={onRetryAiConsent}
+        onWriteManually={onWriteManually}
+        state={aiConsentState}
+      />
 
       {progressMessage ? <Text style={styles.progress}>{progressMessage}</Text> : null}
       {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}

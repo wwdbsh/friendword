@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 import { z } from 'zod';
 
-import { PurchasesRepo, type PurchaseBenefitScope } from '@friendword/data/src/purchasesRepo';
+import { PurchasesRepo, type PurchaseBenefitScope } from '@friendword/data';
 
 import { getSupabaseClient } from './supabaseClient';
 

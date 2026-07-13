@@ -10,3 +10,4 @@ export * from './pitchDraftRepo';
 export * from './publishedPitchRepo';
 export * from './safetyRepo';
 export * from './benefitsRepo';
+export * from './purchasesRepo';

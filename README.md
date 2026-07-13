@@ -23,25 +23,28 @@ The end-to-end flow is:
 
 ## Repository layout and current state
 
-pnpm monorepo: `apps/mobile` (Expo), `apps/web` (Next.js 15), `packages/{domain,contracts,config,ui-tokens,data,adapters}`, `supabase/` (migrations 0001–0023, all state transitions behind SECURITY DEFINER RPCs). Web surfaces: the acquisition landing `/`, public pitch `/p/[slug]` (+ `/api/og` campaign image), interest flow, consent flow `/consent/[token]`, inbox with campaign management and Campaign Pass funnel, intro rooms, the Creator Launch kit `/kit/[draftId]`, and the APIs `/api/transcribe`, `/api/revenuecat`, `/api/media/validate`, `/api/report`.
+pnpm monorepo: `apps/mobile` (Expo), `apps/web` (Next.js 15), `packages/{domain,contracts,config,ui-tokens,data,adapters}`, `supabase/` (migrations 0001–0033, all state transitions behind SECURITY DEFINER RPCs and enforcement triggers). Web surfaces: the acquisition landing `/`, public pitch `/p/[slug]` (+ `/api/og` campaign image), interest flow, consent flow `/consent/[token]` with full dater controls (edit every word, upload own photos, audience/location/duration), inbox with campaign management and Campaign Pass funnel, intro rooms, the Creator Launch kit `/kit/[draftId]`, and the APIs `/api/transcribe`, `/api/revenuecat`, `/api/media/validate`, `/api/moderate-text`, `/api/report`. The public surface ships English-first, and the demo pitch is honest about having no voice recording (no simulated playback).
 
-**Current verdict (second audit, 2026-07-13): functional beta.** The product is not ready for an external beta, real payments, or Grand Prize submission. [`docs/FRIENDWORD_SECOND_AUDIT_HANDOFF_2026-07-13.md`](docs/FRIENDWORD_SECOND_AUDIT_HANDOFF_2026-07-13.md) is the acceptance source of truth; real payments and public interest submission are blocked server-side by the launch gates in migration 0023 until its Slice 10 release gate passes. The first audit and its resolution are recorded in [`docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md`](docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md); working status lives in [`docs/SESSION_HANDOFF.md`](docs/SESSION_HANDOFF.md) and [`docs/TASKS.md`](docs/TASKS.md).
+Outcome analytics (publish, interest decisions, purchases, safety actions) are recorded by database triggers and stamped `recorded_by: "server"`; clients can only send a small validated set of interaction events. Campaign expiration is a real state machine: `expire_due_campaigns()` (service-role only, run via `scripts/run-scheduled-ops.mjs`) transitions past-`ends_at` campaigns to `expired`, which can never be resumed. See [`docs/ANALYTICS_PLAN.md`](docs/ANALYTICS_PLAN.md) and [`docs/OPS.md`](docs/OPS.md).
+
+**Current verdict (2026-07-13): functional beta — second-audit Slices 0–10 complete, launch gates still closed.** All code, schema, and test gates of [`docs/FRIENDWORD_SECOND_AUDIT_HANDOFF_2026-07-13.md`](docs/FRIENDWORD_SECOND_AUDIT_HANDOFF_2026-07-13.md) (the acceptance source of truth) pass: the audit2 acceptance suite is 14/14 green and runs in CI. Real payments and public interest submission remain blocked server-side by the launch gates (migration 0023) because five user-gated proofs are still outstanding — a real RevenueCat sandbox round-trip, an identity vendor, live moderation keys, real-device iOS QA, and the Resend domain / `EXPO_PUBLIC_WEB_ORIGIN`. The release-gate verdict and the exact unlock checklist live in [`docs/DECISIONS.md`](docs/DECISIONS.md); working status lives in [`docs/SESSION_HANDOFF.md`](docs/SESSION_HANDOFF.md) and [`docs/TASKS.md`](docs/TASKS.md). The first audit and its resolution are recorded in [`docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md`](docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md).
 
 ## Local development
 
 ```bash
 pnpm install
 pnpm lint && pnpm typecheck && pnpm test && pnpm format:check
-bash scripts/test-db.sh          # migrations + DB/RLS suites 01–17 on local PostgreSQL 17
-bash scripts/test-db-audit.sh    # audit regression suite (7 files)
+bash scripts/test-db.sh          # migrations + DB/RLS suites 01–18 on local PostgreSQL 17
+bash scripts/test-db-audit.sh    # first-audit regression suite (7 files, green)
 pnpm test:audit                  # DB audit runner + webhook contract suite (first audit, green)
-pnpm test:audit2                 # second-audit regression suite (red by design until Slices 1–9 land)
+pnpm test:audit2                 # second-audit acceptance suite (14/14 green, enforced in CI)
 pnpm --filter @friendword/web test:e2e   # Playwright (reuses :3000, boots a dev server otherwise)
 node scripts/e2e-production.mjs  # full-funnel E2E against hosted Supabase (mutating — advisor-run)
+node scripts/run-scheduled-ops.mjs       # campaign expiration + deletion queue + orphan sweep (dry-run)
 node scripts/export-growth-evidence.mjs  # anonymized aggregate metrics
 ```
 
-CI runs lint/type/unit/format, the web production build, the webhook audit suite, the Playwright suite against a mocked-network dev server, and both DB harnesses on every push.
+CI runs lint/type/unit/format, the web production build, both webhook audit suites (first audit + audit2), the Playwright suite against a mocked-network dev server, and all three DB harnesses (base, audit, audit2) on every push.
 
 ## Environment and secrets
 
@@ -65,9 +68,9 @@ Configure the `starter`, `creator_launch`, and `campaign_30d` offerings against 
 
 ## Provider adapters and staged enforcement
 
-Transcription, pitch structuring, and moderation run through provider adapters: with `OPENAI_API_KEY` set they call OpenAI for real; without it the affected endpoint answers 501 or records a `skipped` moderation verdict — nothing is ever faked into production data. Identity verification is deliberately `Unconfigured` and fails loudly until a liveness/face-match vendor is selected.
+Transcription, pitch structuring, and moderation run through provider adapters: with `OPENAI_API_KEY` set they call OpenAI for real; without it the affected endpoint answers 501 or records a `skipped` moderation verdict — nothing is ever faked into production data. Identity verification is deliberately `Unconfigured` and fails loudly until a liveness/face-match vendor is selected. Every provider call is reserved first against the server-side usage ledger (per-user quota, $200 monthly hard cap, emergency kill switch) and, for draft-scoped AI work, requires the introducer's recorded external-AI processing consent.
 
-Two service-role switches in `app_config` stage the launch boundaries: `identity_enforcement` (when `on`, publish and interest submission require a passed `verification_checks` row plus a verified phone) and `media_validation_enforcement` (when `on`, only server-validated, moderation-passed media can finalize or submit). Both default to `off` until their provider keys exist; the regression suites already assert the enforced behavior. Never mark privacy, consent, moderation, identity, or payment work complete with mocks alone.
+Two service-role switches in `app_config` stage the launch boundaries: `identity_enforcement` (when `on`, publishing requires typed, unexpired evidence — 18+, liveness, and a face match bound to the approved primary photo — plus a verified phone) and `media_validation_enforcement` (when `on`, only server-validated media and moderation-passed transcripts/text can finalize or submit). Both default to `off` until their provider keys exist; the regression suites already assert the enforced behavior. Never mark privacy, consent, moderation, identity, or payment work complete with mocks alone.
 
 ## Cost guardrail
 

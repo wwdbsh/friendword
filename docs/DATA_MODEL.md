@@ -1,45 +1,37 @@
 # 데이터 모델
 
+> 실측 기준: migrations 0001~0033 (2026-07-13). 새 테이블·컬럼은 마이그레이션이 source of truth이며 이 문서는 관계·불변식 요약이다.
+
 ## Core tables
 
 ```text
-users
-profiles
-dating_profiles
-introducer_profiles
-pitch_drafts
-pitch_assets
-consent_requests
-campaigns
-campaign_memberships
-vouches
-interests
-intro_rooms
-messages
-reports
-blocks
-verification_checks
-purchase_events
-purchase_credit_ledger
-campaign_entitlements
-analytics_events
-provider_usage_events
-cost_ledger
+users, profiles, dating_profiles, introducer_profiles
+pitch_drafts, pitch_assets, consent_requests, consent_revisions
+campaigns, campaign_memberships, vouches
+interests, intro_rooms, messages
+reports, blocks, verification_checks, deletion_requests
+purchase_intents, purchase_events, purchase_event_reviews,
+purchase_credit_ledger, campaign_entitlements, share_kits
+analytics_events, provider_usage_events, cost_ledger
+media_validations, text_moderations, ai_processing_consents
+app_config, ops_alerts
 ```
 
 ## 핵심 소유·관계 필드
 
-| 테이블                 | 핵심 필드와 의미                                                                                                                   |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `users`                | `id`, `auth_identity`, `phone_verified_at`, `account_status`                                                                       |
-| `profiles`             | `user_id`, `display_name`, `birth_date`, `locale`, `verification_status`                                                           |
-| `dating_profiles`      | `user_id`, `bio`, `photos`, `dating_intent`, `approximate_location`, `profile_updated_at`; Dater와 Interested Person이 공유합니다. |
-| `introducer_profiles`  | `user_id`, `pseudonym`, `completed_introduction_count`, `unlocked_customizations`; 별도 계정이 아닌 선택적 facet입니다.            |
-| `campaigns`            | `id`, `owner_user_id`; owner는 `DATER_OWNER`입니다.                                                                                |
-| `campaign_memberships` | `campaign_id`, `user_id`, `role` (`DATER_OWNER`, `INTRODUCER`, `ADDITIONAL_VOUCHER`), `status`                                     |
-| `pitch_drafts`         | `id`, `created_by_user_id`(Introducer), `subject_user_id`(invitation claim 후 Dater)                                               |
-| `interests`            | `campaign_id`, `sender_user_id`; Interested Person은 membership이 아니라 sender 관계입니다.                                        |
-| `purchase_events`      | `purchaser_user_id`, `product_id`, `scope_type` (`PITCH_DRAFT` 또는 `CAMPAIGN`), `scope_id`                                        |
+| 테이블                 | 핵심 필드와 의미                                                                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `users`                | `id`, `auth_identity`, `phone_verified_at`, `account_status`                                                                               |
+| `profiles`             | `user_id`, `display_name`, `birth_date`, `locale`, `verification_status`                                                                   |
+| `dating_profiles`      | `user_id`, `bio`, `photos`, `dating_intent`, `approximate_location`, `profile_updated_at`; Dater와 Interested Person이 공유합니다.         |
+| `introducer_profiles`  | `user_id`, `pseudonym`, `completed_introduction_count`, `unlocked_customizations`; 별도 계정이 아닌 선택적 facet입니다.                    |
+| `campaigns`            | `id`, `owner_user_id`(=`DATER_OWNER`), `slug`, `ends_at`, `audience_policy`(JSONB), `location_precision`(`city/region/hidden`)             |
+| `campaign_memberships` | `campaign_id`, `user_id`, `role` (`DATER_OWNER`, `INTRODUCER`, `ADDITIONAL_VOUCHER`), `status`                                             |
+| `pitch_drafts`         | `created_by_user_id`(Introducer), `subject_user_id`(claim 후 Dater), `transcript`(JSONB), `audience_policy`, `publish_days`(7/14)          |
+| `consent_revisions`    | draft별 immutable snapshot(`headline/body/structure/asset_ids/voice_asset_path/transcript/content_hash`); 수정=새 revision                 |
+| `interests`            | `campaign_id`, `sender_user_id`; Interested Person은 membership이 아니라 sender 관계입니다. audience policy는 INSERT 트리거가 강제         |
+| `purchase_events`      | `purchaser_user_id`, `product_id`, `scope_type` (`PITCH_DRAFT` 또는 `CAMPAIGN`), `scope_id`; 미귀속 이벤트는 `purchase_event_reviews` 큐로 |
+| `analytics_events`     | `user_id`, `event_name`, `properties`; outcome은 트리거가 기록하고 `recorded_by:"server"`로 표시, client는 interaction 이벤트만            |
 
 ## DB/RLS invariant
 
@@ -57,8 +49,12 @@ cost_ledger
 
 ```text
 PitchDraft:
-draft → consent_pending → changes_requested → approved
-      → published → paused → expired → archived/deleted
+draft → consent_pending → changes_requested → … → published → archived
+
+Campaign:
+published ⇄ paused → archived
+published/paused --(ends_at 경과, expire_due_campaigns)--> expired → archived
+  · expired는 재개(published 복귀) 불가 — set_campaign_status가 서버에서 거부
 
 Interest:
 started → verification_pending → submitted
@@ -68,4 +64,4 @@ IntroRoom:
 open → left | blocked | closed
 ```
 
-모든 전이는 서버에서 검증합니다. Introducer는 `approved` 이후 콘텐츠를 직접 변경할 수 없고 Dater만 게시·중지·삭제할 수 있습니다. 권한은 전역 role이 아니라 현재 resource의 membership과 ownership으로 판정합니다.
+모든 전이는 서버에서 검증합니다. Introducer는 consent 진입 이후 콘텐츠를 직접 변경할 수 없고(수정은 재제출로 새 immutable revision 생성), Dater는 자신의 문구·사진·audience·기간을 새 revision과 publish preference로 통제하며 publish RPC는 정확히 승인된 snapshot만 발행합니다. 권한은 전역 role이 아니라 현재 resource의 membership과 ownership으로 판정합니다.

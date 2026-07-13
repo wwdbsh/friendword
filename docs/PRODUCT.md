@@ -1,5 +1,7 @@
 # 제품 정의
 
+> 이 문서는 목표 제품 계약입니다. 구현 현황(2026-07-13, 2차 감사 Slice 0~~10 완주): Flow A~~C와 공개 피치·인박스·Intro Room·Creator kit은 구현·검증됐고, Dater는 문구·사진·audience·위치 정밀도·기간(7/14일)을 실제로 통제합니다. Flow D(추가 vouch)와 MP4 export는 P1 미구현입니다. 신원·얼굴 검증은 스키마·게이트만 존재하며 벤더 연동 전까지 enforcement off — 완료 상태는 `docs/SESSION_HANDOFF.md`·`docs/TASKS.md`를 따릅니다.
+
 ## Overview
 
 Friendword는 친구의 30~60초 음성 추천을 당사자가 승인한 사진·문구와 결합해 공유 가능한 세로형 모션 피치로 만들고, 이를 본 사람이 검증된 프로필로 관심을 표현한 뒤 당사자가 수락하면 안전한 인앱 대화를 시작하는 18세 이상 대상의 friend-led dating campaign 앱입니다.

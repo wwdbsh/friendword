@@ -3,6 +3,7 @@ CREATE SCHEMA IF NOT EXISTS auth;
 CREATE TABLE IF NOT EXISTS auth.users (
   id UUID PRIMARY KEY,
   email TEXT UNIQUE,
+  raw_user_meta_data JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

@@ -2,7 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createClient } from '@supabase/supabase-js';
 
-import { ensureUserRow, signInWithOtp, verifyOtp } from './auth';
+import {
+  confirmDisplayName,
+  ensureUserRow,
+  getDisplayNameStatus,
+  signInWithOtp,
+  verifyOtp,
+} from './auth';
 import {
   createBrowserClient,
   createMobileClient,
@@ -12,7 +18,12 @@ import {
   type ServiceSupabaseClient,
 } from './client';
 import { ConsentRepo } from './consentRepo';
-import { InvalidDraftUpdateError, InvalidStoragePathError, UnauthenticatedError } from './errors';
+import {
+  DataLayerError,
+  InvalidDraftUpdateError,
+  InvalidStoragePathError,
+  UnauthenticatedError,
+} from './errors';
 import { buildPitchMediaPath, PitchDraftRepo } from './pitchDraftRepo';
 import { getPublishedPitchBySlug } from './publishedPitchRepo';
 
@@ -23,6 +34,13 @@ const mocks = vi.hoisted(() => ({
   verifyOtp: vi.fn(),
   usersUpsert: vi.fn(),
   profilesUpsert: vi.fn(),
+  profilesSelect: vi.fn(),
+  profilesSelectEq: vi.fn(),
+  profilesSelectSingle: vi.fn(),
+  profilesUpdate: vi.fn(),
+  profilesUpdateEq: vi.fn(),
+  profilesUpdateSelect: vi.fn(),
+  profilesUpdateSingle: vi.fn(),
   draftInsert: vi.fn(),
   draftUpdate: vi.fn(),
   draftSelect: vi.fn(),
@@ -47,7 +65,11 @@ function configureMockClient(): void {
         return { upsert: mocks.usersUpsert };
       }
       if (table === 'profiles') {
-        return { upsert: mocks.profilesUpsert };
+        return {
+          upsert: mocks.profilesUpsert,
+          select: mocks.profilesSelect,
+          update: mocks.profilesUpdate,
+        };
       }
       return {
         insert: mocks.draftInsert,
@@ -73,6 +95,15 @@ describe('Supabase clients and auth', () => {
     mocks.verifyOtp.mockResolvedValue({ data: { session: null }, error: null });
     mocks.usersUpsert.mockResolvedValue({ error: null });
     mocks.profilesUpsert.mockResolvedValue({ error: null });
+    mocks.profilesSelect.mockReturnValue({ eq: mocks.profilesSelectEq });
+    mocks.profilesSelectEq.mockReturnValue({ single: mocks.profilesSelectSingle });
+    mocks.profilesUpdate.mockReturnValue({ eq: mocks.profilesUpdateEq });
+    mocks.profilesUpdateEq.mockReturnValue({ select: mocks.profilesUpdateSelect });
+    mocks.profilesUpdateSelect.mockReturnValue({ single: mocks.profilesUpdateSingle });
+    mocks.profilesUpdateSingle.mockResolvedValue({
+      data: { user_id: '00000000-0000-0000-0000-000000000001' },
+      error: null,
+    });
   });
 
   it('configures the browser client with the supplied anonymous key', () => {
@@ -196,6 +227,97 @@ describe('Supabase clients and auth', () => {
       { ignoreDuplicates: true, onConflict: 'user_id' },
     );
     expect(result.profileDisplayName).toBe('Person');
+  });
+
+  it('marks a display name confirmed only when the caller explicitly supplies it', async () => {
+    mocks.getSession.mockResolvedValue({
+      data: {
+        session: {
+          user: {
+            id: '00000000-0000-0000-0000-000000000001',
+            email: 'fallback@example.com',
+            user_metadata: {},
+          },
+        },
+      },
+      error: null,
+    });
+    const client = createBrowserClient('https://project.example', 'anon-key');
+
+    const result = await ensureUserRow(client, { confirmedDisplayName: '  Chosen Name  ' });
+
+    expect(mocks.profilesUpsert).toHaveBeenCalledWith(
+      {
+        user_id: '00000000-0000-0000-0000-000000000001',
+        display_name: 'Chosen Name',
+        display_name_confirmed: true,
+      },
+      { onConflict: 'user_id' },
+    );
+    expect(result.profileDisplayName).toBe('Chosen Name');
+  });
+
+  it('reads the current display name confirmation state for the signed-in user', async () => {
+    mocks.getSession.mockResolvedValue({
+      data: {
+        session: { user: { id: '00000000-0000-0000-0000-000000000001' } },
+      },
+      error: null,
+    });
+    mocks.profilesSelectSingle.mockResolvedValue({
+      data: { display_name: 'Fallback', display_name_confirmed: false },
+      error: null,
+    });
+    const client = createBrowserClient('https://project.example', 'anon-key');
+
+    const status = await getDisplayNameStatus(client);
+
+    expect(mocks.profilesSelect).toHaveBeenCalledWith('display_name, display_name_confirmed');
+    expect(mocks.profilesSelectEq).toHaveBeenCalledWith(
+      'user_id',
+      '00000000-0000-0000-0000-000000000001',
+    );
+    expect(status).toEqual({ displayName: 'Fallback', confirmed: false });
+  });
+
+  it('confirms a trimmed display name on only the signed-in profile', async () => {
+    mocks.getSession.mockResolvedValue({
+      data: {
+        session: { user: { id: '00000000-0000-0000-0000-000000000001' } },
+      },
+      error: null,
+    });
+    const client = createBrowserClient('https://project.example', 'anon-key');
+
+    await confirmDisplayName(client, '  Approved Name  ');
+
+    expect(mocks.profilesUpdate).toHaveBeenCalledWith({
+      display_name: 'Approved Name',
+      display_name_confirmed: true,
+    });
+    expect(mocks.profilesUpdateEq).toHaveBeenCalledWith(
+      'user_id',
+      '00000000-0000-0000-0000-000000000001',
+    );
+    expect(mocks.profilesUpdateSelect).toHaveBeenCalledWith('user_id');
+  });
+
+  it('rejects display name confirmation when no profile row is updated', async () => {
+    mocks.getSession.mockResolvedValue({
+      data: {
+        session: { user: { id: '00000000-0000-0000-0000-000000000001' } },
+      },
+      error: null,
+    });
+    mocks.profilesUpdateSingle.mockResolvedValue({
+      data: null,
+      error: { message: 'JSON object requested, multiple (or no) rows returned' },
+    });
+    const client = createBrowserClient('https://project.example', 'anon-key');
+
+    await expect(confirmDisplayName(client, 'Approved Name')).rejects.toBeInstanceOf(
+      DataLayerError,
+    );
   });
 });
 

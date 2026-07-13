@@ -4,8 +4,11 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 
 import {
+  confirmDisplayName,
   ConsentRepo,
   DataLayerError,
+  ensureUserRow,
+  getDisplayNameStatus,
   signInWithOtp,
   trackEvent,
   type BrowserSupabaseClient,
@@ -49,6 +52,13 @@ type FlowState =
   | { readonly step: 'signin'; readonly preview: ConsentPreview }
   | { readonly step: 'link-sent'; readonly preview: ConsentPreview; readonly email: string }
   | { readonly step: 'claiming'; readonly preview: ConsentPreview }
+  | {
+      readonly step: 'name-confirmation';
+      readonly preview: ConsentPreview;
+      readonly draft: PitchDraftRow;
+      readonly voiceUrl: string | null;
+      readonly photos: readonly { readonly assetId: string; readonly url: string }[];
+    }
   | {
       readonly step: 'review';
       readonly preview: ConsentPreview;
@@ -101,6 +111,9 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   const [state, setState] = useState<FlowState>({ step: 'loading' });
   const [email, setEmail] = useState('');
   const [sendingLink, setSendingLink] = useState(false);
+  const [displayName, setDisplayName] = useState('');
+  const [confirmingName, setConfirmingName] = useState(false);
+  const [displayNameError, setDisplayNameError] = useState<string | null>(null);
   const [excludedIds, setExcludedIds] = useState<readonly string[]>([]);
   const [campaignDays, setCampaignDays] = useState<7 | 30 | 90>(30);
   const claimStartedRef = useRef(false);
@@ -115,6 +128,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
 
       const repo = new ConsentRepo(activeClient);
       try {
+        await ensureUserRow(activeClient);
         const { pitchDraftId } = await repo.claim(token);
         trackEvent(activeClient, 'dater_verified', { pitch_draft_id: pitchDraftId });
         const draft = await repo.getDraftForReview(pitchDraftId);
@@ -132,8 +146,17 @@ export function ConsentFlow({ token }: { readonly token: string }) {
               ),
           )
         ).filter((photo): photo is { assetId: string; url: string } => photo !== null);
-        setState({ step: 'review', preview, draft, voiceUrl, photos });
+        const nameStatus = await getDisplayNameStatus(activeClient);
+        if (nameStatus.confirmed) {
+          setState({ step: 'review', preview, draft, voiceUrl, photos });
+        } else {
+          setDisplayName(nameStatus.displayName);
+          setState({ step: 'name-confirmation', preview, draft, voiceUrl, photos });
+        }
       } catch (error: unknown) {
+        if (!(error instanceof Error)) {
+          throw error;
+        }
         claimStartedRef.current = false;
         setState({ step: 'error', message: claimErrorMessage(error) });
       }
@@ -230,7 +253,32 @@ export function ConsentFlow({ token }: { readonly token: string }) {
       trackEvent(client, 'campaign_published', { campaign_id: campaignId });
       router.push(`/p/${campaignSlug}`);
     } catch (error: unknown) {
+      if (!(error instanceof Error)) {
+        throw error;
+      }
       setState({ step: 'error', message: claimErrorMessage(error) });
+    }
+  }
+
+  async function handleConfirmDisplayName(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (client === null || state.step !== 'name-confirmation') {
+      return;
+    }
+
+    setConfirmingName(true);
+    setDisplayNameError(null);
+    try {
+      await confirmDisplayName(client, displayName);
+      setState({ ...state, step: 'review' });
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        setDisplayNameError('We could not save your name. Check it and try again.');
+        return;
+      }
+      throw error;
+    } finally {
+      setConfirmingName(false);
     }
   }
 
@@ -331,6 +379,34 @@ export function ConsentFlow({ token }: { readonly token: string }) {
 
             {state.step === 'claiming' && <p className={styles.muted}>Unlocking your review…</p>}
             {state.step === 'publishing' && <p className={styles.muted}>Publishing your page…</p>}
+          </section>
+        )}
+
+        {state.step === 'name-confirmation' && (
+          <section className={styles.card}>
+            <span className={styles.badge}>Before you review</span>
+            <h1 className={styles.title}>What should we call you?</h1>
+            <p className={styles.lede}>
+              Check the name below before it appears on your Friendword page. You can change it now.
+            </p>
+            <form className={styles.form} onSubmit={handleConfirmDisplayName}>
+              <label className={styles.label} htmlFor="consent-display-name">
+                Your name
+              </label>
+              <input
+                id="consent-display-name"
+                className={styles.input}
+                type="text"
+                required
+                autoComplete="name"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+              />
+              <button className={styles.secondary} type="submit" disabled={confirmingName}>
+                {confirmingName ? 'Saving…' : 'Save & review the pitch'}
+              </button>
+              {displayNameError !== null && <p className={styles.error}>{displayNameError}</p>}
+            </form>
           </section>
         )}
 

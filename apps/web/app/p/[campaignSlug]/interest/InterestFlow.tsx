@@ -4,7 +4,10 @@ import Link from 'next/link';
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import {
+  confirmDisplayName,
   DataLayerError,
+  ensureUserRow,
+  getDisplayNameStatus,
   InterestRepo,
   trackEvent,
   type BrowserSupabaseClient,
@@ -69,6 +72,9 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
   const { session, loading } = useSession(client);
 
   const [bio, setBio] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [displayNameConfirmed, setDisplayNameConfirmed] = useState(false);
+  const [displayNameLoaded, setDisplayNameLoaded] = useState(false);
   const [birthDate, setBirthDate] = useState('');
   const [intent, setIntent] = useState<string>('long-term');
   const [location, setLocation] = useState('');
@@ -92,12 +98,21 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
 
     let cancelled = false;
     const repo = new InterestRepo(client);
-    void repo
-      .getMyDatingProfile()
-      .then(async (profile) => {
-        if (cancelled || profile === null) {
-          return;
-        }
+    void (async () => {
+      await ensureUserRow(client);
+      const nameStatus = await getDisplayNameStatus(client);
+      if (cancelled) {
+        return;
+      }
+      setDisplayName(nameStatus.displayName);
+      setDisplayNameConfirmed(nameStatus.confirmed);
+
+      const profile = await repo.getMyDatingProfile();
+      if (cancelled) {
+        return;
+      }
+      setDisplayNameLoaded(true);
+      if (profile !== null) {
         setBio(profile.bio ?? '');
         setIntent(profile.dating_intent ?? 'long-term');
         setLocation(profile.approximate_location ?? '');
@@ -109,11 +124,21 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
               .catch(() => null),
           ),
         );
+        if (cancelled) {
+          return;
+        }
+        setPhotos(previews.filter((photo): photo is UploadedPhoto => photo !== null));
+      }
+    })()
+      .catch((loadError: unknown) => {
         if (!cancelled) {
-          setPhotos(previews.filter((photo): photo is UploadedPhoto => photo !== null));
+          setError(
+            loadError instanceof Error
+              ? 'We could not load your profile. Refresh the page to try again.'
+              : 'We could not read the profile response. Refresh the page to try again.',
+          );
         }
       })
-      .catch(() => undefined)
       .finally(() => {
         if (!cancelled) {
           setPrefillDone(true);
@@ -145,6 +170,9 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
       }
       setPhotos((current) => [...current, ...uploaded].slice(0, 6));
     } catch (uploadError: unknown) {
+      if (!(uploadError instanceof Error)) {
+        throw uploadError;
+      }
       setError(errorCopy(uploadError));
     } finally {
       setUploading(false);
@@ -160,6 +188,10 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
     setError(null);
     try {
       const repo = new InterestRepo(client);
+      if (!displayNameConfirmed) {
+        await confirmDisplayName(client, displayName);
+        setDisplayNameConfirmed(true);
+      }
       await repo.saveDatingProfile({
         bio: bio.trim(),
         datingIntent: intent,
@@ -174,6 +206,9 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
       });
       setSubmitted(true);
     } catch (submitError: unknown) {
+      if (!(submitError instanceof Error)) {
+        throw submitError;
+      }
       setError(errorCopy(submitError));
     } finally {
       setSubmitting(false);
@@ -223,116 +258,159 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
           </section>
         )}
 
-        {client !== null && !loading && session !== null && !submitted && (
-          <section className={styles.card}>
-            <span className={styles.badge}>Verified interest</span>
-            <h1 className={styles.title}>Introduce yourself to {daterName}.</h1>
-            <p className={styles.muted}>
-              {daterName} sees this profile before deciding. Contact details are never shared.
-            </p>
-
-            <form className={styles.form} onSubmit={handleSubmit}>
-              <label className={styles.label} htmlFor="interest-bio">
-                Short bio
-              </label>
-              <textarea
-                id="interest-bio"
-                className={styles.textarea}
-                required
-                minLength={10}
-                placeholder="Museum lover, weekend cyclist, serious about pasta."
-                value={bio}
-                onChange={(event) => setBio(event.target.value)}
-              />
-
-              <label className={styles.label} htmlFor="interest-birth-date">
-                Birth date (18+)
-              </label>
-              <input
-                id="interest-birth-date"
-                className={styles.input}
-                type="date"
-                required
-                value={birthDate}
-                onChange={(event) => setBirthDate(event.target.value)}
-              />
-
-              <span className={styles.label}>Looking for</span>
-              <div className={styles.chipRow} role="radiogroup" aria-label="Dating intent">
-                {DATING_INTENTS.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    role="radio"
-                    aria-checked={intent === option.value}
-                    className={`${styles.chip} ${intent === option.value ? styles.chipActive : ''}`}
-                    onClick={() => setIntent(option.value)}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-
-              <label className={styles.label} htmlFor="interest-location">
-                City or area (optional)
-              </label>
-              <input
-                id="interest-location"
-                className={styles.input}
-                type="text"
-                placeholder="Brooklyn, New York"
-                value={location}
-                onChange={(event) => setLocation(event.target.value)}
-              />
-
-              <span className={styles.label}>Current photos (at least 2)</span>
-              <div className={styles.photoGrid}>
-                {photos.map((photo, index) => (
-                  <img
-                    key={photo.storagePath}
-                    className={styles.photo}
-                    src={photo.previewUrl}
-                    alt={`Your photo ${index + 1}`}
-                  />
-                ))}
-              </div>
-              <input
-                aria-label="Add photos"
-                type="file"
-                accept="image/*"
-                multiple
-                disabled={uploading}
-                onChange={(event) => {
-                  void handlePhotoUpload(event);
-                }}
-              />
-              {uploading && <p className={styles.muted}>Uploading…</p>}
-
-              <label className={styles.label} htmlFor="interest-note">
-                A note for {daterName} (optional)
-              </label>
-              <textarea
-                id="interest-note"
-                className={styles.textarea}
-                placeholder="We keep almost meeting at the same shows…"
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-              />
-
-              <button
-                className={styles.primary}
-                type="submit"
-                disabled={submitting || uploading || photos.length < 2}
-              >
-                {submitting ? 'Sending…' : `Send interest to ${daterName}`}
-              </button>
-              {photos.length < 2 && (
-                <p className={styles.finePrint}>Add at least 2 current photos to send.</p>
-              )}
-              {error !== null && <p className={styles.error}>{error}</p>}
-            </form>
+        {client !== null && !loading && session !== null && !submitted && !prefillDone && (
+          <section className={styles.card} aria-live="polite">
+            <h1 className={styles.title}>Loading your profile…</h1>
           </section>
         )}
+
+        {client !== null &&
+          !loading &&
+          session !== null &&
+          !submitted &&
+          prefillDone &&
+          !displayNameLoaded && (
+            <section className={styles.card}>
+              <h1 className={styles.title}>We couldn’t load your profile.</h1>
+              <p className={styles.muted}>Refresh the page to try again before sending interest.</p>
+            </section>
+          )}
+
+        {client !== null &&
+          !loading &&
+          session !== null &&
+          !submitted &&
+          prefillDone &&
+          displayNameLoaded && (
+            <section className={styles.card}>
+              <span className={styles.badge}>Verified interest</span>
+              <h1 className={styles.title}>Introduce yourself to {daterName}.</h1>
+              <p className={styles.muted}>
+                {daterName} sees this profile before deciding. Contact details are never shared.
+              </p>
+
+              <form className={styles.form} onSubmit={handleSubmit}>
+                {!displayNameConfirmed && (
+                  <>
+                    <label className={styles.label} htmlFor="interest-display-name">
+                      Your name
+                    </label>
+                    <input
+                      id="interest-display-name"
+                      className={styles.input}
+                      type="text"
+                      required
+                      autoComplete="name"
+                      value={displayName}
+                      onChange={(event) => setDisplayName(event.target.value)}
+                    />
+                    <p className={styles.muted}>
+                      Confirm how your name should appear before sending your profile.
+                    </p>
+                  </>
+                )}
+
+                <label className={styles.label} htmlFor="interest-bio">
+                  Short bio
+                </label>
+                <textarea
+                  id="interest-bio"
+                  className={styles.textarea}
+                  required
+                  minLength={10}
+                  placeholder="Museum lover, weekend cyclist, serious about pasta."
+                  value={bio}
+                  onChange={(event) => setBio(event.target.value)}
+                />
+
+                <label className={styles.label} htmlFor="interest-birth-date">
+                  Birth date (18+)
+                </label>
+                <input
+                  id="interest-birth-date"
+                  className={styles.input}
+                  type="date"
+                  required
+                  value={birthDate}
+                  onChange={(event) => setBirthDate(event.target.value)}
+                />
+
+                <span className={styles.label}>Looking for</span>
+                <div className={styles.chipRow} role="radiogroup" aria-label="Dating intent">
+                  {DATING_INTENTS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={intent === option.value}
+                      className={`${styles.chip} ${intent === option.value ? styles.chipActive : ''}`}
+                      onClick={() => setIntent(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+
+                <label className={styles.label} htmlFor="interest-location">
+                  City or area (optional)
+                </label>
+                <input
+                  id="interest-location"
+                  className={styles.input}
+                  type="text"
+                  placeholder="Brooklyn, New York"
+                  value={location}
+                  onChange={(event) => setLocation(event.target.value)}
+                />
+
+                <span className={styles.label}>Current photos (at least 2)</span>
+                <div className={styles.photoGrid}>
+                  {photos.map((photo, index) => (
+                    <img
+                      key={photo.storagePath}
+                      className={styles.photo}
+                      src={photo.previewUrl}
+                      alt={`Your photo ${index + 1}`}
+                    />
+                  ))}
+                </div>
+                <input
+                  aria-label="Add photos"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  disabled={uploading}
+                  onChange={(event) => {
+                    void handlePhotoUpload(event);
+                  }}
+                />
+                {uploading && <p className={styles.muted}>Uploading…</p>}
+
+                <label className={styles.label} htmlFor="interest-note">
+                  A note for {daterName} (optional)
+                </label>
+                <textarea
+                  id="interest-note"
+                  className={styles.textarea}
+                  placeholder="We keep almost meeting at the same shows…"
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                />
+
+                <button
+                  className={styles.primary}
+                  type="submit"
+                  disabled={submitting || uploading || photos.length < 2}
+                >
+                  {submitting ? 'Sending…' : `Send interest to ${daterName}`}
+                </button>
+                {photos.length < 2 && (
+                  <p className={styles.finePrint}>Add at least 2 current photos to send.</p>
+                )}
+                {error !== null && <p className={styles.error}>{error}</p>}
+              </form>
+            </section>
+          )}
       </div>
     </main>
   );

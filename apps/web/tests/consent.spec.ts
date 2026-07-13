@@ -28,6 +28,25 @@ async function mockPreview(page: Page, rows: readonly unknown[]): Promise<void> 
   await page.route('**/rest/v1/rpc/get_consent_preview*', (route) => route.fulfill({ json: rows }));
 }
 
+async function mockUserBootstrap(
+  page: Page,
+  profile: { readonly displayName: string; readonly confirmed: boolean },
+): Promise<void> {
+  await page.route('**/rest/v1/users*', (route) => route.fulfill({ status: 201, json: [] }));
+  await page.route('**/rest/v1/profiles*', (route) => {
+    const method = route.request().method();
+    if (method === 'GET') {
+      return route.fulfill({
+        json: { display_name: profile.displayName, display_name_confirmed: profile.confirmed },
+      });
+    }
+    if (method === 'PATCH') {
+      return route.fulfill({ json: { user_id: DATER_ID } });
+    }
+    return route.fulfill({ status: 201, json: [] });
+  });
+}
+
 async function seedSignedInSession(page: Page): Promise<void> {
   const session = {
     access_token: 'playwright-access-token',
@@ -97,6 +116,7 @@ test('shows the invite preview and sends a magic link while signed out', async (
 test('claims, reviews the voice pitch, and publishes when signed in', async ({ page }) => {
   await mockPreview(page, [pendingPreviewRow]);
   await seedSignedInSession(page);
+  await mockUserBootstrap(page, { displayName: 'Blair', confirmed: true });
 
   await page.route('**/rest/v1/rpc/claim_consent_request*', (route) =>
     route.fulfill({ json: [{ pitch_draft_id: DRAFT_ID }] }),
@@ -135,9 +155,41 @@ test('claims, reviews the voice pitch, and publishes when signed in', async ({ p
   });
 });
 
+test('confirms a fallback display name before the review step', async ({ page }) => {
+  await mockPreview(page, [pendingPreviewRow]);
+  await seedSignedInSession(page);
+  await mockUserBootstrap(page, { displayName: 'dater', confirmed: false });
+
+  await page.route('**/rest/v1/rpc/claim_consent_request*', (route) =>
+    route.fulfill({ json: [{ pitch_draft_id: DRAFT_ID }] }),
+  );
+  await page.route('**/rest/v1/pitch_drafts*', (route) => route.fulfill({ json: draftRow }));
+  await page.route('**/storage/v1/object/sign/pitch-media/**', (route) =>
+    route.fulfill({
+      json: { signedURL: `/object/sign/pitch-media/${DRAFT_ID}/voice.m4a?token=playwright` },
+    }),
+  );
+
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+
+  await test.step('Then the fallback name asks for explicit approval', async () => {
+    await expect(page.getByRole('heading', { name: 'What should we call you?' })).toBeVisible();
+    await expect(page.getByLabel('Your name')).toHaveValue('dater');
+  });
+
+  await test.step('When the dater fixes their name, the review begins', async () => {
+    await page.getByLabel('Your name').fill('Blair');
+    await page.getByRole('button', { name: 'Save & review the pitch' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Hear what Maya says about you.' }),
+    ).toBeVisible();
+  });
+});
+
 test('explains when the invite was claimed by a different account', async ({ page }) => {
   await mockPreview(page, [pendingPreviewRow]);
   await seedSignedInSession(page);
+  await mockUserBootstrap(page, { displayName: 'Blair', confirmed: true });
   await page.route('**/rest/v1/rpc/claim_consent_request*', (route) =>
     route.fulfill({
       status: 400,

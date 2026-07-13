@@ -5,6 +5,7 @@
 // and analytics ingestion — then cleans up everything it created.
 // Run: node scripts/e2e-production.mjs (repo root; needs .env + dev server).
 import { Buffer } from 'node:buffer';
+import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -40,7 +41,7 @@ const stamp = Date.now();
 const introducerEmail = `e2e-introducer-${stamp}@friendword.test`;
 const daterEmail = `e2e-dater-${stamp}@friendword.test`;
 const strangerEmail = `e2e-stranger-${stamp}@friendword.test`;
-const password = `E2e-${stamp}-pass!`;
+const password = `E2e-${randomBytes(24).toString('base64url')}!`;
 
 const created = { users: [], draftId: null, campaignId: null, voicePath: null };
 let failures = 0;
@@ -49,6 +50,19 @@ function check(label, ok, extra = '') {
   const mark = ok ? 'PASS' : 'FAIL';
   if (!ok) failures += 1;
   console.log(`${mark} ${label}${extra ? ` — ${extra}` : ''}`);
+}
+
+async function cleanup(label, operation) {
+  try {
+    const { error } = await operation;
+    if (error) {
+      failures += 1;
+      console.error(`CLEANUP FAIL ${label}`);
+    }
+  } catch {
+    failures += 1;
+    console.error(`CLEANUP FAIL ${label}`);
+  }
 }
 
 async function makeUser(email, displayName) {
@@ -60,18 +74,28 @@ async function makeUser(email, displayName) {
   });
   if (error) throw new Error(`createUser ${email}: ${error.message}`);
   created.users.push(data.user.id);
+  const { data: publicUser, error: publicUserError } = await admin
+    .from('users')
+    .select('id')
+    .eq('id', data.user.id)
+    .single();
+  const { data: profile, error: profileError } = await admin
+    .from('profiles')
+    .select('display_name, display_name_confirmed')
+    .eq('user_id', data.user.id)
+    .single();
+  check(
+    `fresh user public row auto-provisioned (${displayName})`,
+    !publicUserError &&
+      !profileError &&
+      publicUser.id === data.user.id &&
+      profile.display_name === displayName &&
+      profile.display_name_confirmed === true,
+    publicUserError?.message ?? profileError?.message,
+  );
   const client = createClient(url, anonKey, anonAuthOpts);
   const { error: signInError } = await client.auth.signInWithPassword({ email, password });
   if (signInError) throw new Error(`signIn ${email}: ${signInError.message}`);
-  await client
-    .from('users')
-    .upsert({ id: data.user.id }, { ignoreDuplicates: true, onConflict: 'id' });
-  await client
-    .from('profiles')
-    .upsert(
-      { user_id: data.user.id, display_name: displayName },
-      { ignoreDuplicates: true, onConflict: 'user_id' },
-    );
   return { id: data.user.id, client };
 }
 
@@ -648,39 +672,62 @@ try {
     process.exit(0);
   }
   if (created.voicePath) {
-    await admin.storage
-      .from('pitch-media')
-      .remove([created.voicePath, ...(created.photoPaths ?? [])]);
+    await cleanup(
+      'pitch media',
+      admin.storage.from('pitch-media').remove([created.voicePath, ...(created.photoPaths ?? [])]),
+    );
   }
   if (created.profilePhotos) {
-    await admin.storage.from('profile-media').remove(created.profilePhotos);
+    await cleanup(
+      'profile media',
+      admin.storage.from('profile-media').remove(created.profilePhotos),
+    );
   }
   if (created.analyticsSeeded) {
-    await admin.from('analytics_events').delete().contains('properties', { source: 'e2e' });
+    await cleanup(
+      'analytics events',
+      admin.from('analytics_events').delete().contains('properties', { source: 'e2e' }),
+    );
   }
   if (created.campaignId) {
     for (const userId of created.users) {
-      await admin.from('dating_profiles').delete().eq('user_id', userId);
-      await admin.from('reports').delete().eq('reporter_user_id', userId);
+      await cleanup('dating profile', admin.from('dating_profiles').delete().eq('user_id', userId));
+      await cleanup('report', admin.from('reports').delete().eq('reporter_user_id', userId));
     }
-    const { data: roomsToClean } = await admin
+    const { data: roomsToClean, error: roomsError } = await admin
       .from('intro_rooms')
       .select('id')
       .eq('campaign_id', created.campaignId);
-    for (const row of roomsToClean ?? []) {
-      await admin.from('messages').delete().eq('intro_room_id', row.id);
+    if (roomsError) {
+      failures += 1;
+      console.error('CLEANUP FAIL room lookup');
     }
-    await admin.from('intro_rooms').delete().eq('campaign_id', created.campaignId);
-    await admin.from('interests').delete().eq('campaign_id', created.campaignId);
-    await admin.from('campaign_memberships').delete().eq('campaign_id', created.campaignId);
-    await admin.from('campaigns').delete().eq('id', created.campaignId);
+    for (const row of roomsToClean ?? []) {
+      await cleanup('messages', admin.from('messages').delete().eq('intro_room_id', row.id));
+    }
+    await cleanup(
+      'intro rooms',
+      admin.from('intro_rooms').delete().eq('campaign_id', created.campaignId),
+    );
+    await cleanup(
+      'interests',
+      admin.from('interests').delete().eq('campaign_id', created.campaignId),
+    );
+    await cleanup(
+      'campaign memberships',
+      admin.from('campaign_memberships').delete().eq('campaign_id', created.campaignId),
+    );
+    await cleanup('campaign', admin.from('campaigns').delete().eq('id', created.campaignId));
   }
   if (created.draftId) {
-    await admin.from('consent_requests').delete().eq('pitch_draft_id', created.draftId);
-    await admin.from('pitch_drafts').delete().eq('id', created.draftId);
+    await cleanup(
+      'consent request',
+      admin.from('consent_requests').delete().eq('pitch_draft_id', created.draftId),
+    );
+    await cleanup('pitch draft', admin.from('pitch_drafts').delete().eq('id', created.draftId));
   }
   for (const userId of created.users) {
-    await admin.auth.admin.deleteUser(userId);
+    await cleanup('auth user', admin.auth.admin.deleteUser(userId));
   }
   console.log(`cleanup done; failures=${failures}`);
   process.exit(failures === 0 ? 0 : 1);

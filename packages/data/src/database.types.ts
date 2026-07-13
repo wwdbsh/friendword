@@ -16,6 +16,7 @@ export type UserRow = {
 export type ProfileRow = {
   readonly user_id: string;
   readonly display_name: string;
+  readonly display_name_confirmed: boolean;
   readonly birth_date: string | null;
   readonly locale: string;
   readonly verification_status: string;
@@ -98,6 +99,26 @@ export type MessageRow = {
   readonly updated_at: string;
 };
 
+export type ConsentRequestRow = {
+  readonly id: string;
+  readonly pitch_draft_id: string;
+  readonly subject_user_id: string | null;
+  readonly token_hash: string;
+  readonly status: string;
+  readonly responded_at: string | null;
+  readonly invite_contact_channel: 'email' | 'phone' | null;
+  readonly invite_contact_hash: string | null;
+  readonly invite_friend_name: string | null;
+  readonly created_at: string;
+  readonly updated_at: string;
+};
+
+export type AppConfigRow = {
+  readonly key: string;
+  readonly value: string;
+  readonly updated_at: string;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -117,11 +138,13 @@ export type Database = {
         Insert: {
           readonly user_id: string;
           readonly display_name: string;
+          readonly display_name_confirmed?: boolean;
           readonly birth_date?: string | null;
           readonly locale?: string;
         };
         Update: {
           readonly display_name?: string;
+          readonly display_name_confirmed?: boolean;
           readonly birth_date?: string | null;
           readonly locale?: string;
         };
@@ -176,6 +199,23 @@ export type Database = {
           readonly body: string;
         };
         Update: Record<string, never>;
+        Relationships: [];
+      };
+      consent_requests: {
+        Row: ConsentRequestRow;
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      app_config: {
+        Row: AppConfigRow;
+        Insert: {
+          readonly key: string;
+          readonly value: string;
+        };
+        Update: {
+          readonly value?: string;
+        };
         Relationships: [];
       };
       reports: {
@@ -329,7 +369,12 @@ export type Database = {
     Views: Record<string, never>;
     Functions: {
       submit_pitch_for_consent: {
-        Args: { readonly draft_id: string };
+        Args: {
+          readonly draft_id: string;
+          readonly invite_channel?: 'email' | 'phone' | null;
+          readonly invite_contact?: string | null;
+          readonly invite_friend_name?: string | null;
+        };
         Returns: readonly {
           readonly consent_request_id: string;
           readonly consent_token: string;

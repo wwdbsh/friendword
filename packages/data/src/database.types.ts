@@ -343,6 +343,22 @@ export type Database = {
         Update: Record<string, never>;
         Relationships: [];
       };
+      share_kits: {
+        Row: {
+          readonly id: string;
+          readonly pitch_draft_id: string;
+          readonly unlocked_by_user_id: string;
+          readonly credit_ledger_id: string;
+          readonly created_at: string;
+        };
+        Insert: {
+          readonly pitch_draft_id: string;
+          readonly unlocked_by_user_id: string;
+          readonly credit_ledger_id: string;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
       ops_alerts: {
         Row: {
           readonly id: string;

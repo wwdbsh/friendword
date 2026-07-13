@@ -17,6 +17,22 @@ export type ShareKitUnlock = {
   readonly alreadyUnlocked: boolean;
 };
 
+export class CreatorCreditRequiredError extends Error {
+  override readonly name = 'CreatorCreditRequiredError';
+
+  constructor() {
+    super('A Creator Launch credit is required for this pitch');
+  }
+}
+
+export class KitNotPublishedError extends Error {
+  override readonly name = 'KitNotPublishedError';
+
+  constructor() {
+    super('The share kit unlocks after the pitch is approved and published');
+  }
+}
+
 function translate(scope: string, error: { readonly message: string }): Error {
   if (error.message.includes('authentication required')) {
     return new UnauthenticatedError();
@@ -69,6 +85,12 @@ export class BenefitsRepo {
       target_draft_id: draftId,
     });
     if (error !== null) {
+      if (error.message.includes('creator launch credit required')) {
+        throw new CreatorCreditRequiredError();
+      }
+      if (error.message.includes('approves and publishes')) {
+        throw new KitNotPublishedError();
+      }
       throw translate('benefits.unlockShareKit', error);
     }
     const row = data[0];

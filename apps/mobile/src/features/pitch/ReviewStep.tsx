@@ -3,7 +3,12 @@ import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Image, StyleSheet, Text, View } from 'react-native';
 
 import { HypeButton, StickerCard } from '../../components';
-import type { PitchPhoto, PitchRecording, PitchRelationship } from '../../services/types';
+import type {
+  InvitationContact,
+  PitchPhoto,
+  PitchRecording,
+  PitchRelationship,
+} from '../../services/types';
 import { PitchStepFrame } from './PitchStepFrame';
 
 type ReviewStepProps = {
@@ -50,9 +55,7 @@ export function ReviewStep({
         <Text style={styles.detail}>
           {relationship.kind} for {relationship.duration.toLowerCase()}
         </Text>
-        <Text style={styles.detail}>
-          Invite by {relationship.contact.kind}: {relationship.contact.value}
-        </Text>
+        <Text style={styles.detail}>{formatInvitationContact(relationship.contact)}</Text>
       </StickerCard>
 
       <StickerCard>
@@ -100,6 +103,17 @@ export function ReviewStep({
 function formatDuration(durationMillis: number): string {
   const seconds = Math.floor(durationMillis / 1000);
   return `0:${seconds.toString().padStart(2, '0')}`;
+}
+
+function formatInvitationContact(contact: InvitationContact): string {
+  switch (contact.kind) {
+    case 'email':
+      return `Invite by email: ${contact.value}`;
+    case 'phone':
+      return `Invite by phone: ${contact.value}`;
+    case 'sent':
+      return 'Approval contact sent';
+  }
 }
 
 const styles = StyleSheet.create({

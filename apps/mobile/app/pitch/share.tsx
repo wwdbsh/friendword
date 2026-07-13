@@ -1,5 +1,5 @@
 import { colors, fonts, fontSizes, radii, spacing, strokes } from '@friendword/ui-tokens';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -22,9 +22,21 @@ export default function SharePitchScreen() {
     let active = true;
     pitchDraftService
       .getMyDrafts()
-      .then((drafts) => {
+      .then(async (drafts) => {
+        const candidate = drafts.find((draft) => draft.id === draftId);
+        if (
+          candidate === undefined ||
+          candidate.server === null ||
+          candidate.relationship === null ||
+          candidate.relationship.contact.kind === 'sent'
+        ) {
+          return candidate ?? null;
+        }
+        return pitchDraftService.purgeInvitationContact(candidate.id);
+      })
+      .then((candidate) => {
         if (active) {
-          setDraft(drafts.find((candidate) => candidate.id === draftId) ?? null);
+          setDraft(candidate);
         }
       })
       .catch(() => {
@@ -61,6 +73,7 @@ export default function SharePitchScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <Stack.Screen options={{ title: 'Share approval invite' }} />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.heading}>
           <Text style={styles.eyebrow}>TRACK 6 · RELEASE DAY</Text>
@@ -86,6 +99,9 @@ export default function SharePitchScreen() {
           <>
             <StickerCard>
               <Text style={styles.cardTitle}>{friendName}’s private invite</Text>
+              <Text style={styles.finePrint}>
+                Invite details sent to Friendword · contact removed from this device.
+              </Text>
               <View style={styles.linkBox}>
                 <Text numberOfLines={2} style={styles.link}>
                   {consentUrl}

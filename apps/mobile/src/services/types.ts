@@ -15,12 +15,17 @@ export type RelationshipDuration = (typeof RELATIONSHIP_DURATIONS)[number];
 
 const PitchDraftIdSchema = z.string().min(1).brand<'PitchDraftId'>();
 const PitchDraftStatusSchema = z.enum(PITCH_DRAFT_STATUSES);
+export const EmailInvitationContactSchema = z.object({
+  kind: z.literal('email'),
+  value: z.email(),
+});
 export const InvitationContactSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('phone'),
     value: z.string().refine((value) => value.replace(/\D/g, '').length >= 7),
   }),
-  z.object({ kind: z.literal('email'), value: z.email() }),
+  EmailInvitationContactSchema,
+  z.object({ kind: z.literal('sent') }),
 ]);
 const PitchRelationshipSchema = z.object({
   kind: z.enum(RELATIONSHIP_KINDS),
@@ -66,6 +71,7 @@ export const PitchDraftListSchema = z.array(PitchDraftSchema);
 
 export type PitchServerSync = z.infer<typeof PitchServerSyncSchema>;
 export type PitchDraftId = z.infer<typeof PitchDraftIdSchema>;
+export type EmailInvitationContact = z.infer<typeof EmailInvitationContactSchema>;
 export type InvitationContact = z.infer<typeof InvitationContactSchema>;
 export type PitchRelationship = z.infer<typeof PitchRelationshipSchema>;
 export type PitchPhoto = z.infer<typeof PitchPhotoSchema>;

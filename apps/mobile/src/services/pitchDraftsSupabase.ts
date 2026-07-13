@@ -11,6 +11,7 @@ import {
   type PitchDraftService,
 } from './pitchDrafts';
 import type {
+  EmailInvitationContact,
   PitchDraft,
   PitchDraftId,
   PitchPhoto,
@@ -82,6 +83,10 @@ export class HybridPitchDraftService implements PitchDraftService {
     return this.local.getMyDrafts();
   }
 
+  purgeInvitationContact(id: PitchDraftId): Promise<PitchDraft> {
+    return this.local.purgeInvitationContact(id);
+  }
+
   async submitForConsent(id: PitchDraftId): Promise<PitchDraft> {
     if (this.client === null) {
       return this.local.submitForConsent(id);
@@ -95,6 +100,7 @@ export class HybridPitchDraftService implements PitchDraftService {
     if (draft.status !== 'draft') {
       throw new PitchDraftSubmissionError('This pitch has already been sent for approval.');
     }
+    const invitationContact = requireEmailContact(draft.relationship.contact);
 
     const repo = new PitchDraftRepo(this.client);
     let submission;
@@ -104,7 +110,11 @@ export class HybridPitchDraftService implements PitchDraftService {
       await this.uploadPhotos(repo, serverDraft.id, draft.photos);
       submission = {
         serverDraftId: serverDraft.id,
-        ...(await repo.submitForConsent(serverDraft.id)),
+        ...(await repo.submitForConsent(serverDraft.id, {
+          channel: 'email',
+          contact: invitationContact.value,
+          friendName: draft.relationship.friendFirstName,
+        })),
       };
     } catch (error: unknown) {
       if (error instanceof UnauthenticatedError) {
@@ -162,4 +172,11 @@ export class HybridPitchDraftService implements PitchDraftService {
       );
     }
   }
+}
+
+function requireEmailContact(contact: PitchRelationship['contact']): EmailInvitationContact {
+  if (contact.kind !== 'email') {
+    throw new PitchDraftSubmissionError('Enter a valid email before sending for approval.');
+  }
+  return contact;
 }

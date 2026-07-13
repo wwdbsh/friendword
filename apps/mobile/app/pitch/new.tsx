@@ -12,21 +12,18 @@ import {
 import {
   assertNever,
   handleFlowError,
-  handleSubmitError,
   PitchFlowStateError,
   requireDraftId,
   requireRecording,
   requireReviewData,
 } from '../../src/features/pitch/pitchFlowState';
+import { usePitchSubmission } from '../../src/features/pitch/usePitchSubmission';
 import { trackEvent } from '@friendword/data';
 
 import { SignInSheet } from '../../src/features/auth/SignInSheet';
-import { requestDraftGeneration } from '../../src/services/draftGeneration';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
-import { NeedsSignInError } from '../../src/services/pitchDraftsSupabase';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 import type {
-  InvitationContact,
   PitchDraftId,
   PitchPhoto,
   PitchRecording,
@@ -45,7 +42,6 @@ export default function NewPitchScreen() {
     null,
   );
   const [friendFirstName, setFriendFirstName] = useState('');
-  const [contactKind, setContactKind] = useState<InvitationContact['kind']>('phone');
   const [contactValue, setContactValue] = useState('');
   const [photos, setPhotos] = useState<readonly PitchPhoto[]>([]);
   const [recording, setRecording] = useState<PitchRecording | null>(null);
@@ -53,9 +49,8 @@ export default function NewPitchScreen() {
   const [savedRelationship, setSavedRelationship] = useState<PitchRelationship | null>(null);
   const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [signInVisible, setSignInVisible] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const submission = usePitchSubmission(draftId, setErrorMessage);
 
   const goBack = useCallback((): void => {
     if (savingRef.current) {
@@ -102,15 +97,11 @@ export default function NewPitchScreen() {
       throw new PitchFlowStateError();
     }
 
-    const contact: InvitationContact =
-      contactKind === 'email'
-        ? { kind: 'email', value: contactValue.trim() }
-        : { kind: 'phone', value: contactValue.trim() };
     const relationship: PitchRelationship = {
       kind: relationshipKind,
       duration: relationshipDuration,
       friendFirstName: friendFirstName.trim(),
-      contact,
+      contact: { kind: 'email', value: contactValue.trim() },
     };
 
     try {
@@ -177,35 +168,6 @@ export default function NewPitchScreen() {
     }
   };
 
-  const submit = async (): Promise<void> => {
-    const activeDraftId = requireDraftId(draftId);
-    setSubmitting(true);
-    try {
-      const submitted = await pitchDraftService.submitForConsent(activeDraftId);
-      trackEvent(getSupabaseClient(), 'consent_sent', {
-        platform: 'mobile',
-        pitch_draft_id: submitted.server?.draftId ?? null,
-      });
-      if (submitted.server !== null) {
-        void requestDraftGeneration(submitted.server.draftId);
-      }
-      setErrorMessage(null);
-      if (submitted.server !== null) {
-        router.replace({ pathname: '/pitch/share', params: { draftId: submitted.id } });
-      } else {
-        router.replace('/campaigns');
-      }
-    } catch (error: unknown) {
-      if (error instanceof NeedsSignInError) {
-        setSignInVisible(true);
-        return;
-      }
-      handleSubmitError(error, setErrorMessage);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   switch (track) {
     case 1:
       return (
@@ -222,12 +184,10 @@ export default function NewPitchScreen() {
       return (
         <FriendDetailsStep
           busy={saving}
-          contactKind={contactKind}
           contactValue={contactValue}
           errorMessage={errorMessage}
           firstName={friendFirstName}
           onBack={goBack}
-          onContactKindChange={setContactKind}
           onContactValueChange={setContactValue}
           onContinue={() => {
             void saveDetails();
@@ -270,19 +230,19 @@ export default function NewPitchScreen() {
             onBack={goBack}
             onRerecord={() => setTrack(4)}
             onSubmit={() => {
-              void submit();
+              void submission.submit();
             }}
             photos={photos}
             recording={review.recording}
             relationship={review.relationship}
-            submitting={submitting}
+            submitting={submission.submitting}
           />
           <SignInSheet
-            visible={signInVisible}
-            onClose={() => setSignInVisible(false)}
+            visible={submission.signInVisible}
+            onClose={submission.closeSignIn}
             onSignedIn={() => {
-              setSignInVisible(false);
-              void submit();
+              submission.closeSignIn();
+              void submission.submit();
             }}
           />
         </>

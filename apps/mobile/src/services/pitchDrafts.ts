@@ -10,8 +10,14 @@ import {
   type PitchRelationship,
   type PitchServerSync,
 } from './types';
+import { purgeInvitationContact } from './draftStorage';
 
 const STORAGE_KEY = '@friendword/pitch-drafts';
+
+export type PitchDraftStorage = {
+  getItem(key: string): Promise<string | null>;
+  setItem(key: string, value: string): Promise<void>;
+};
 
 export interface PitchDraftService {
   createDraft(): Promise<PitchDraft>;
@@ -19,6 +25,7 @@ export interface PitchDraftService {
   savePhotos(id: PitchDraftId, photos: readonly PitchPhoto[]): Promise<PitchDraft>;
   saveRecording(id: PitchDraftId, recording: PitchRecording): Promise<PitchDraft>;
   submitForConsent(id: PitchDraftId): Promise<PitchDraft>;
+  purgeInvitationContact(id: PitchDraftId): Promise<PitchDraft>;
   getMyDrafts(): Promise<readonly PitchDraft[]>;
 }
 
@@ -46,6 +53,8 @@ export class PitchDraftSubmissionError extends Error {
 export class MockPitchDraftService implements PitchDraftService {
   private pending: Promise<void> = Promise.resolve();
 
+  constructor(private readonly storage: PitchDraftStorage = AsyncStorage) {}
+
   async createDraft(): Promise<PitchDraft> {
     return this.runExclusive(async () => {
       const drafts = await this.readDrafts();
@@ -67,6 +76,7 @@ export class MockPitchDraftService implements PitchDraftService {
   }
 
   async saveRelationship(id: PitchDraftId, relationship: PitchRelationship): Promise<PitchDraft> {
+    // The raw email is needed for submit, then the share screen purges it from this local draft.
     return this.updateDraft(id, (draft) => ({ ...draft, relationship }));
   }
 
@@ -91,6 +101,10 @@ export class MockPitchDraftService implements PitchDraftService {
       }
       return { ...draft, status: 'consent_pending' };
     });
+  }
+
+  async purgeInvitationContact(id: PitchDraftId): Promise<PitchDraft> {
+    return this.updateDraft(id, purgeInvitationContact);
   }
 
   async getMyDrafts(): Promise<readonly PitchDraft[]> {
@@ -144,7 +158,7 @@ export class MockPitchDraftService implements PitchDraftService {
   }
 
   private async readDrafts(): Promise<readonly PitchDraft[]> {
-    const serialized = await AsyncStorage.getItem(STORAGE_KEY);
+    const serialized = await this.storage.getItem(STORAGE_KEY);
     if (!serialized) {
       return [];
     }
@@ -158,6 +172,6 @@ export class MockPitchDraftService implements PitchDraftService {
   }
 
   private async writeDrafts(drafts: readonly PitchDraft[]): Promise<void> {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(drafts));
+    await this.storage.setItem(STORAGE_KEY, JSON.stringify(drafts));
   }
 }

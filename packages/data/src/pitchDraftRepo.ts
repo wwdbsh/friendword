@@ -36,6 +36,14 @@ export type ConsentSubmission = {
   readonly consentToken: string;
 };
 
+const consentInvitationSchema = z.object({
+  channel: z.literal('email'),
+  contact: z.string().trim().email(),
+  friendName: z.string().trim().min(1),
+});
+
+export type ConsentInvitationInput = z.input<typeof consentInvitationSchema>;
+
 const consentSubmissionRowSchema = z.array(
   z.object({
     consent_request_id: z.string().uuid(),
@@ -159,10 +167,18 @@ export class PitchDraftRepo {
    * Returns the raw consent token exactly once — only its hash is stored,
    * so the caller must hand it to the introducer's share flow immediately.
    */
-  async submitForConsent(draftId: string): Promise<ConsentSubmission> {
+  async submitForConsent(
+    draftId: string,
+    invitation?: ConsentInvitationInput,
+  ): Promise<ConsentSubmission> {
     await this.getRequiredSession();
+    const parsedDraftId = uuidSchema.parse(draftId);
+    const args =
+      invitation === undefined
+        ? { draft_id: parsedDraftId }
+        : buildConsentInvitationArgs(parsedDraftId, invitation);
     const { data, error } = await this.client.rpc('submit_pitch_for_consent', {
-      draft_id: uuidSchema.parse(draftId),
+      ...args,
     });
     if (error !== null) {
       throw new DataLayerError('pitchDraft.submitForConsent', error);
@@ -190,4 +206,14 @@ export class PitchDraftRepo {
 
     return data.session;
   }
+}
+
+function buildConsentInvitationArgs(draftId: string, invitation: ConsentInvitationInput) {
+  const parsed = consentInvitationSchema.parse(invitation);
+  return {
+    draft_id: draftId,
+    invite_channel: parsed.channel,
+    invite_contact: parsed.contact,
+    invite_friend_name: parsed.friendName,
+  };
 }

@@ -2,18 +2,15 @@ import { colors, fontSizes, radii, spacing, strokes } from '@friendword/ui-token
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { HypeButton, StickerCard } from '../../components';
-import { InvitationContactSchema, type InvitationContact } from '../../services/types';
-import { OptionChip } from './OptionChip';
+import { EmailInvitationContactSchema } from '../../services/types';
 import { PitchStepFrame } from './PitchStepFrame';
 
 type FriendDetailsStepProps = {
   readonly busy: boolean;
   readonly errorMessage: string | null;
   readonly firstName: string;
-  readonly contactKind: InvitationContact['kind'];
   readonly contactValue: string;
   readonly onFirstNameChange: (value: string) => void;
-  readonly onContactKindChange: (kind: InvitationContact['kind']) => void;
   readonly onContactValueChange: (value: string) => void;
   readonly onBack: () => void;
   readonly onContinue: () => void;
@@ -23,18 +20,16 @@ export function FriendDetailsStep({
   busy,
   errorMessage,
   firstName,
-  contactKind,
   contactValue,
   onFirstNameChange,
-  onContactKindChange,
   onContactValueChange,
   onBack,
   onContinue,
 }: FriendDetailsStepProps) {
   const trimmedName = firstName.trim();
   const trimmedContact = contactValue.trim();
-  const contactIsValid = InvitationContactSchema.safeParse({
-    kind: contactKind,
+  const contactIsValid = EmailInvitationContactSchema.safeParse({
+    kind: 'email',
     value: trimmedContact,
   }).success;
   const canContinue = trimmedName.length > 0 && contactIsValid;
@@ -43,7 +38,7 @@ export function FriendDetailsStep({
     <PitchStepFrame
       track={2}
       title="Who are we hyping?"
-      subtitle="We only use this contact to send your friend their private approval invite."
+      subtitle="We use this email to make sure only your invited friend can claim the approval link."
       onBack={onBack}
       footer={
         <View style={styles.footerContent}>
@@ -77,28 +72,14 @@ export function FriendDetailsStep({
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Approval invite</Text>
-          <View style={styles.contactKinds}>
-            <OptionChip
-              label="Phone"
-              selected={contactKind === 'phone'}
-              tiltIndex={0}
-              onPress={() => onContactKindChange('phone')}
-            />
-            <OptionChip
-              label="Email"
-              selected={contactKind === 'email'}
-              tiltIndex={1}
-              onPress={() => onContactKindChange('email')}
-            />
-          </View>
+          <Text style={styles.label}>Approval invite email</Text>
           <TextInput
-            accessibilityLabel={`Approval invite ${contactKind}`}
+            accessibilityLabel="Approval invite email"
             autoCapitalize="none"
-            autoComplete={contactKind === 'email' ? 'email' : 'tel'}
-            keyboardType={contactKind === 'email' ? 'email-address' : 'phone-pad'}
+            autoComplete="email"
+            keyboardType="email-address"
             onChangeText={onContactValueChange}
-            placeholder={contactKind === 'email' ? 'jordan@example.com' : '(555) 123-4567'}
+            placeholder="jordan@example.com"
             placeholderTextColor={colors.textFaint}
             style={styles.input}
             value={contactValue}
@@ -113,7 +94,6 @@ const styles = StyleSheet.create({
   footerContent: { gap: spacing.sm },
   field: { gap: spacing.sm },
   label: { color: colors.ink, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.lg },
-  contactKinds: { flexDirection: 'row', gap: spacing.sm },
   input: {
     minHeight: 52,
     borderColor: colors.ink,

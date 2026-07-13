@@ -1,0 +1,65 @@
+/* Trust Layer: quiet, undecorated — no sticker grammar on safety
+   affordances (docs/DESIGN.md intensity table). */
+
+.link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #6b5e51;
+  font-size: 0.85rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link:hover {
+  color: #221b15;
+}
+
+.form {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 22rem;
+  margin: 0 auto;
+  text-align: left;
+}
+
+.label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #4a4036;
+}
+
+.select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #c9bcae;
+  border-radius: 10px;
+  background: #fffdf9;
+  font: inherit;
+  color: #221b15;
+}
+
+.actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.submit {
+  padding: 0.45rem 1rem;
+  border: 1px solid #221b15;
+  border-radius: 10px;
+  background: #fffdf9;
+  color: #221b15;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.note {
+  font-size: 0.85rem;
+  color: #4a4036;
+}

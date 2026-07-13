@@ -165,3 +165,19 @@ test('shows the locked pass state without an entitlement', async ({ page }) => {
   await expect(page.getByText('Not active.', { exact: false })).toBeVisible();
   await expect(page.getByRole('button', { name: 'View my funnel' })).toHaveCount(0);
 });
+
+test('reports a public pitch without signing in', async ({ page }) => {
+  let reportBody: unknown;
+  await page.route('**/api/report', (route) => {
+    reportBody = route.request().postDataJSON();
+    return route.fulfill({ json: { received: true } });
+  });
+
+  await page.goto('/p/demo-blair');
+  await page.getByRole('button', { name: 'Report this page' }).click();
+  await page.getByLabel('Why are you reporting this page?').selectOption('impersonation');
+  await page.getByRole('button', { name: 'Send report' }).click();
+
+  await expect(page.getByText('Report received', { exact: false })).toBeVisible();
+  expect(reportBody).toMatchObject({ campaignSlug: 'demo-blair', reason: 'impersonation' });
+});

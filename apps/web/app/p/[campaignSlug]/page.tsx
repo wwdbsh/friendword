@@ -6,6 +6,7 @@ import { notFound } from 'next/navigation';
 import { getPublishedPitchBySlug } from '@friendword/data';
 
 import { PitchPlayer } from '@/components/PitchPlayer';
+import { ReportCampaignLink } from '@/components/ReportCampaignLink';
 import { getPitchFixture } from '@/fixtures/pitch';
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
 import { fromFixture, fromPublishedPitch, type PitchView } from '@/pitch/view';
@@ -184,6 +185,7 @@ export default async function PitchPage({ params }: PitchPageProps) {
         </div>
         <p className={styles.wordmark}>Friendword</p>
         <p className={styles.tagline}>Dating, in your friends&apos; words.</p>
+        <ReportCampaignLink campaignSlug={campaignSlug} />
       </footer>
     </main>
   );

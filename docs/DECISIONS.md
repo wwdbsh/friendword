@@ -33,6 +33,13 @@
 - **검토 대안**: 자동 갱신 구독 하나, 공개/연결 기능 paywall, 두 상품의 번들·상호 할인, Introducer의 Gift a Pass.
 - **영향**: Creator Launch는 `PITCH_DRAFT` scope의 server credit ledger로 `available → reserved → consumed`를 idempotent하게 처리하고, Campaign Pass는 `CAMPAIGN` scope의 30일 entitlement를 webhook과 서버에서 검증합니다.
 
+## 2026-07-13: 워커 운용 2인 체제 축소 (사용자 지시)
+
+- **결정**: codex 토큰 과소모로, 진행 중이던 작업(codex-1 E2E 갱신, codex-2 G-DB, codex-3 D-Mobile) 완료 후 codex-2/3는 추가 지시 없이 대기시키고, 이후 감사 대응은 **Advisor(직접 구현 병행) + codex-1 2인**으로 진행합니다.
+- **이유**: 워커 3기 병렬 운용이 codex 사용량 한도를 과속 소진.
+- **검토 대안**: 3기 유지(토큰 고갈 시 전면 중단 위험), Advisor 단독(처리량 부족).
+- **영향**: 슬라이스 F~J의 분해 단위가 커지고 Advisor 직접 구현 비중 증가. brief는 codex-1 전용으로 발행.
+
 ## 2026-07-13: 1차 전수 감사 채택과 실행 순서 고정
 
 - **결정**: `docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md`(외부 전수 감사, `5c367ff` 기준)를 현행 개발의 source of truth로 채택하고, 실행 순서를 감사 §7의 A→J로 고정합니다. 문서의 "핵심 루프 완성" 표현을 "핵심 루프의 UI·데이터 골격 완성, 신원·동의·결제·운영의 출시 경계 미완성"으로 정정합니다.

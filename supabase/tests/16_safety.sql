@@ -123,6 +123,14 @@ UPDATE media_validations
  WHERE bucket_id = 'profile-media'
    AND object_name = '00000000-0000-0000-0000-000000000003/safety-a.jpg';
 
+-- Slice 2 text gates (0026): the enforcement-on success path also needs
+-- passed verdicts for the sender's bio and the interest note.
+INSERT INTO text_moderations (scope, content_hash, moderation_status)
+VALUES
+  ('profile_bio', encode(digest('Museum fan and weekend cyclist.', 'sha256'), 'hex'), 'passed'),
+  ('interest_note', encode(digest('validated profile', 'sha256'), 'hex'), 'passed')
+ON CONFLICT (scope, content_hash) DO NOTHING;
+
 RESET ROLE;
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000003', true);
@@ -277,6 +285,17 @@ UPDATE media_validations
    SET moderation_status = 'passed'
  WHERE bucket_id = 'pitch-media'
    AND object_name = '16000000-0000-0000-0000-000000000002/photo.jpg';
+
+INSERT INTO text_moderations (scope, content_hash, moderation_status)
+VALUES (
+  'pitch_content',
+  encode(digest(
+    'Safety on fixture' || E'\n\n' || 'This draft proves validation is required when enforcement is on.',
+    'sha256'
+  ), 'hex'),
+  'passed'
+)
+ON CONFLICT (scope, content_hash) DO NOTHING;
 
 RESET ROLE;
 SET LOCAL ROLE authenticated;

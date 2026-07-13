@@ -84,6 +84,35 @@ export async function POST(request: Request): Promise<NextResponse> {
       uri: signed.signedUrl,
       durationMs: 60_000,
     });
+
+    // Voice moderation (second audit P0-2): the transcript is the audio's
+    // moderatable form. The verdict upgrades the voice object's
+    // media_validations row from 'skipped', which is what the enforcement
+    // gate requires before this draft can enter consent. Only an existing
+    // row is updated — structural checks stay owned by /api/media/validate.
+    const voiceVerdict = await providers.moderation.checkText(transcript.text);
+    const { data: voiceValidation } = await serviceClient
+      .from('media_validations')
+      .update({
+        moderation_status: voiceVerdict.allowed ? 'passed' : 'flagged',
+        moderation_ref: voiceVerdict.allowed
+          ? null
+          : voiceVerdict.categories.join(',').slice(0, 200),
+      })
+      .eq('bucket_id', PITCH_MEDIA_BUCKET)
+      .eq('object_name', `${draftId}/voice.m4a`)
+      .select('moderation_status')
+      .maybeSingle();
+    if (!voiceVerdict.allowed) {
+      return NextResponse.json(
+        { error: 'the voice recording did not pass moderation' },
+        { status: 422 },
+      );
+    }
+    if (voiceValidation === null) {
+      console.warn('transcribe: voice object has no validation row to upgrade');
+    }
+
     const structure = await providers.pitchStructure.structure(transcript.text, {
       relationshipType: draft.relationship_type ?? 'friend',
       relationshipDuration: draft.relationship_duration ?? 'y1to3',

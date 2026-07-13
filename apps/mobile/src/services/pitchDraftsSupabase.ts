@@ -12,6 +12,7 @@ import type {
 } from '@friendword/contracts';
 
 import { requestMediaValidation } from './mediaValidation';
+import { requestPitchTextModeration } from './textModeration';
 import {
   MockPitchDraftService,
   PitchDraftSubmissionError,
@@ -188,6 +189,15 @@ export class HybridPitchDraftService implements PitchDraftService {
       body: draft.review.body.trim(),
       structure: draft.review.structure,
     });
+    // Text moderation happens on the saved server copy so edited drafts are
+    // covered. 'flagged' blocks honestly; 'unavailable' defers to the DB
+    // gate, which fails closed while media_validation_enforcement is on.
+    const textVerdict = await requestPitchTextModeration(draft.server.draftId);
+    if (textVerdict === 'flagged') {
+      throw new PitchDraftSubmissionError(
+        'This pitch text did not pass moderation. Edit the wording and try again.',
+      );
+    }
     const invitation = invitationForFinalize(draft);
     try {
       const submission = await this.repo.submitForConsent(draft.server.draftId, invitation);

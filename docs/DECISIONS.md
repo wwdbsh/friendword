@@ -102,3 +102,10 @@
 - **이유**: 2차 감사 P0-1(익명 신고 2건 self-DoS)·H-1(계정 상태 read 미강제). 임계치 2 distinct는 유지하되 identity 위조 비용을 올리는 것이 목적입니다.
 - **검토 대안**: 익명 전용 CAPTCHA(무가입 신고 마찰 증가, 후속 검토 가능), 익명 2건은 pause 대신 ops review만(피해자 보호 지연 — 서로 다른 IP 2건은 pause 유지로 결정), 기존 permissive 정책 개별 수정(누락 위험, RESTRICTIVE가 전 정책에 AND로 걸림).
 - **영향**: migration 0024, 신고 라우트 proxy trust 수정, audit2 b01(워커)·b11(Advisor) 그린 전환. 두 identity가 같은 NAT 뒤에 있으면 1명으로 계산되는 한계는 수용(잔여 위험으로 기록).
+
+## 2026-07-13: UGC 텍스트·음성 moderation과 사용량 경계 (Slice 2)
+
+- **결정**: (1) voice의 moderatable form은 transcript다 — `/api/transcribe`가 전사 직후 transcript를 moderation하고 그 verdict로 voice object의 `media_validations`를 `skipped→passed/flagged`로 승격한다(구조 검증은 계속 `/api/media/validate` 소유). flagged voice는 draft에 쓰이지 않고 422로 정직하게 반환된다. (2) 텍스트 moderation은 content-addressed 원장(`text_moderations`, scope+sha256 유니크)이며 `/api/moderate-text`가 service role로만 기록한다. enforcement on에서 BEFORE 트리거가 pitch text(consent 진입 시)와 interest bio/note(제출 시)에 정확한 내용의 passed verdict를 요구한다 — 편집하면 hash가 바뀌어 재moderation이 필요하다. (3) 길이 제한(headline 120·body 2000·bio/note 500·message 2000·display name 60), 메시지 rate limit(20건/60초/room), storage quota(prefix당 12개)는 DB가 강제한다. (4) 채팅 메시지는 proactive provider moderation을 하지 않는다 — 길이·rate 제한+신고·차단+운영 조치로 커버하며, 이를 "moderation complete"라고 주장하지 않는다.
+- **이유**: 2차 감사 P0-2(enforcement 음성 deadlock)·H-3·H-7. 전사는 pitch 파이프라인에서 이미 필요하므로 moderation을 그 транscript에 얹으면 provider 이중 지출이 없다. content-addressed 원장은 재호출을 무료로 만들고(P0-9 대비) 클라이언트 편집 우회를 구조적으로 막는다.
+- **검토 대안**: 별도 audio moderation provider(비용·중복), submit RPC 재정의로 게이트(후속 재정의 시 소실 위험 — 트리거 채택), 채팅 실시간 provider moderation(비용·지연 대비 효과 낮음, 잔여 위험으로 기록).
+- **영향**: migration 0025(워커)·0026(Advisor), suite 18 그린, audit2 b12 그린, suite 16·b02는 enforcement-on 성공 경로에 text verdict 픽스처 추가. 모바일 제출과 웹 interest가 moderation API를 선호출(501은 게이트에 위임). `EXPO_PUBLIC_WEB_ORIGIN` 미설정 시 모바일은 localhost 폴백으로 호출한다.

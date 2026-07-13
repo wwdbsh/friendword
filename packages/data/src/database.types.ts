@@ -311,6 +311,33 @@ export type Database = {
         };
         Relationships: [];
       };
+      text_moderations: {
+        Row: {
+          readonly id: string;
+          readonly scope: 'pitch_content' | 'profile_bio' | 'interest_note';
+          readonly content_hash: string;
+          readonly moderation_status: 'passed' | 'flagged';
+          readonly moderation_ref: string | null;
+          readonly subject_user_id: string | null;
+          readonly pitch_draft_id: string | null;
+          readonly created_at: string;
+        };
+        Insert: {
+          readonly scope: 'pitch_content' | 'profile_bio' | 'interest_note';
+          readonly content_hash: string;
+          readonly moderation_status: 'passed' | 'flagged';
+          readonly moderation_ref?: string | null;
+          readonly subject_user_id?: string | null;
+          readonly pitch_draft_id?: string | null;
+        };
+        Update: {
+          readonly moderation_status?: 'passed' | 'flagged';
+          readonly moderation_ref?: string | null;
+          readonly subject_user_id?: string | null;
+          readonly pitch_draft_id?: string | null;
+        };
+        Relationships: [];
+      };
       reports: {
         Row: {
           readonly id: string;

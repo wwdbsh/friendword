@@ -101,6 +101,20 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
+-- Slice 2 text gate (0026): all b02 drafts share one headline/body, so a
+-- single passed pitch_content verdict keeps this file focused on media.
+INSERT INTO public.text_moderations (scope, content_hash, moderation_status)
+VALUES (
+  'pitch_content',
+  encode(digest(
+    'Audit2 validated pitch' || E'\n\n'
+      || 'Both the image and voice must have authoritative validation evidence.',
+    'sha256'
+  ), 'hex'),
+  'passed'
+)
+ON CONFLICT (scope, content_hash) DO NOTHING;
+
 SELECT pg_temp.add_media_case(
   'b0200000-0000-0000-0000-000000000001',
   true, true, true, true, 'passed',

@@ -1,18 +1,20 @@
 # PROJECT HANDOFF
 
-> 갱신: 2026-07-13 02:40 KST · 최신 커밋 `5c367ff` (main, CI 그린)
-> 읽는 순서: 이 문서 → `docs/TASKS.md` → 필요 시 `FRIENDWORD_HANDOFF.md`(제품 원본), `docs/DESIGN.md`(디자인), `docs/OPS.md`(운영), `docs/REVENUECAT_SETUP.md`(결제 셋업), `CLAUDE.md`/`AGENTS.md`(협업 규칙)
+> 갱신: 2026-07-13 11:50 KST · 최신 커밋 기준 main (CI 그린)
+> 읽는 순서: 이 문서 → **`docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md`(감사·현행 작업의 source of truth)** → `docs/TASKS.md` → 필요 시 `FRIENDWORD_HANDOFF.md`(제품 원본), `docs/DESIGN.md`(디자인), `docs/OPS.md`(운영), `docs/REVENUECAT_SETUP.md`(결제 셋업), `CLAUDE.md`/`AGENTS.md`(협업 규칙)
 
-## NEXT SESSION 지시 (사용자 확정, 2026-07-13)
+## 현행 목표 (사용자 확정, 2026-07-13)
 
-- **작업 형태 복귀**: Advisor(Fable 5) 단독 모드 종료 → **codex 워커 협업 재개** (`friendword-codex-1/2/3` tmux 세션). CLAUDE.md 1~5 규칙 그대로: Advisor가 분해·brief 작성·통합 검증 소유, 워커 결과는 diff·테스트·manual QA 직접 재검증 전까지 미완료
-- **방향**: App Store 심사 준비는 지금 하지 않는다(출시 창구가 8/1 이후라 급하지 않음). 대신 **개발 계속 — 부족한 부분 보완 + 사용자 피드백 반영**이 다음 세션의 축
-- 다음 세션 시작 시: 이 문서 → 사용자에게 피드백/보완 우선순위 확인 → 워커 brief 분해
+- **감사 문서(`docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md`)의 P0 전부 해소 — 다음 감사 all-pass.**
+- 실행 순서는 감사 §7 고정: A(문서 truth reset+회귀 테스트) → B(web bootstrap) → C(identity 게이트) → D(immutable consent) → E(결제 원장) → F(유료 효익) → G(safety) → H(growth) → I(Trust Layer) → J(release 게이트). 순서 변경 금지.
+- codex 워커 협업 재개 (`friendword-codex-1/2/3`). Advisor가 분해·brief·통합 검증 소유, 워커 결과는 diff·테스트·manual QA 직접 재검증 전까지 미완료.
+- App Store 심사 준비는 보류(출시 창구 8/1~9/30). 단, 7월 중하순 착수 시점 재판단.
 
 ## CURRENT STATE
 
 - **제품**: Shipaton 2026 참가작 friend-led dating campaign 앱. 8/1 이후 App Store 최초 출시 필수, RevenueCat IAP 필수.
-- **핵심 루프 완성**: Flow A(모바일 피치: 관계→사진→음성→제출+미디어 업로드+동의 링크 공유 화면) → Flow B(웹 동의: preview→매직링크→claim→음성·사진 검토(개별 제외)→공개 기간 선택→발행) → 공개 페이지(실사진·실오디오) → Flow C(verified interest: 프로필 게이트→제출→Dater 인박스 accept/decline) → Intro Room(1:1 채팅+신고·차단·나가기) → 캠페인 pause/resume/archive. **프로덕션 E2E 39체크 전부 그린** (`node scripts/e2e-production.mjs`).
+- **정확한 상태 (2026-07-13 전수 감사 판정)**: **핵심 루프의 UI·데이터 골격 완성 — 신원·동의 불변성·결제 효익·운영의 출시 경계 미완성.** 브랜드가 분명하고 데이터 모델·RLS·공개 피치·동의·관심·채팅의 골격이 연결된 기능성 알파이며, 실사용자 출시 가능한 1.0이 아니다. 이전 핸드오프의 "핵심 루프 완성" 표현은 과대 기술이었음. 상세 판정·점수표·P0 목록은 감사 문서 §1·§5.
+- **골격이 연결된 범위**: Flow A(모바일 피치: 관계→사진→음성→제출+미디어 업로드+동의 링크 공유 화면) → Flow B(웹 동의: preview→매직링크→claim→음성·사진 검토(개별 제외)→공개 기간 선택→발행) → 공개 페이지(실사진·실오디오) → Flow C(interest: 프로필 게이트→제출→Dater 인박스 accept/decline) → Intro Room(1:1 채팅+신고·차단·나가기) → 캠페인 pause/resume/archive. 프로덕션 E2E 39체크 그린 — 단, 이 E2E는 admin 사전 프로비저닝으로 P0-1(신규 웹 사용자 bootstrap 부재)을 우회하며, identity·moderation·결제 sandbox는 검증하지 않는다(감사 §2).
 - **모노레포**: `apps/mobile`(Expo SDK 57) · `apps/web`(Next.js 15) · `packages/{domain,contracts,config,ui-tokens,data,adapters}` · `supabase/`. pnpm hoisted.
 - **백엔드**: hosted Supabase(ref `oknolcxsvogrhnxnyosr`). 마이그레이션 **0001~0010** 배포. 모든 상태 전이는 SECURITY DEFINER RPC — submit/preview/claim/approve(+공개기간)/exclude_pitch_asset/submit_interest/list_campaign_interests/decide_interest/list_my_intro_rooms/leave_intro_room/set_campaign_status/track_event. 클라이언트 campaigns 쓰기 그랜트 전면 회수.
 - **웹 표면**: `/p/[slug]`(실데이터+fixture fallback), `/p/[slug]/interest`, `/consent/[token]`, `/inbox`(관심 인박스+캠페인 관리), `/rooms`·`/rooms/[id]`(채팅), API `/api/transcribe`(OpenAI 전사→구조화 초안, 키 없으면 501), `/api/revenuecat`(웹훅, 토큰 없으면 501).
@@ -35,25 +37,22 @@
 - Slice 12: OpenAI 어댑터+`/api/transcribe`, 사진 제외·공개 기간(0010), E2E 스크립트 repo 편입 (`5000951`)
 - Slice 10: RevenueCat SDK·페이월·웹훅 (`2eb67e7`)
 
-## TODO (남은 것 — 대부분 사용자 액션 게이트)
+## TODO (감사 대응이 최우선 — 상세는 감사 문서 §5~§8)
 
-1. **(사용자·출시 게이트) Resend 도메인 인증** — 샌드박스 발신자는 소유자 메일로만 발송. 도메인 인증 + SMTP sender 교체 전엔 실사용자 로그인 불가
-2. **(사용자) OPENAI_API_KEY 입력** — 넣는 즉시 `/api/transcribe`가 실전사·구조화 초안 생성 (지금은 501)
-3. **(사용자) RevenueCat 셋업** — `docs/REVENUECAT_SETUP.md` 체크리스트 (대시보드·제품 2종·키 2개·dev build). Shipaton 필수
-4. **(사용자+Advisor·출시 게이트) 신원 확인 공급자 선정** — selfie liveness/face match 벤더 결정 + 키 입력 → `UnconfiguredIdentityVerificationProvider` 교체. 실사용자 받기 전 필수
-5. **(P1·다음 세션 축) 보완 + 피드백 반영** — 사용자 피드백 수집 후 우선순위 확정. 알려진 보완 후보:
-   - 모바일 손 QA(사진 업로드→공유 화면 경로, 시뮬레이터) + 발견 버그 수정
-   - 웹 계정 플로우 시각 QA(interest/inbox/rooms — 스크린샷 QA 미실시 표면)
-   - 자막·키네틱 텍스트(전사 결과를 공개 페이지 플레이어에 연결)
-   - 만료 캠페인 자동 status 전이(pg_cron), 채팅 폴링→Realtime 전환 검토
-   - 랜딩(`/`) 페이지 — 현재 스캐폴드 수준
-6. **(P2) 9:16 모션 피치 MP4 export** (media-worker), Vouch Cards(Flow D)
-7. **(보류·8/1 이후 일정에 맞춰) App Store 출시 준비** — 18+ 나이 게이트 화면, dev build(`expo prebuild`), EAS, 심사 메타데이터, 수동 release. 데이팅 4.3(b)+UGC 리스크 대응 포함. 사용자 지시로 지금은 착수하지 않음
-8. **(게이트)** Devpost 공식 Rules 게시 시 `docs/HACKATHON_RULES.md` 재확인
+1. **(진행 중) 감사 Slice A~J 실행** — 현재 진행 상황은 `docs/TASKS.md`의 2026-07-13 감사 대응 표 참조. 출시 차단 P0: ① 웹 사용자 bootstrap ② claim/verified 실증 ③ 동의 snapshot 불변화+AI 순서 ④ 유료 상품 효익+웹훅 정합성 ⑤ moderation/report/delete ⑥ OG/CTA/growth ⑦ 환경·CI 게이트 ⑧ Verified Interest 서버 증거 ⑨ 실캠페인 fixture 오용
+2. **(사용자·출시 게이트) Resend 도메인 인증** — 도메인 인증 + SMTP sender 교체 전엔 실사용자 로그인 불가
+3. **(사용자) OPENAI_API_KEY 입력** — 넣는 즉시 `/api/transcribe`가 실전사·구조화 초안 생성 (지금은 501)
+4. **(사용자) RevenueCat 셋업** — `docs/REVENUECAT_SETUP.md` 체크리스트. Shipaton 필수. Slice E/F 완료 전에는 "결제 완료" 주장 금지
+5. **(사용자+Advisor·출시 게이트) 신원 확인 공급자 선정** — Slice C의 하드 게이트. selfie liveness/face match 벤더 결정 + 키 입력 → `UnconfiguredIdentityVerificationProvider` 교체
+6. **(사용자) `EXPO_PUBLIC_WEB_ORIGIN` 설정** — `pnpm check:env` 현재 실패, 실기기 공유 링크가 localhost로 fallback (감사 P0-7)
+7. **(P2·Slice F와 연동) 9:16 모션 피치 MP4 export** (media-worker) — Creator Launch 효익의 핵심이므로 P2가 아닌 Slice F 범위로 승격됨
+8. **(보류·7월 중하순 재판단) App Store 출시 준비** — 18+ 나이 게이트, dev build, EAS, 심사 메타데이터. 데이팅 4.3(b)+UGC 리스크 대응 포함
+9. **(게이트)** Devpost 공식 Rules 게시 시 `docs/HACKATHON_RULES.md` 재확인
 
 ## IMPORTANT DECISIONS
 
-- **워커 운영**: ~~codex 위임 중단, Advisor 단독 모드~~ → **2026-07-13 사용자 지시로 다음 세션부터 codex 워커 협업 복귀**. 단독 모드는 2026-07-12~13 코어 루프 구축 구간에만 적용된 한시 조치였음. 이유: 코어 루프가 완성돼 병렬 분해 가능한 보완 작업 국면으로 전환. 영향: 다음 세션은 brief 작성(`.briefs/` 패턴)부터 시작
+- **감사 채택 (2026-07-13)**: `docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md`를 현행 작업의 source of truth로 채택. 실행 순서 A→J 고정, 회귀 스위트(`supabase/tests/audit/`, `pnpm test:audit`)는 기대 동작을 인코딩하며 초기 FAIL이 정상, Slice J에서 CI 편입. 상세는 `docs/DECISIONS.md` 2026-07-13 항목
+- **워커 운영**: 2026-07-13부터 codex 워커 협업 재개 (`friendword-codex-1/2/3`). 단독 모드는 2026-07-12~13 코어 루프 구축 구간의 한시 조치였음
 - **출시 일정**: App Store 심사 준비는 보류(출시 창구 8/1~9/30, 아직 여유). 개발·보완 우선 (2026-07-13 사용자 결정)
 - **보안**: API 키·토큰 값은 사용자가 직접 입력. Claude는 위치만 안내
 - **디자인**: "Hype Mixtape" (크림+탠저린/핫핑크/선샤인, 스티커 미학, Unbounded+Bricolage). 웹 공용 스타일 `apps/web/src/styles/flowCard.module.css`
@@ -73,4 +72,5 @@
 
 ## LOG SUMMARY
 
-2026-07-12~13 연속 세션. 빈 repo → 코어 루프 전체 완성. 이번 구간 커밋 9개(모두 CI 그린): 웹 동의/실데이터 → 이메일 검증 → 사진 파이프라인 → verified interest → Intro Room → 라이프사이클+운영 → analytics → 전사+동의 심화 → RevenueCat. 마이그레이션 10개 배포, DB 스위트 10, Playwright 10, 프로덕션 E2E 39체크.
+2026-07-12~13 연속 세션. 빈 repo → 코어 루프의 UI·데이터 골격 구축(커밋 9개, CI 그린): 웹 동의/실데이터 → 이메일 검증 → 사진 파이프라인 → interest → Intro Room → 라이프사이클+운영 → analytics → 전사+동의 심화 → RevenueCat scaffold. 마이그레이션 10개 배포, DB 스위트 10, Playwright 10, 프로덕션 E2E 39체크.
+2026-07-13 오전: 1차 전수 감사 수행(외부 감사, `5c367ff` 기준) — 판정 "기능성 알파, 출시 경계 미완성". 감사 대응 세션 시작: Slice A(문서 truth reset + 회귀 스위트) 착수, codex 워커 3기 재가동.

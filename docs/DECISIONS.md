@@ -33,6 +33,34 @@
 - **검토 대안**: 자동 갱신 구독 하나, 공개/연결 기능 paywall, 두 상품의 번들·상호 할인, Introducer의 Gift a Pass.
 - **영향**: Creator Launch는 `PITCH_DRAFT` scope의 server credit ledger로 `available → reserved → consumed`를 idempotent하게 처리하고, Campaign Pass는 `CAMPAIGN` scope의 30일 entitlement를 webhook과 서버에서 검증합니다.
 
+## 2026-07-13: 1차 전수 감사 채택과 실행 순서 고정
+
+- **결정**: `docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md`(외부 전수 감사, `5c367ff` 기준)를 현행 개발의 source of truth로 채택하고, 실행 순서를 감사 §7의 A→J로 고정합니다. 문서의 "핵심 루프 완성" 표현을 "핵심 루프의 UI·데이터 골격 완성, 신원·동의·결제·운영의 출시 경계 미완성"으로 정정합니다.
+- **이유**: 감사와 두 독립 검토가 일치되게 P0 미달(신규 웹 사용자 bootstrap 부재, token-possession claim, 동의 snapshot 가변, 유료 효익 부재, moderation 미연결 등)을 판정했습니다. 신뢰 경계를 고정하기 전의 결제 활성화·디자인 폴리시는 재작업을 만듭니다.
+- **검토 대안**: 기존 TODO 우선순위 유지(사용자 키 게이트 우선), 디자인 Trust Layer 선행, App Store 준비 병행.
+- **영향**: Slice A~J가 `docs/TASKS.md`에 추가되고 워커 brief(`.briefs/07~`)가 이 순서를 따릅니다. "1.0 complete", "verified dating", "RevenueCat complete" 표현은 감사 §8 기준 충족 전 문서 사용 금지.
+
+## 2026-07-13: 감사 회귀 스위트는 기대 동작을 인코딩 (초기 FAIL 정상)
+
+- **결정**: `supabase/tests/audit/`(DB)와 `apps/web/tests-audit/`(웹훅 유닛)에 감사 P0 acceptance를 **수정 완료 후 기대 동작** 기준으로 작성합니다. 전용 러너 `scripts/test-db-audit.sh`와 `pnpm test:audit`로 실행하며 기본 `pnpm test`/CI에는 포함하지 않고, 전부 그린이 되는 Slice J에서 CI에 편입합니다.
+- **이유**: 기존 하니스(ON_ERROR_STOP 순차 실행)를 그린으로 유지하면서 다음 감사의 합격 기준을 실행 가능한 형태로 먼저 고정하기 위함입니다.
+- **검토 대안**: 슬라이스별 테스트 후행 작성(감사 §7 Slice A 지시 위반), `it.fails` 마킹(그린 전환 시점 추적이 불명확).
+- **영향**: 각 슬라이스의 완료 정의가 "해당 audit 테스트 그린 전환"으로 관찰 가능해집니다.
+
+## 2026-07-13: 웹 사용자 bootstrap 표준은 DB 트리거
+
+- **결정**: `auth.users` AFTER INSERT 트리거(`private.handle_new_auth_user`, SECURITY DEFINER, 예외 비전파)로 `public.users`+`profiles`를 자동 생성하고 기존 계정은 백필합니다. display_name은 email local-part로 영구 확정하지 않고 `profiles.display_name_confirmed`를 도입해 온보딩에서 사용자가 승인합니다. `ensureUserRow`는 폴백으로 유지합니다.
+- **이유**: 웹 매직링크·모바일 OTP·향후 OAuth 등 모든 auth 진입 경로를 클라이언트 코드 협조 없이 커버하는 유일한 지점이 DB이기 때문입니다(감사 P0-1).
+- **검토 대안**: idempotent bootstrap RPC를 각 웹 플로우 선두에 호출(호출 누락 위험 상존), 서버 미들웨어 provisioning(모바일 미커버).
+- **영향**: migration 0011, suite 11, E2E의 수동 upsert 제거. claim/interest RPC는 public row 존재를 전제할 수 있게 됩니다.
+
+## 2026-07-13: 무료 공개 기간 14일 고정, 90일 폐지
+
+- **결정**: 동의 승인 시 공개 기간은 무료(Free Starter) 14일 고정으로 되돌리고, 30일은 활성 Campaign Pass 엔타이틀먼트가 있을 때만, 90일 선택지는 제거합니다.
+- **이유**: 무료 90일이 존재하면 Campaign Pass(30일, $19.99)의 가치가 성립하지 않습니다(감사 P0-4). 원본 제품 계약(`FRIENDWORD_HANDOFF.md`)도 Free 14일/Pass 30일입니다.
+- **검토 대안**: 현행 7/30/90 유지(상품 붕괴), Pass를 기간 연장이 아닌 기능 전용으로 재정의(원본 계약 이탈).
+- **영향**: `approve_consent_request` 검증 변경(Slice E), ConsentFlow 기간 UI 재설계, audit 테스트 a04에 인코딩.
+
 ## 2026-07-12: 로컬 PostgreSQL 17 + plain-SQL 스키마 테스트 하니스
 
 - **결정**: 초기 schema 테스트를 Docker/pgTAP 대신 로컬 PostgreSQL 17과 plain-SQL 하니스로 실행합니다.

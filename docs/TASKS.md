@@ -8,6 +8,16 @@
 
 상태는 Worker의 자체 보고와 Advisor 승인을 구분합니다. Worker 완료는 Advisor가 diff, 동일 테스트와 matching-surface manual QA를 재실행하기 전까지 통합 승인이 아닙니다. 범위가 바뀌면 작업 전에 이 표를 갱신합니다.
 
+## 2026-07-13 감사 대응 (source of truth: docs/FRIENDWORD_AUDIT_HANDOFF_2026-07-13.md §7, 순서 A→J 고정)
+
+| Session              | Owned paths                                                                                                            | Dependency                   | Acceptance criteria                                                   | Status                  | Updated    |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------- | --------------------------------------------------------------------- | ----------------------- | ---------- |
+| Advisor              | Slice A(문서): `docs/**`, `.briefs/07~09`                                                                              | 없음                         | 감사 판정 반영한 truth reset + 결정 4건 기록 + 감사 문서 repo 편입    | 진행 중                 | 2026-07-13 |
+| `friendword-codex-2` | Slice A(DB 회귀): `supabase/tests/audit/**`, `scripts/test-db-audit.sh`                                                | `.briefs/07`                 | 러너가 파일별 PASS/FAIL 보고, 기존 test-db.sh 그린 유지               | 진행 중                 | 2026-07-13 |
+| `friendword-codex-3` | Slice A(웹훅 회귀): `apps/web/tests-audit/**`, `apps/web/vitest.audit.config.ts`, 루트 `package.json` test:audit 1줄   | `.briefs/09`                 | `pnpm test:audit` 실행 가능, 기본 `pnpm test` 그린 유지               | 진행 중                 | 2026-07-13 |
+| `friendword-codex-1` | Slice B: `supabase/migrations/0011`, `supabase/tests/11`, `packages/data`(auth), 웹 이름 확정 UI, E2E 수동 upsert 제거 | `.briefs/08`, Slice A 선통합 | fresh email이 수동 DB 작업 없이 claim/interest 완료, 전체 하니스 그린 | 진행 중 (통합은 A 이후) | 2026-07-13 |
+| (예정)               | Slice C~J                                                                                                              | 감사 §7 의존성 표            | 감사 §5·§8 acceptance + audit 회귀 스위트 그린 전환                   | 예정                    | 2026-07-13 |
+
 ## 2026-07-12 진행 중 작업
 
 | Session              | Owned paths                                      | Dependency                                                                       | Acceptance criteria                                                                    | Status                     | Updated    |

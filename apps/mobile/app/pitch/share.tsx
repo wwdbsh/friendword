@@ -1,17 +1,18 @@
 import { colors, fonts, fontSizes, radii, spacing, strokes } from '@friendword/ui-tokens';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { PurchasesRepo, trackEvent } from '@friendword/data';
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { Linking, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { trackEvent } from '@friendword/data';
-
-import { HypeButton, StickerCard } from '../../src/components';
+import { HypeButton, QuietNavAction, StickerCard, TrustCard } from '../../src/components';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
 import { hasFinalizedConsent } from '../../src/services/pitchDrafts';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 import type { PitchDraft } from '../../src/services/types';
-import { buildConsentUrl } from '../../src/services/webOrigin';
+import { buildConsentUrl, getWebOrigin } from '../../src/services/webOrigin';
+
+type CreatorCreditState = 'idle' | 'loading' | 'available' | 'unavailable' | 'error';
 
 export default function SharePitchScreen() {
   const router = useRouter();
@@ -19,6 +20,9 @@ export default function SharePitchScreen() {
   const [draft, setDraft] = useState<PitchDraft | null>(null);
   const [loading, setLoading] = useState(true);
   const [shareError, setShareError] = useState<string | null>(null);
+  const [kitError, setKitError] = useState<string | null>(null);
+  const [creatorCreditState, setCreatorCreditState] = useState<CreatorCreditState>('idle');
+  const [creditRefresh, setCreditRefresh] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -58,9 +62,50 @@ export default function SharePitchScreen() {
   }, [draftId]);
 
   const friendName = draft?.relationship?.friendFirstName ?? 'your friend';
+  const serverDraftId = draft?.server?.draftId ?? null;
   const consentToken = draft?.server?.consentToken ?? null;
   const consentUrl = consentToken === null ? null : buildConsentUrl(consentToken);
   const isResent = resent === '1';
+  const isPublished = draft?.status === 'published' && serverDraftId !== null;
+  const kitUrl = serverDraftId === null ? null : `${getWebOrigin()}/kit/${serverDraftId}`;
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!isPublished || serverDraftId === null) {
+        setCreatorCreditState('idle');
+        return;
+      }
+
+      let active = true;
+      const client = getSupabaseClient();
+      if (client === null) {
+        setCreatorCreditState('error');
+        return;
+      }
+
+      setCreatorCreditState('loading');
+      const repo = new PurchasesRepo(client);
+      void repo
+        .hasConfirmedBenefit({
+          productId: 'creator_launch_credit_499',
+          pitchDraftId: serverDraftId,
+        })
+        .then((available) => {
+          if (active) {
+            setCreatorCreditState(available ? 'available' : 'unavailable');
+          }
+        })
+        .catch(() => {
+          if (active) {
+            setCreatorCreditState('error');
+          }
+        });
+
+      return () => {
+        active = false;
+      };
+    }, [creditRefresh, isPublished, serverDraftId]),
+  );
 
   const shareInvite = async (): Promise<void> => {
     if (consentUrl === null) {
@@ -82,37 +127,67 @@ export default function SharePitchScreen() {
     }
   };
 
+  const openKit = async (): Promise<void> => {
+    if (kitUrl === null) {
+      return;
+    }
+    setKitError(null);
+    try {
+      await Linking.openURL(kitUrl);
+    } catch {
+      setKitError('The social launch kit could not open. Please try again.');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <Stack.Screen options={{ title: isResent ? 'Revision ready' : 'Share approval invite' }} />
+      <Stack.Screen
+        options={{
+          title: isPublished
+            ? 'Social launch kit'
+            : isResent
+              ? 'Revision ready'
+              : 'Share approval invite',
+        }}
+      />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.heading}>
           <Text style={styles.eyebrow}>
-            {isResent ? 'LATEST REVISION READY' : 'TRACK 6 · RELEASE DAY'}
+            {isPublished
+              ? 'SOCIAL LAUNCH KIT'
+              : isResent
+                ? 'LATEST REVISION READY'
+                : 'TRACK 6 · RELEASE DAY'}
           </Text>
           <Text style={styles.title}>
-            {isResent ? 'The existing link is up to date' : 'Your mix is ready to send!'}
+            {isPublished
+              ? 'Your approved pitch is live'
+              : isResent
+                ? 'The existing link is up to date'
+                : 'Your mix is ready to send!'}
           </Text>
           <Text style={styles.subtitle}>
-            {isResent
-              ? `${friendName} can review the latest revision at the same private link.`
-              : `One last move: send ${friendName} the private approval invite. Nothing goes public until they say yes.`}
+            {isPublished
+              ? 'Create social assets from the approved pitch, or open the kit you already purchased.'
+              : isResent
+                ? `${friendName} can review the latest revision at the same private link.`
+                : `One last move: send ${friendName} the private approval invite. Nothing goes public until they say yes.`}
           </Text>
         </View>
 
         {loading ? <Text style={styles.subtitle}>Loading your invite…</Text> : null}
 
-        {!loading && !isResent && consentUrl === null ? (
-          <StickerCard>
+        {!loading && !isResent && !isPublished && consentUrl === null ? (
+          <TrustCard tone="danger">
             <Text style={styles.cardTitle}>Invite not found</Text>
             <Text style={styles.subtitle}>
               This pitch hasn’t been submitted yet, or the invite link lives on another device.
             </Text>
-          </StickerCard>
+          </TrustCard>
         ) : null}
 
-        {isResent && draft !== null ? (
-          <StickerCard>
+        {isResent && !isPublished && draft !== null ? (
+          <TrustCard>
             <Text style={styles.cardTitle}>Existing link updated</Text>
             <Text style={styles.subtitle}>
               기존 링크가 최신 수정본으로{`\n`}바뀌었어요.{`\n`}새 링크나 재공유는 필요하지 않아요.
@@ -121,12 +196,12 @@ export default function SharePitchScreen() {
               {friendName}’s existing private approval link now opens the latest revision. No new
               link was issued.
             </Text>
-          </StickerCard>
+          </TrustCard>
         ) : null}
 
-        {!isResent && consentUrl !== null ? (
+        {!isResent && !isPublished && consentUrl !== null ? (
           <>
-            <StickerCard>
+            <TrustCard>
               <Text style={styles.cardTitle}>{friendName}’s private invite</Text>
               <Text style={styles.finePrint}>
                 Invite details sent to Friendword · contact removed from this device.
@@ -145,24 +220,82 @@ export default function SharePitchScreen() {
                 onPress={() => {
                   void shareInvite();
                 }}
+                variant="trust"
               />
               {shareError ? <Text style={styles.error}>{shareError}</Text> : null}
-            </StickerCard>
+            </TrustCard>
 
-            <StickerCard>
+            <TrustCard>
               <Text style={styles.cardTitle}>What happens next</Text>
               <Text style={styles.step}>1. {friendName} opens the link and signs in.</Text>
               <Text style={styles.step}>2. They hear your voice and review everything.</Text>
               <Text style={styles.step}>3. When they approve, their page goes live.</Text>
-            </StickerCard>
+            </TrustCard>
           </>
         ) : null}
 
-        <HypeButton
-          label="Back to my campaigns"
-          onPress={() => router.replace('/campaigns')}
-          secondary
-        />
+        {isPublished && (creatorCreditState === 'idle' || creatorCreditState === 'loading') ? (
+          <TrustCard>
+            <Text style={styles.cardTitle}>Checking Creator Launch access</Text>
+            <Text style={styles.subtitle}>Confirming the credit for this published pitch…</Text>
+          </TrustCard>
+        ) : null}
+
+        {isPublished && creatorCreditState === 'unavailable' && serverDraftId !== null ? (
+          <StickerCard>
+            <Text style={styles.cardTitle}>Create social launch kit</Text>
+            <Text style={styles.subtitle}>
+              Purchase one Creator Launch credit for this pitch, then create its approved social
+              assets on the web.
+            </Text>
+            <HypeButton
+              label="Get Creator Launch"
+              onPress={() =>
+                router.push({
+                  pathname: '/paywall',
+                  params: { intent: 'creator_launch', draftId: serverDraftId },
+                })
+              }
+            />
+          </StickerCard>
+        ) : null}
+
+        {isPublished && creatorCreditState === 'available' && kitUrl !== null ? (
+          <StickerCard>
+            <Text style={styles.cardTitle}>Your social launch kit is ready to unlock</Text>
+            <Text style={styles.subtitle}>
+              Your Creator Launch credit is available for this pitch. Open the web kit to create and
+              share the approved assets.
+            </Text>
+            <View style={styles.linkBox}>
+              <Text numberOfLines={2} style={styles.link}>
+                {kitUrl}
+              </Text>
+            </View>
+            <HypeButton
+              label="Open social launch kit"
+              onPress={() => {
+                void openKit();
+              }}
+            />
+            {kitError ? <Text style={styles.error}>{kitError}</Text> : null}
+          </StickerCard>
+        ) : null}
+
+        {isPublished && creatorCreditState === 'error' ? (
+          <TrustCard tone="danger">
+            <Text style={styles.cardTitle}>Creator Launch access could not be checked</Text>
+            <Text style={styles.subtitle}>
+              No purchase was started. Check your connection and try again.
+            </Text>
+            <QuietNavAction
+              label="Try again"
+              onPress={() => setCreditRefresh((current) => current + 1)}
+            />
+          </TrustCard>
+        ) : null}
+
+        <QuietNavAction label="Back to my campaigns" onPress={() => router.replace('/campaigns')} />
       </ScrollView>
     </SafeAreaView>
   );

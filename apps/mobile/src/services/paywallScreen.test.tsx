@@ -58,7 +58,10 @@ vi.mock('../components', async () => {
   const { createElement } = await import('react');
   return {
     HypeButton: ({ label }: { readonly label: string }) => createElement('button', null, label),
+    QuietNavAction: ({ label }: { readonly label: string }) => createElement('button', null, label),
     StickerCard: ({ children }: { readonly children: React.ReactNode }) =>
+      createElement('article', null, children),
+    TrustCard: ({ children }: { readonly children: React.ReactNode }) =>
       createElement('article', null, children),
   };
 });
@@ -77,7 +80,7 @@ describe('PaywallScreen', () => {
     const markup = renderToStaticMarkup(<PaywallScreen />);
 
     expect(markup).toContain('This paywall link isn’t valid');
-    expect(markup).toContain('No products are shown without that context.');
+    expect(markup).toContain('Products are not shown without a verified context.');
     expect(markup).not.toContain('Restore purchases');
     expect(markup).not.toContain('Get Creator Launch');
     expect(mocks.getPaywallStatus).not.toHaveBeenCalled();

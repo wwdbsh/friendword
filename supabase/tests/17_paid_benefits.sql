@@ -157,6 +157,24 @@ BEGIN
 END;
 $$;
 
+-- 4b. The introducer can still buy the credit after publish (0022) —
+-- that is exactly when the kit becomes usable.
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000004';
+DO $$
+DECLARE
+  issued RECORD;
+BEGIN
+  SELECT * INTO issued
+    FROM issue_purchase_intent(
+      'creator_launch_credit_499',
+      'f1700000-0000-0000-0000-000000000001'
+    );
+  IF issued.purchase_intent_id IS NULL THEN
+    RAISE EXCEPTION 'creator intent was not issued for a published draft';
+  END IF;
+END;
+$$;
+
 -- 5. Without a credit the unlock refuses; a non-creator cannot unlock.
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000001';
 DO $$

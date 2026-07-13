@@ -10,6 +10,7 @@ const stickerShadow: ViewStyle = {
   elevation: spacing.xs,
 };
 
+/** Campaign-expression card. Do not use on payment, identity, or safety surfaces. */
 export function StickerCard({ children }: PropsWithChildren) {
   return <View style={styles.card}>{children}</View>;
 }

@@ -8,13 +8,16 @@ type HypeButtonProps = {
   readonly onPress: () => void;
   readonly disabled?: boolean;
   readonly secondary?: boolean;
+  readonly variant?: 'campaign' | 'trust';
 };
 
+/** Campaign-expression action by default; trust removes the sticker shadow and outline weight. */
 export function HypeButton({
   label,
   onPress,
   disabled = false,
   secondary = false,
+  variant = 'campaign',
 }: HypeButtonProps) {
   const reducedMotion = useReducedMotion();
 
@@ -26,8 +29,15 @@ export function HypeButton({
       style={({ pressed }) => [
         styles.button,
         secondary && styles.secondary,
+        variant === 'trust' && styles.trust,
         disabled && styles.disabled,
-        pressed && !disabled && (secondary ? styles.secondaryPressed : styles.pressed),
+        pressed &&
+          !disabled &&
+          (variant === 'trust'
+            ? styles.trustPressed
+            : secondary
+              ? styles.secondaryPressed
+              : styles.pressed),
         pressed && !disabled && !reducedMotion && styles.pressedScale,
       ]}
     >
@@ -70,6 +80,14 @@ const styles = StyleSheet.create({
   secondaryPressed: {
     backgroundColor: colors.hype,
     shadowOffset: { width: 2, height: 2 },
+  },
+  trust: {
+    borderWidth: 1,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  trustPressed: {
+    backgroundColor: colors.popPressed,
   },
   disabled: {
     backgroundColor: colors.textFaint,

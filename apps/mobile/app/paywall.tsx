@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { HypeButton, StickerCard } from '../src/components';
+import { HypeButton, QuietNavAction, TrustCard } from '../src/components';
 import {
   getPaywallStatus,
   parseProductIntentParams,
@@ -115,14 +115,14 @@ export default function PaywallScreen() {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.content}>
-          <StickerCard>
+          <TrustCard tone="danger">
             <Text style={styles.cardTitle}>This paywall link isn’t valid</Text>
             <Text style={styles.subtitle}>
-              Open the paywall from the draft or campaign you want to boost. No products are shown
-              without that context.
+              Open payment from the draft or campaign you want to purchase for. Products are not
+              shown without a verified context.
             </Text>
-          </StickerCard>
-          <HypeButton label="Back" onPress={() => router.back()} secondary />
+          </TrustCard>
+          <QuietNavAction label="Back" onPress={() => router.back()} />
         </View>
       </SafeAreaView>
     );
@@ -171,28 +171,30 @@ export default function PaywallScreen() {
         {status === null ? <Text style={styles.subtitle}>Loading offering…</Text> : null}
 
         {status?.state === 'unconfigured' ? (
-          <StickerCard>
+          <TrustCard>
             <Text style={styles.cardTitle}>Billing isn’t live yet</Text>
             <Text style={styles.subtitle}>{status.reason}</Text>
             <Text style={styles.finePrint}>
               Once this product is configured in RevenueCat, it will appear here automatically.
             </Text>
-          </StickerCard>
+          </TrustCard>
         ) : null}
 
         {status?.state === 'ready' && status.package === null ? (
-          <StickerCard>
+          <TrustCard>
             <Text style={styles.cardTitle}>This offering isn’t available yet</Text>
             <Text style={styles.subtitle}>
               RevenueCat responded, but the product for this paywall context is missing from the
               current offering.
             </Text>
-          </StickerCard>
+          </TrustCard>
         ) : null}
 
         {status?.state === 'ready' && status.package !== null ? (
-          <StickerCard>
+          <TrustCard>
             <Text style={styles.cardTitle}>{status.package.title}</Text>
+            <Text style={styles.subtitle}>{copy.benefit}</Text>
+            <Text style={styles.purchaseKind}>One-time purchase</Text>
             <Text style={styles.price}>{status.package.priceString}</Text>
             <HypeButton
               disabled={busy}
@@ -200,21 +202,25 @@ export default function PaywallScreen() {
               onPress={() => {
                 void run('purchase', status.package?.identifier);
               }}
+              variant="trust"
             />
-          </StickerCard>
+          </TrustCard>
         ) : null}
 
-        {note !== null ? <Text style={styles.note}>{note}</Text> : null}
+        {note !== null ? (
+          <TrustCard tone="danger">
+            <Text style={styles.note}>{note}</Text>
+          </TrustCard>
+        ) : null}
 
-        <HypeButton
+        <QuietNavAction
           disabled={busy}
           label={busy ? 'Working…' : 'Restore purchases'}
           onPress={() => {
             void run('restore');
           }}
-          secondary
         />
-        <HypeButton label="Back" onPress={() => router.back()} secondary />
+        <QuietNavAction label="Back" onPress={() => router.back()} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -232,11 +238,11 @@ function FlowMessage({
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.centeredContent}>
-        <StickerCard>
+        <TrustCard tone={title === '결제가 확인됐어요' ? 'success' : 'neutral'}>
           <Text style={styles.cardTitle}>{title}</Text>
           <Text style={styles.subtitle}>{body}</Text>
-        </StickerCard>
-        {onBack === undefined ? null : <HypeButton label="Back" onPress={onBack} secondary />}
+        </TrustCard>
+        {onBack === undefined ? null : <QuietNavAction label="Back" onPress={onBack} />}
       </View>
     </SafeAreaView>
   );
@@ -246,19 +252,22 @@ function getPaywallCopy(intent: ProductIntent): {
   readonly eyebrow: string;
   readonly title: string;
   readonly subtitle: string;
+  readonly benefit: string;
 } {
   return intent.intent === 'creator_launch'
     ? {
-        eyebrow: 'GIVE THE MIX A BOOST',
-        title: 'Launch it louder.',
+        eyebrow: 'CREATOR LAUNCH',
+        title: 'One credit for this pitch',
         subtitle:
-          'Unlock the Creator Launch share kit for this pitch. Friendword stays free for introductions and safety.',
+          'Purchase a Creator Launch credit for the selected pitch. The credit stays scoped to this draft.',
+        benefit: 'Create the approved social launch kit for this pitch after it is published.',
       }
     : {
-        eyebrow: 'KEEP THE CAMPAIGN LIVE',
-        title: 'Add 30 more days.',
+        eyebrow: 'CAMPAIGN PASS',
+        title: '30 more days for this campaign',
         subtitle:
-          'Activate Campaign Pass for this published campaign and unlock its performance analytics.',
+          'Purchase Campaign Pass for the selected published campaign. The entitlement is scoped to this campaign.',
+        benefit: 'Extend the campaign and access its performance analytics for the pass period.',
       };
 }
 
@@ -285,7 +294,12 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.xs,
     letterSpacing: 1,
   },
-  title: { color: colors.ink, fontFamily: fonts.display, fontSize: fontSizes.xl, lineHeight: 32 },
+  title: {
+    color: colors.ink,
+    fontFamily: 'BricolageGrotesqueBold',
+    fontSize: fontSizes.xl,
+    lineHeight: 32,
+  },
   subtitle: {
     color: colors.textSecondary,
     fontFamily: fonts.body,
@@ -293,6 +307,11 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   cardTitle: { color: colors.ink, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.lg },
+  purchaseKind: {
+    color: colors.textSecondary,
+    fontFamily: fonts.body,
+    fontSize: fontSizes.sm,
+  },
   price: { color: colors.pop, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.xl },
   finePrint: {
     color: colors.textSecondary,

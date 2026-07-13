@@ -1,0 +1,514 @@
+.page {
+  min-height: 100dvh;
+  overflow: clip;
+  overflow-wrap: break-word;
+  background:
+    radial-gradient(
+      circle at 82% 8%,
+      color-mix(in srgb, var(--color-hype) 30%, transparent) 0,
+      transparent 24rem
+    ),
+    radial-gradient(
+      circle at 8% 34%,
+      color-mix(in srgb, var(--color-fresh) 12%, transparent) 0,
+      transparent 28rem
+    ),
+    var(--color-background);
+  word-break: keep-all;
+}
+
+.nav,
+.hero,
+.stepsSection,
+.demoBand,
+.safetySection,
+.appSection,
+.footer {
+  width: min(calc(100% - var(--space-xl) * 2), 72rem);
+  margin-inline: auto;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 5.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-ink) 16%, transparent);
+}
+
+.wordmark,
+.footerWordmark {
+  font-family: var(--font-display), sans-serif;
+  font-weight: 900;
+  letter-spacing: -0.05em;
+}
+
+.wordmark {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  font-size: var(--font-size-lg);
+  text-decoration: none;
+}
+
+.quietLink,
+.textLink {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  font-weight: 750;
+  text-underline-offset: var(--space-xs);
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(20rem, 0.92fr);
+  gap: var(--space-xxl);
+  align-items: center;
+  min-height: calc(100dvh - 5.5rem);
+  padding-block: calc(var(--space-xxl) * 1.5);
+}
+
+.heroCopy {
+  max-width: 42rem;
+}
+
+.eyebrow,
+.kicker,
+.pathLabel {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 850;
+  letter-spacing: 0.08em;
+}
+
+.hero h1 {
+  max-width: 11ch;
+  margin: var(--space-md) 0 var(--space-lg);
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(var(--font-size-display), 6vw, var(--font-size-hero));
+  line-height: var(--line-tight);
+  letter-spacing: -0.065em;
+}
+
+.hero h1 span,
+.voiceQuote > span:not(.quoteMark) {
+  display: block;
+}
+
+.heroBody {
+  max-width: 36rem;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-lg);
+  line-height: var(--line-relaxed);
+}
+
+.noBreak {
+  white-space: nowrap;
+}
+
+.heroActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  margin-top: var(--space-xl);
+}
+
+.primaryAction,
+.secondaryAction {
+  display: inline-flex;
+  min-height: 3.5rem;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  border-radius: var(--radius-pill);
+  font-weight: 850;
+  text-decoration: none;
+  transition:
+    transform var(--motion-fast) var(--motion-ease-out),
+    box-shadow var(--motion-fast) var(--motion-ease-out);
+}
+
+.primaryAction {
+  border: 1px solid var(--color-ink);
+  background: var(--color-pop);
+  box-shadow: var(--shadow-card);
+}
+
+.secondaryAction {
+  border: 1px solid color-mix(in srgb, var(--color-ink) 36%, transparent);
+  background: var(--color-surface);
+}
+
+.primaryAction:hover,
+.secondaryAction:hover {
+  transform: translateY(calc(var(--space-xs) * -1));
+  box-shadow: var(--shadow-card);
+}
+
+.primaryAction:active,
+.secondaryAction:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.voiceCard {
+  position: relative;
+  min-height: 31rem;
+  padding: var(--space-xl);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 36%, transparent);
+  border-radius: var(--radius-lg);
+  background: var(--color-stage);
+  color: var(--color-stage-text);
+  box-shadow: var(--shadow-card);
+}
+
+.voiceCard::before {
+  position: absolute;
+  right: -4rem;
+  bottom: -5rem;
+  width: 15rem;
+  height: 15rem;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-flirt) 42%, transparent);
+  content: '';
+  filter: blur(0.25rem);
+}
+
+.voiceCardTopline,
+.approvalLine {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--color-stage-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.voiceMark {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: auto;
+  margin-block: calc(var(--space-xxl) * 1.25);
+  fill: var(--color-flirt);
+}
+
+.voiceQuote {
+  position: relative;
+  z-index: 1;
+  max-width: 17ch;
+  font-size: var(--font-size-xl);
+  font-weight: 750;
+  line-height: var(--line-normal);
+}
+
+.quoteMark {
+  color: var(--color-hype);
+  font-family: var(--font-display), sans-serif;
+  font-size: var(--font-size-display);
+  line-height: 0;
+}
+
+.approvalLine {
+  justify-content: flex-start;
+  gap: var(--space-sm);
+  margin-top: var(--space-xl);
+  letter-spacing: 0;
+}
+
+.approvalDot {
+  width: var(--space-sm);
+  height: var(--space-sm);
+  border-radius: var(--radius-pill);
+  background: var(--color-fresh);
+  box-shadow: 0 0 0 var(--space-xs) color-mix(in srgb, var(--color-fresh) 22%, transparent);
+}
+
+.stepsSection,
+.safetySection,
+.appSection {
+  padding-block: calc(var(--space-xxl) * 2);
+}
+
+.sectionHeading {
+  max-width: 46rem;
+  margin-bottom: var(--space-xl);
+}
+
+.sectionHeading h2,
+.demoBand h2 {
+  margin: var(--space-sm) 0 var(--space-md);
+  font-size: clamp(var(--font-size-xl), 4vw, var(--font-size-display));
+  line-height: var(--line-tight);
+  letter-spacing: -0.035em;
+}
+
+.sectionHeading > p:last-child,
+.demoBand p,
+.stepCard p,
+.safetyGrid p,
+.pathCard > p {
+  color: var(--color-text-secondary);
+}
+
+.stepsGrid,
+.safetyGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-lg);
+}
+
+.stepCard,
+.safetyGrid article,
+.pathCard {
+  border: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
+  box-shadow: var(--shadow-card);
+}
+
+.stepCard {
+  min-height: 16rem;
+  padding: var(--space-xl);
+}
+
+.stepNumber,
+.safetyIcon {
+  display: inline-grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-hype) 72%, var(--color-surface));
+  font-weight: 900;
+}
+
+.stepCard h3,
+.safetyGrid h3,
+.pathCard h3 {
+  margin: var(--space-lg) 0 var(--space-sm);
+  font-size: var(--font-size-lg);
+  line-height: var(--line-tight);
+}
+
+.stepCard p,
+.safetyGrid p,
+.pathCard p {
+  margin: 0;
+  line-height: var(--line-relaxed);
+}
+
+.demoBand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xl);
+  padding: var(--space-xl);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 28%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-hype) 22%, var(--color-surface));
+}
+
+.demoBand > div {
+  max-width: 42rem;
+}
+
+.demoBand .secondaryAction {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.demoBand p:last-child {
+  margin-bottom: 0;
+}
+
+.safetySection {
+  margin-top: calc(var(--space-xxl) * 2);
+  border-top: 1px solid color-mix(in srgb, var(--color-ink) 16%, transparent);
+}
+
+.safetyGrid article {
+  padding: var(--space-lg);
+}
+
+.safetyIcon {
+  background: color-mix(in srgb, var(--color-fresh) 22%, var(--color-surface));
+  color: var(--color-ink);
+}
+
+.appSection {
+  margin-top: var(--space-xxl);
+  padding-inline: var(--space-xl);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-stage) 96%, var(--color-surface));
+  color: var(--color-stage-text);
+}
+
+.appSection .kicker,
+.appSection .sectionHeading > p:last-child,
+.appSection .pathCard > p {
+  color: var(--color-stage-text-secondary);
+}
+
+.pathGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-lg);
+}
+
+.pathCard {
+  min-height: 19rem;
+  padding: var(--space-xl);
+  scroll-margin-top: var(--space-xl);
+  background: color-mix(in srgb, var(--color-surface) 8%, transparent);
+  box-shadow: none;
+}
+
+.pathLabel {
+  color: var(--color-hype) !important;
+}
+
+.comingSoon,
+.textLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-xl);
+  font-weight: 800;
+}
+
+.comingSoon {
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid color-mix(in srgb, var(--color-stage-text) 28%, transparent);
+  border-radius: var(--radius-pill);
+  color: var(--color-stage-text);
+}
+
+.textLink {
+  color: var(--color-stage-text);
+}
+
+.footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  padding-block: calc(var(--space-xxl) * 1.5);
+  color: var(--color-text-secondary);
+}
+
+.footer p {
+  margin: 0;
+}
+
+.footerWordmark {
+  color: var(--color-ink);
+  font-size: var(--font-size-lg);
+}
+
+@media (max-width: 860px) {
+  .hero {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .heroCopy {
+    max-width: 46rem;
+  }
+
+  .voiceCard {
+    min-height: 27rem;
+  }
+
+  .stepsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .stepCard {
+    min-height: 0;
+  }
+
+  .safetyGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .nav,
+  .hero,
+  .stepsSection,
+  .demoBand,
+  .safetySection,
+  .appSection,
+  .footer {
+    width: calc(100% - var(--space-xl));
+  }
+
+  .hero {
+    gap: var(--space-xl);
+    padding-block: var(--space-xxl);
+  }
+
+  .hero h1 {
+    font-size: var(--font-size-display);
+  }
+
+  .heroBody {
+    font-size: var(--font-size-md);
+  }
+
+  .heroActions,
+  .demoBand,
+  .footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .primaryAction,
+  .secondaryAction {
+    width: 100%;
+  }
+
+  .voiceCard {
+    min-height: 25rem;
+    padding: var(--space-lg);
+  }
+
+  .voiceMark {
+    margin-block: var(--space-xxl);
+  }
+
+  .stepsSection,
+  .safetySection,
+  .appSection {
+    padding-block: calc(var(--space-xxl) * 1.5);
+  }
+
+  .pathGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .pathCard {
+    min-height: 0;
+    padding: var(--space-lg);
+  }
+
+  .footer {
+    align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primaryAction,
+  .secondaryAction {
+    transition: none;
+  }
+}

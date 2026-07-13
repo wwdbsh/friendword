@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
@@ -14,6 +15,28 @@ import styles from './page.module.css';
 type PitchPageProps = {
   readonly params: Promise<{ readonly campaignSlug: string }>;
 };
+
+type HeaderReader = Pick<Headers, 'get'>;
+
+function metadataOrigin(requestHeaders: HeaderReader): URL {
+  const deploymentHost =
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL ?? null;
+  if (deploymentHost !== null && deploymentHost.length > 0) {
+    return new URL(`https://${deploymentHost}`);
+  }
+
+  const forwardedHost = requestHeaders.get('x-forwarded-host')?.split(',')[0]?.trim();
+  const host = forwardedHost ?? requestHeaders.get('host') ?? 'localhost:3000';
+  const forwardedProtocol = requestHeaders.get('x-forwarded-proto')?.split(',')[0]?.trim();
+  const protocol =
+    forwardedProtocol === 'http' || forwardedProtocol === 'https'
+      ? forwardedProtocol
+      : host.startsWith('localhost')
+        ? 'http'
+        : 'https';
+  const origin = `${protocol}://${host}`;
+  return URL.canParse(origin) ? new URL(origin) : new URL('http://localhost:3000');
+}
 
 // Signed media URLs must be minted per request, never cached at build time.
 export const dynamic = 'force-dynamic';
@@ -35,6 +58,8 @@ async function loadPitch(campaignSlug: string): Promise<PitchView | null> {
 
 export async function generateMetadata({ params }: PitchPageProps): Promise<Metadata> {
   const { campaignSlug } = await params;
+  const origin = metadataOrigin(await headers());
+  const isDemo = getPitchFixture(campaignSlug) !== undefined;
   const pitch = await loadPitch(campaignSlug);
 
   if (pitch === null) {
@@ -42,7 +67,11 @@ export async function generateMetadata({ params }: PitchPageProps): Promise<Meta
   }
 
   const title = `${pitch.daterName} — introduced by a friend`;
+  const ogPath = isDemo
+    ? '/fixtures/blair-og.svg'
+    : `/api/og?slug=${encodeURIComponent(campaignSlug)}`;
   return {
+    metadataBase: origin,
     title,
     description: pitch.description,
     robots: { index: false, follow: false },
@@ -50,7 +79,14 @@ export async function generateMetadata({ params }: PitchPageProps): Promise<Meta
       title,
       description: pitch.description,
       type: 'website',
-      images: [{ url: '/fixtures/blair-og.svg', width: 1200, height: 630, alt: title }],
+      images: [
+        {
+          url: new URL(ogPath, origin).toString(),
+          width: 1200,
+          height: 630,
+          alt: title,
+        },
+      ],
     },
   };
 }
@@ -139,10 +175,10 @@ export default async function PitchPage({ params }: PitchPageProps) {
       <footer className={`${styles.footer} ${styles.revealSix}`} data-pitch-footer>
         <p className={styles.footerPrompt}>Know someone worth hyping up?</p>
         <div className={styles.footerActions}>
-          <Link className={styles.primarySticker} href="/">
+          <Link className={styles.primarySticker} href="/#pitch-a-friend">
             Pitch a friend
           </Link>
-          <Link className={styles.secondarySticker} href="/">
+          <Link className={styles.secondarySticker} href="/#create">
             Create my Friendword
           </Link>
         </div>

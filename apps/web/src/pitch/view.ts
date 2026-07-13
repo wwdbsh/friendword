@@ -2,12 +2,6 @@ import type { PublishedPitch } from '@friendword/data';
 
 import type { PitchCaption, PitchFixture, PitchPhoto, PitchVouch } from '@/fixtures/pitch';
 
-/**
- * What the public pitch page renders — a published campaign mapped for
- * display, or the demo fixture. Real campaigns start without photos,
- * captions, vouches, or a known duration; the audio element supplies timing
- * and the placeholders keep the stage art on-brand until photo upload ships.
- */
 export type PitchView = {
   readonly campaignSlug: string;
   readonly daterName: string;
@@ -40,26 +34,19 @@ const DURATION_LABELS: Record<string, string> = {
   gt10y: 'for 10+ years',
 };
 
-const PLACEHOLDER_PHOTOS: readonly [PitchPhoto, ...PitchPhoto[]] = [
-  {
-    src: '/fixtures/blair-portrait-1.svg',
-    alt: 'Illustrated placeholder portrait in a tangerine jacket',
-    startMs: 0,
-    endMs: 20_000,
-  },
-  {
-    src: '/fixtures/blair-portrait-2.svg',
-    alt: 'Illustrated placeholder portrait holding a record',
-    startMs: 20_000,
-    endMs: 40_000,
-  },
-  {
-    src: '/fixtures/blair-portrait-3.svg',
-    alt: 'Illustrated placeholder portrait on a sunny city walk',
-    startMs: 40_000,
-    endMs: 60_001,
-  },
-];
+const ABSTRACT_PHOTO: PitchPhoto = {
+  src: `data:image/svg+xml,${encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1200">
+      <rect width="900" height="1200" fill="#221B15"/>
+      <circle cx="735" cy="210" r="270" fill="#FFC63F" opacity=".92"/>
+      <circle cx="110" cy="1040" r="310" fill="#FF5B2E" opacity=".88"/>
+      <path d="M90 630c70-250 140 210 210-30s140 210 210-20 140 180 300-80" fill="none" stroke="#FF3D8A" stroke-width="38" stroke-linecap="round"/>
+    </svg>
+  `)}`,
+  alt: 'Friendword abstract voice waveform pattern',
+  startMs: 0,
+  endMs: 60_001,
+};
 
 const PLACEHOLDER_WAVEFORM: readonly number[] = [
   38, 56, 74, 49, 66, 90, 61, 42, 76, 95, 70, 51, 84, 59, 34, 67, 92, 78, 46, 72, 88, 54, 40, 81,
@@ -84,19 +71,30 @@ export function fromFixture(fixture: PitchFixture): PitchView {
 }
 
 function realPhotos(pitch: PublishedPitch): readonly [PitchPhoto, ...PitchPhoto[]] | null {
-  if (pitch.photos.length === 0) {
+  const [firstPhoto, ...remainingPhotos] = pitch.photos;
+  if (firstPhoto === undefined) {
     return null;
   }
 
   const windowMs = 60_000 / pitch.photos.length;
-  const mapped = pitch.photos.map((photo, index) => ({
-    src: photo.url,
-    alt: `${pitch.daterDisplayName} — approved photo ${index + 1}`,
-    startMs: Math.round(index * windowMs),
-    endMs: index === pitch.photos.length - 1 ? 60_001 : Math.round((index + 1) * windowMs),
-  }));
-
-  return mapped as unknown as readonly [PitchPhoto, ...PitchPhoto[]];
+  return [
+    {
+      src: firstPhoto.url,
+      alt: `${pitch.daterDisplayName} — approved photo 1`,
+      startMs: 0,
+      endMs: pitch.photos.length === 1 ? 60_001 : Math.round(windowMs),
+    },
+    ...remainingPhotos.map((photo, index) => {
+      const photoIndex = index + 1;
+      return {
+        src: photo.url,
+        alt: `${pitch.daterDisplayName} — approved photo ${photoIndex + 1}`,
+        startMs: Math.round(photoIndex * windowMs),
+        endMs:
+          photoIndex === pitch.photos.length - 1 ? 60_001 : Math.round((photoIndex + 1) * windowMs),
+      };
+    }),
+  ];
 }
 
 export function fromPublishedPitch(pitch: PublishedPitch): PitchView {
@@ -113,7 +111,7 @@ export function fromPublishedPitch(pitch: PublishedPitch): PitchView {
     relationship: relationshipLabel(pitch),
     durationMs: 60_000,
     description: `Meet ${pitch.daterDisplayName} through ${pitch.introducerDisplayName}'s original voice pitch, shared with ${pitch.daterDisplayName}'s approval.`,
-    photos: realPhotos(pitch) ?? PLACEHOLDER_PHOTOS,
+    photos: realPhotos(pitch) ?? [ABSTRACT_PHOTO],
     captions: [{ startMs: 0, endMs: Number.MAX_SAFE_INTEGER, text: captionText }],
     waveform: PLACEHOLDER_WAVEFORM,
     vouches: [],

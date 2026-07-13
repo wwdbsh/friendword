@@ -156,3 +156,20 @@ test('returns not found when the campaign slug is unknown', async ({ page }) => 
     await expect(page.getByRole('heading', { name: 'Blair, 29' })).toHaveCount(0);
   });
 });
+
+test('routes the two pitch footer actions to distinct landing destinations', async ({ page }) => {
+  await page.goto('/p/demo-blair');
+
+  const pitchFriend = page.getByRole('link', { name: 'Pitch a friend' });
+  await expect(pitchFriend).toHaveAttribute('href', '/#pitch-a-friend');
+  await pitchFriend.click();
+  await page.waitForURL('**/#pitch-a-friend');
+  await expect(page.locator('#pitch-a-friend')).toBeVisible();
+
+  await page.goto('/p/demo-blair');
+  const createFriendword = page.getByRole('link', { name: 'Create my Friendword' });
+  await expect(createFriendword).toHaveAttribute('href', '/#create');
+  await createFriendword.click();
+  await page.waitForURL('**/#create');
+  await expect(page.locator('#create')).toBeVisible();
+});

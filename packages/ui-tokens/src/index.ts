@@ -22,10 +22,24 @@ export const colors = {
   /** Secondary text on cream. */
   textSecondary: '#6E6259',
   /**
-   * Placeholder/disabled ONLY (2.72:1 on cream — below AA). Never use for
-   * readable copy or fine print; use textSecondary instead (audit D-P0).
+   * Placeholder/disabled fills ONLY (2.72:1 on cream, 2.92:1 on white — below
+   * AA text AND below the 3:1 WCAG 1.4.11 non-text threshold). Never use for
+   * readable copy, fine print, OR borders/boundaries; use textSecondary for
+   * text and borderMuted for hairlines (audit D-P0, third audit §8).
    */
   textFaint: '#A2958A',
+  /**
+   * Trust Layer neutral hairline (3.73:1 on cream, 3.99:1 on white — passes
+   * WCAG 1.4.11 non-text 3:1 on both canvases). Replaces textFaint as the
+   * TrustCard / QuietNavAction border. Not for readable text.
+   */
+  borderMuted: '#8A7D73',
+  /**
+   * Trust Layer success/verified border (3.77:1 on cream, 4.03:1 on white).
+   * Darker teal than `fresh` (which is 2.35:1 as a border and fails 3:1);
+   * use this for TrustCard success boundaries, `fresh` only for fills/icons.
+   */
+  borderSuccess: '#0E8F76',
   /** Text on the ink stage. */
   stageText: '#FFF6EA',
   /** Muted text on the ink stage. */
@@ -137,9 +151,17 @@ export const shadows = {
   stickerSm: '2px 2px 0 #221B15',
   /** Soft ambient card shadow. */
   card: '0 8px 24px rgba(34, 27, 21, 0.10)',
+  /**
+   * Trust Layer elevation — soft, low, no hard offset (consent, identity,
+   * payment, report, delete). RN equivalent: offset {0,4}, radius 16,
+   * opacity 0.08, elevation 2. Never use the sticker shadow on trust surfaces.
+   */
+  trust: '0 4px 16px rgba(34, 27, 21, 0.08)',
 } as const;
 
-/** Standard ink outline width for sticker elements. */
+/** Outline widths: 2px sticker for campaign, 1px hairline for the Trust Layer. */
 export const strokes = {
   sticker: 2,
+  /** Trust Layer border width (consent/identity/payment/report/delete). */
+  trust: 1,
 } as const;

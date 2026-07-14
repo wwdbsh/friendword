@@ -17,6 +17,8 @@ export const themeCss = `
   --color-ink: ${colors.ink};
   --color-text-secondary: ${colors.textSecondary};
   --color-text-faint: ${colors.textFaint};
+  --color-border-muted: ${colors.borderMuted};
+  --color-border-success: ${colors.borderSuccess};
   --color-stage-text: ${colors.stageText};
   --color-stage-text-secondary: ${colors.stageTextSecondary};
   --color-pop: ${colors.pop};
@@ -57,6 +59,8 @@ export const themeCss = `
   --shadow-sticker: ${shadows.sticker};
   --shadow-sticker-sm: ${shadows.stickerSm};
   --shadow-card: ${shadows.card};
+  --shadow-trust: ${shadows.trust};
   --stroke-sticker: ${strokes.sticker}px;
+  --stroke-trust: ${strokes.trust}px;
 }
 `;

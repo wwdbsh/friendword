@@ -807,3 +807,114 @@ test('closes politely when the request was already approved', async ({ page }) =
   await expect(page.getByRole('heading', { name: 'This invite is wrapped up.' })).toBeVisible();
   await expect(page.getByText('You already approved this pitch — it’s live.')).toBeVisible();
 });
+
+// --- Third audit §8/§11: staged review, sticky progress, keyboard + SR, and
+// horizontal-overflow regression. The review keeps every input mounted, so
+// these assert the presentation/navigation layer, not the RPC flow. ---
+
+test('breaks the review into a sticky, keyboard-operable progress rail (§8 acceptance 1)', async ({
+  page,
+}) => {
+  await mockClaimedReview(page);
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+
+  const nav = page.getByRole('navigation', { name: 'Review progress' });
+  await expect(nav).toBeVisible();
+  // The fixture carries a hard claim, so all six steps are present.
+  await expect(nav.getByRole('link')).toHaveCount(6);
+  const listenLink = nav.getByRole('link', { name: 'Listen' });
+  await expect(listenLink).toHaveAttribute('aria-current', 'step');
+
+  await test.step('A keyboard user can jump to a step and land on its heading', async () => {
+    const aboutLink = nav.getByRole('link', { name: 'About you' });
+    await aboutLink.focus();
+    await expect(aboutLink).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#consent-step-about-heading')).toBeFocused();
+  });
+});
+
+test('exposes each review step as a labelled region for assistive tech (§8 acceptance 3)', async ({
+  page,
+}) => {
+  await mockClaimedReview(page);
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+
+  await expect(page.getByRole('heading', { name: 'Listen to the voice note' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Make it yours' })).toBeVisible();
+  // Fieldsets surface as groups named by their legends.
+  await expect(page.getByRole('group', { name: 'About you' })).toBeVisible();
+  await expect(
+    page.getByRole('group', { name: 'Who can reach out & for how long' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'This is your page — exactly what people will see' }),
+  ).toBeVisible();
+
+  await test.step('Every step advertises its position in the sequence', async () => {
+    await expect(page.getByText('Step 1 of 6')).toBeVisible();
+    await expect(page.getByText('Step 6 of 6')).toBeVisible();
+  });
+});
+
+test('keeps the review free of horizontal overflow from 320 to 1440 (§11 browser)', async ({
+  page,
+}) => {
+  await mockClaimedReview(page);
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+  await expect(
+    page.getByRole('heading', { name: 'Hear what Maya says about you.' }),
+  ).toBeVisible();
+
+  for (const width of [320, 375, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const hasHorizontalOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    );
+    expect(hasHorizontalOverflow, `width ${width}`).toBe(false);
+  }
+});
+
+test('honors reduced motion while the progress rail still navigates (§11 reduced motion)', async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await mockClaimedReview(page);
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+
+  const nav = page.getByRole('navigation', { name: 'Review progress' });
+  const confirmLink = nav.getByRole('link', { name: 'Confirm' });
+  await confirmLink.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#consent-step-claims-heading')).toBeFocused();
+});
+
+test('lets a keyboard user confirm claims and reach an enabled approval (§8 acceptance 3)', async ({
+  page,
+}) => {
+  await mockClaimedReview(page);
+  await page.route('**/rest/v1/rpc/approve_and_publish_pitch*', (route) =>
+    route.fulfill({
+      json: [
+        { campaign_id: '20000000-0000-0000-0000-000000000001', campaign_slug: 'blair-mix123' },
+      ],
+    }),
+  );
+
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+
+  const approve = page.getByRole('button', { name: 'Approve & publish my page' });
+  await expect(approve).toBeDisabled();
+
+  await fillDaterProfile(page);
+  const confirmClaims = page.getByLabel('I confirm all of these claims are true.');
+  await confirmClaims.focus();
+  await expect(confirmClaims).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(confirmClaims).toBeChecked();
+
+  await expect(approve).toBeEnabled();
+  // The approve control is itself keyboard-focusable.
+  await approve.focus();
+  await expect(approve).toBeFocused();
+});

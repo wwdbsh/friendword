@@ -1,4 +1,4 @@
-import { colors, fontSizes, radii, spacing } from '@friendword/ui-tokens';
+import { colors, fontSizes, radii, spacing, strokes } from '@friendword/ui-tokens';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { useReducedMotion } from './useReducedMotion';
@@ -37,7 +37,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderColor: colors.danger,
     borderRadius: radii.md,
-    borderWidth: 1,
+    borderWidth: strokes.trust,
     backgroundColor: colors.surface,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,

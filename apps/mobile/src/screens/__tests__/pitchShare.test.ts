@@ -31,24 +31,24 @@ vi.mock('react-native', () => ({
 }));
 vi.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'section' }));
 vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn() }));
-vi.mock('../../src/components', () => ({
+vi.mock('../../components', () => ({
   HypeButton: 'button',
   QuietNavAction: 'button',
   TrustCard: 'article',
 }));
-vi.mock('../../src/services/draftServiceInstance', () => ({ pitchDraftService: {} }));
-vi.mock('../../src/services/pitchDrafts', () => ({ hasFinalizedConsent: vi.fn() }));
-vi.mock('../../src/services/supabaseClient', () => ({ getSupabaseClient: () => null }));
-vi.mock('../../src/services/webOrigin', () => ({
+vi.mock('../../services/draftServiceInstance', () => ({ pitchDraftService: {} }));
+vi.mock('../../services/pitchDrafts', () => ({ hasFinalizedConsent: vi.fn() }));
+vi.mock('../../services/supabaseClient', () => ({ getSupabaseClient: () => null }));
+vi.mock('../../services/webOrigin', () => ({
   buildConsentUrl: vi.fn(),
   getWebOrigin: () => 'https://friendword.example',
 }));
-vi.mock('../../src/services/introducedCampaigns', () => ({
+vi.mock('../../services/introducedCampaigns', () => ({
   buildIntroducerShareUrl: (slug: string) =>
     `https://friendword.example/p/${slug}?src=introducer-share&ref=${slug}`,
 }));
 
-import { getCreatorKitSurface, getPublishedFreeShareUrl } from './share';
+import { getCreatorKitSurface, getPublishedFreeShareUrl } from '../../../app/pitch/share';
 
 describe('published Creator Kit surface', () => {
   it('maps every benefit state to the safe purchase or re-entry surface', () => {

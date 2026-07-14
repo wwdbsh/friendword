@@ -36,20 +36,20 @@ vi.mock('react-native', () => ({
 }));
 vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn() }));
 vi.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'section' }));
-vi.mock('../../src/components', () => ({
+vi.mock('../../components', () => ({
   HypeButton: 'button',
   StickerCard: 'article',
   TrustCard: 'article',
 }));
-vi.mock('../../src/services/draftServiceInstance', () => ({ pitchDraftService: {} }));
-vi.mock('../../src/services/pitchDraftsSupabase', () => ({
+vi.mock('../../services/draftServiceInstance', () => ({ pitchDraftService: {} }));
+vi.mock('../../services/pitchDraftsSupabase', () => ({
   isRecoveredServerDraft: (draft: {
     readonly id: string;
     readonly server: { readonly draftId: string } | null;
   }) => draft.server !== null && draft.id === draft.server.draftId,
 }));
-vi.mock('../../src/services/supabaseClient', () => ({ getSupabaseClient: () => null }));
-vi.mock('../../src/services/introducedCampaigns', () => ({
+vi.mock('../../services/supabaseClient', () => ({ getSupabaseClient: () => null }));
+vi.mock('../../services/introducedCampaigns', () => ({
   buildIntroducerShareUrl: (slug: string) =>
     `https://friendword.example/p/${slug}?src=introducer-share&ref=${slug}`,
   canShareIntroducedCampaign: (campaign: { status: string; slug: string | null }) =>
@@ -59,14 +59,14 @@ vi.mock('../../src/services/introducedCampaigns', () => ({
   listMyIntroducedCampaigns: vi.fn(),
 }));
 
-import { PitchDraftSchema } from '../../src/services/types';
+import { PitchDraftSchema } from '../../services/types';
 import {
   canGetCampaignPass,
   getCampaignName,
   getIntroducerDraftName,
   getIntroducedShareActions,
   isCampaignRevival,
-} from './index';
+} from '../../../app/campaigns/index';
 
 describe('Dater-owned Campaign Pass surface', () => {
   it('offers the pass for a live campaign or an expired campaign the owner can revive', () => {

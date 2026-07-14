@@ -10,9 +10,13 @@
   gap: var(--space-sm);
 }
 
+/* Trust Layer safety toggle: calm hairline, full 44px hit target. */
 .safetyToggle {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
   padding: var(--space-xs) var(--space-md);
-  border: var(--stroke-sticker) solid var(--color-ink);
+  border: var(--stroke-trust) solid var(--color-border-muted);
   border-radius: var(--radius-pill);
   background: var(--color-surface);
   font-weight: 800;
@@ -22,7 +26,7 @@
 .safetyPanel {
   margin: var(--space-sm) 0;
   padding: var(--space-md);
-  border: var(--stroke-sticker) solid var(--color-ink);
+  border: var(--stroke-trust) solid var(--color-danger);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface));
 }

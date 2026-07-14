@@ -59,18 +59,22 @@ vi.mock('react-native-safe-area-context', async () => {
       createElement('section', null, children),
   };
 });
-vi.mock('../../src/components', async () => {
+vi.mock('../../components', async () => {
   const { createElement } = await import('react');
   return {
     TrustCard: ({ children }: { readonly children?: ReactNode }) =>
       createElement('article', null, children),
   };
 });
-vi.mock('../../src/services/supabaseClient', () => ({ getSupabaseClient: () => null }));
+vi.mock('../../services/supabaseClient', () => ({ getSupabaseClient: () => null }));
 
 import type { MyInterest } from '@friendword/data';
 
-import { InterestsContent, getInterestStatusLabel, getInterestTitle } from './index';
+import {
+  InterestsContent,
+  getInterestStatusLabel,
+  getInterestTitle,
+} from '../../../app/interests/index';
 
 const ACCEPTED_INTEREST: MyInterest = {
   interestId: '50000000-0000-4000-8000-000000000001',

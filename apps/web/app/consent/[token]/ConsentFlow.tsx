@@ -65,6 +65,20 @@ const DATING_INTENTS = [
 ] as const;
 const PUBLISH_DAY_OPTIONS = [7, 14] as const;
 
+// Third audit §8 acceptance 1: the review is broken into legible steps with a
+// sticky progress rail. This is purely a structure/presentation layer — every
+// input stays mounted, so the RPC call order and validation are unchanged.
+type ReviewStepId = 'listen' | 'edit' | 'about' | 'reach' | 'claims' | 'approve';
+type ReviewStepDef = { readonly id: ReviewStepId; readonly label: string; readonly nav: string };
+const REVIEW_STEP_DEFS: readonly ReviewStepDef[] = [
+  { id: 'listen', label: 'Listen to the voice note', nav: 'Listen' },
+  { id: 'edit', label: 'Make it yours', nav: 'Make it yours' },
+  { id: 'about', label: 'About you', nav: 'About you' },
+  { id: 'reach', label: 'Who can reach out & for how long', nav: 'Reach & length' },
+  { id: 'claims', label: 'Confirm your claims', nav: 'Confirm' },
+  { id: 'approve', label: 'Preview & approve your page', nav: 'Preview & approve' },
+];
+
 type DatingIntent = (typeof DATING_INTENTS)[number]['value'];
 type LocationPrecision = 'city' | 'region' | 'hidden';
 type PublishDays = 7 | 14;
@@ -264,6 +278,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   const responseNoteRef = useRef<HTMLTextAreaElement | null>(null);
   const claimStartedRef = useRef(false);
   const approvalStartedRef = useRef(false);
+  const [activeReviewStep, setActiveReviewStep] = useState<ReviewStepId>('listen');
 
   const enterReview = useCallback(
     async (activeClient: BrowserSupabaseClient, preview: ConsentPreview) => {
@@ -781,6 +796,63 @@ export function ConsentFlow({ token }: { readonly token: string }) {
     return `Ages ${range} · ${intents}`;
   })();
 
+  // The claims step only exists when there is something to confirm, so the
+  // progress rail hides it otherwise (keeps step numbers honest).
+  const showClaims =
+    state.step === 'review' &&
+    (state.review.hardClaims.length > 0 || state.review.daterEdited);
+  const reviewSteps = REVIEW_STEP_DEFS.filter(
+    (definition) => definition.id !== 'claims' || showClaims,
+  );
+  const reviewStepCount = reviewSteps.length;
+  const reviewStepNumber = (id: ReviewStepId) =>
+    reviewSteps.findIndex((definition) => definition.id === id) + 1;
+
+  // Scroll-spy: highlight the step nearest the viewport centre. Every step
+  // section is rendered, so this only reflects position — it never gates input.
+  useEffect(() => {
+    if (state.step !== 'review') {
+      return;
+    }
+    const sections = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-consent-step]'),
+    );
+    if (sections.length === 0 || typeof IntersectionObserver === 'undefined') {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const nearest = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        const id = nearest?.target.getAttribute('data-consent-step');
+        if (id !== null && id !== undefined) {
+          setActiveReviewStep(id as ReviewStepId);
+        }
+      },
+      { rootMargin: '-45% 0px -45% 0px', threshold: 0 },
+    );
+    sections.forEach((section) => observer.observe(section));
+    return () => observer.disconnect();
+  }, [state.step, showClaims]);
+
+  const goToReviewStep = useCallback((id: ReviewStepId) => {
+    const section = document.getElementById(`consent-step-${id}`);
+    if (section === null) {
+      return;
+    }
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    section.scrollIntoView({
+      behavior: prefersReducedMotion ? 'auto' : 'smooth',
+      block: 'start',
+    });
+    const heading = section.querySelector<HTMLElement>('[data-step-heading]');
+    heading?.focus();
+    setActiveReviewStep(id);
+  }, []);
+
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
@@ -941,21 +1013,80 @@ export function ConsentFlow({ token }: { readonly token: string }) {
               will hear if you approve it.
             </p>
 
-            <div className={styles.playerBlock}>
-              {state.voiceUrl === null ? (
-                <p className={styles.muted}>
-                  The voice note isn’t ready to play here yet. You can still review the details
-                  below.
-                </p>
-              ) : (
-                <audio className={styles.audio} controls preload="metadata" src={state.voiceUrl}>
-                  Your browser cannot play this audio.
-                </audio>
-              )}
-            </div>
+            <nav className={styles.progressNav} aria-label="Review progress">
+              <ol className={styles.progressList}>
+                {reviewSteps.map((definition, index) => {
+                  const active = activeReviewStep === definition.id;
+                  return (
+                    <li key={definition.id} className={styles.progressItem}>
+                      <a
+                        className={`${styles.progressLink} ${active ? styles.progressLinkActive : ''}`}
+                        href={`#consent-step-${definition.id}`}
+                        aria-current={active ? 'step' : undefined}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          goToReviewStep(definition.id);
+                        }}
+                      >
+                        <span className={styles.progressIndex} aria-hidden="true">
+                          {index + 1}
+                        </span>
+                        {definition.nav}
+                      </a>
+                    </li>
+                  );
+                })}
+              </ol>
+            </nav>
 
-            <div className={styles.editBlock}>
-              <h2 className={styles.sectionHeading}>Make it yours</h2>
+            <section
+              className={styles.stepSection}
+              id="consent-step-listen"
+              data-consent-step="listen"
+              aria-labelledby="consent-step-listen-heading"
+            >
+              <p className={styles.stepMarker}>
+                Step {reviewStepNumber('listen')} of {reviewStepCount}
+              </p>
+              <h2
+                id="consent-step-listen-heading"
+                className={`${styles.sectionHeading} ${styles.stepHeading}`}
+                data-step-heading
+                tabIndex={-1}
+              >
+                Listen to the voice note
+              </h2>
+              <div className={styles.playerBlock}>
+                {state.voiceUrl === null ? (
+                  <p className={styles.muted}>
+                    The voice note isn’t ready to play here yet. You can still review the details
+                    below.
+                  </p>
+                ) : (
+                  <audio className={styles.audio} controls preload="metadata" src={state.voiceUrl}>
+                    Your browser cannot play this audio.
+                  </audio>
+                )}
+              </div>
+            </section>
+
+            <section
+              className={`${styles.editBlock} ${styles.stepSection}`}
+              id="consent-step-edit"
+              data-consent-step="edit"
+              aria-labelledby="consent-step-edit-heading"
+            >
+              <p className={styles.stepMarker}>
+                Step {reviewStepNumber('edit')} of {reviewStepCount}
+              </p>
+              <h2
+                id="consent-step-edit-heading"
+                className={`${styles.sectionHeading} ${styles.stepHeading}`}
+                data-step-heading
+                tabIndex={-1}
+              >
+                Make it yours
+              </h2>
               <p className={styles.muted}>
                 Edit every word and choose every photo before you approve.
               </p>
@@ -1101,14 +1232,30 @@ export function ConsentFlow({ token }: { readonly token: string }) {
               >
                 {savingEdits ? 'Saving edits…' : 'Save my edits'}
               </button>
-            </div>
+            </section>
 
-            <fieldset className={styles.preferenceBlock}>
-              <legend className={styles.sectionHeading}>About you</legend>
-              <p className={styles.muted}>
-                Confirm a few details about yourself. Your date of birth stays private — only your
-                age appears on your page.
+            <section
+              className={styles.stepSection}
+              id="consent-step-about"
+              data-consent-step="about"
+              aria-labelledby="consent-step-about-heading"
+            >
+              <p className={styles.stepMarker}>
+                Step {reviewStepNumber('about')} of {reviewStepCount}
               </p>
+              <fieldset className={styles.preferenceBlock}>
+                <legend
+                  id="consent-step-about-heading"
+                  className={`${styles.sectionHeading} ${styles.stepHeading}`}
+                  data-step-heading
+                  tabIndex={-1}
+                >
+                  About you
+                </legend>
+                <p className={styles.muted}>
+                  Confirm a few details about yourself. Your date of birth stays private — only your
+                  age appears on your page.
+                </p>
 
               <div className={styles.fieldGroup}>
                 <label className={styles.label} htmlFor="dater-birth-date">
@@ -1198,14 +1345,31 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                   {profileError}
                 </p>
               )}
-            </fieldset>
+              </fieldset>
+            </section>
 
-            <fieldset className={styles.preferenceBlock}>
-              <legend className={styles.sectionHeading}>Who can reach out &amp; for how long</legend>
-              <p className={styles.muted}>
-                Your page is public — anyone with the link can watch it. These settings only decide
-                who is allowed to send you interest and how precisely your location shows.
+            <section
+              className={styles.stepSection}
+              id="consent-step-reach"
+              data-consent-step="reach"
+              aria-labelledby="consent-step-reach-heading"
+            >
+              <p className={styles.stepMarker}>
+                Step {reviewStepNumber('reach')} of {reviewStepCount}
               </p>
+              <fieldset className={styles.preferenceBlock}>
+                <legend
+                  id="consent-step-reach-heading"
+                  className={`${styles.sectionHeading} ${styles.stepHeading}`}
+                  data-step-heading
+                  tabIndex={-1}
+                >
+                  Who can reach out &amp; for how long
+                </legend>
+                <p className={styles.muted}>
+                  Your page is public — anyone with the link can watch it. These settings only decide
+                  who is allowed to send you interest and how precisely your location shows.
+                </p>
 
               <div className={styles.fieldGroup}>
                 <span className={styles.label}>Public duration</span>
@@ -1312,11 +1476,25 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                   {preferenceError ?? currentAudienceError}
                 </p>
               )}
-            </fieldset>
+              </fieldset>
+            </section>
 
-            {(state.review.hardClaims.length > 0 || state.review.daterEdited) && (
-              <div className={styles.claimBlock}>
-                <h2 className={styles.photoHeading}>
+            {showClaims && (
+              <section
+                className={`${styles.claimBlock} ${styles.stepSection}`}
+                id="consent-step-claims"
+                data-consent-step="claims"
+                aria-labelledby="consent-step-claims-heading"
+              >
+                <p className={styles.stepMarker}>
+                  Step {reviewStepNumber('claims')} of {reviewStepCount}
+                </p>
+                <h2
+                  id="consent-step-claims-heading"
+                  className={`${styles.photoHeading} ${styles.stepHeading}`}
+                  data-step-heading
+                  tabIndex={-1}
+                >
                   {state.review.daterEdited && state.review.hardClaims.length === 0
                     ? 'Confirm your edits are accurate'
                     : 'Claims that need your confirmation'}
@@ -1346,11 +1524,27 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                       : 'I confirm all of these claims are true.'}
                   </span>
                 </label>
-              </div>
+              </section>
             )}
 
+            <section
+              className={styles.stepSection}
+              id="consent-step-approve"
+              data-consent-step="approve"
+              aria-labelledby="consent-step-approve-heading"
+            >
+            <p className={styles.stepMarker}>
+              Step {reviewStepNumber('approve')} of {reviewStepCount}
+            </p>
             <div className={styles.profileSummary}>
-              <h2 className={styles.sectionHeading}>This is your page — exactly what people will see</h2>
+              <h2
+                id="consent-step-approve-heading"
+                className={`${styles.sectionHeading} ${styles.stepHeading}`}
+                data-step-heading
+                tabIndex={-1}
+              >
+                This is your page — exactly what people will see
+              </h2>
               <p className={styles.muted}>
                 A still preview built from what you approved above. On the live page,{' '}
                 {state.preview.introducerDisplayName}’s voice plays over these photos.
@@ -1517,6 +1711,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
             )}
 
             {responseError !== null && <p className={styles.error}>{responseError}</p>}
+            </section>
           </section>
         )}
 

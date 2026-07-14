@@ -82,7 +82,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 2, height: 2 },
   },
   trust: {
-    borderWidth: 1,
+    borderWidth: strokes.trust,
     shadowOpacity: 0,
     elevation: 0,
   },

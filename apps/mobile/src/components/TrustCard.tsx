@@ -1,4 +1,4 @@
-import { colors, radii, spacing } from '@friendword/ui-tokens';
+import { colors, radii, spacing, strokes } from '@friendword/ui-tokens';
 import type { PropsWithChildren } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -24,9 +24,11 @@ export function TrustCard({ children, tone = 'neutral' }: TrustCardProps) {
 const styles = StyleSheet.create({
   card: {
     gap: spacing.md,
-    borderColor: colors.textFaint,
+    // Trust Layer hairline: borderMuted meets WCAG 1.4.11 (3:1) on cream and
+    // white; textFaint (2.72/2.92) did not. See docs/DESIGN.md Trust Layer.
+    borderColor: colors.borderMuted,
     borderRadius: radii.md,
-    borderWidth: 1,
+    borderWidth: strokes.trust,
     backgroundColor: colors.surface,
     padding: spacing.md,
     shadowColor: colors.ink,
@@ -35,6 +37,8 @@ const styles = StyleSheet.create({
     shadowRadius: spacing.md,
     elevation: 2,
   },
-  success: { borderColor: colors.fresh },
+  // borderSuccess (darker teal) passes 3:1 as a boundary; fresh (2.35/2.51)
+  // is a fill/icon color only.
+  success: { borderColor: colors.borderSuccess },
   danger: { borderColor: colors.danger },
 });

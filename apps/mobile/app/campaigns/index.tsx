@@ -209,6 +209,15 @@ export default function CampaignsScreen() {
     }, []),
   );
 
+  // The introduced-campaigns RPC collapses every failure (including "no session")
+  // into one generic error, so on its own it can't tell signed-out from a real
+  // outage. The owned feed's repo IS session-aware (throws UnauthenticatedError),
+  // so when it reports signed_out we treat the introduced error as the same
+  // signed-out state — a sign-in prompt, not a scary "could not load" card.
+  const introducerSignedOut =
+    introducedState === 'signed_out' ||
+    (introducedState === 'error' && ownedCampaignState === 'signed_out');
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -319,7 +328,16 @@ export default function CampaignsScreen() {
           <Text style={styles.message}>Loading your live pitches…</Text>
         ) : null}
 
-        {introducedState === 'error' ? (
+        {introducerSignedOut ? (
+          <TrustCard>
+            <Text style={styles.emptyTitle}>Sign in to see your live pitches</Text>
+            <Text style={styles.message}>
+              Your live pitches and their free share links appear here once you sign in.
+            </Text>
+          </TrustCard>
+        ) : null}
+
+        {introducedState === 'error' && !introducerSignedOut ? (
           <StickerCard>
             <Text style={styles.emptyTitle}>Live pitches could not be loaded</Text>
             <Text style={styles.message}>Check your connection and reopen this screen.</Text>

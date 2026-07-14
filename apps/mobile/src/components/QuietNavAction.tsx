@@ -1,4 +1,4 @@
-import { colors, fontSizes, spacing } from '@friendword/ui-tokens';
+import { colors, fontSizes, spacing, strokes } from '@friendword/ui-tokens';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { useReducedMotion } from './useReducedMotion';
@@ -40,8 +40,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.sm,
-    borderBottomColor: colors.textFaint,
-    borderBottomWidth: 1,
+    // borderMuted keeps the divider at >=3:1 (WCAG 1.4.11); textFaint did not.
+    borderBottomColor: colors.borderMuted,
+    borderBottomWidth: strokes.trust,
     paddingHorizontal: spacing.xs,
     paddingVertical: spacing.sm,
   },

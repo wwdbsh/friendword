@@ -1,6 +1,9 @@
 import Link from 'next/link';
 import Script from 'next/script';
 
+import { ReferralTracker } from '@/components/ReferralTracker';
+import { WaitlistForm } from '@/components/WaitlistForm';
+
 import styles from './page.module.css';
 
 const attributionScript = `(() => {
@@ -49,6 +52,7 @@ export default function HomePage() {
       <Script id="friendword-attribution" strategy="afterInteractive">
         {attributionScript}
       </Script>
+      <ReferralTracker />
       <main className={styles.page}>
         <header className={styles.nav}>
           <Link className={styles.wordmark} href="/" aria-label="Friendword home">
@@ -195,6 +199,18 @@ export default function HomePage() {
               </Link>
             </article>
           </div>
+        </section>
+
+        <section className={styles.waitlistSection} id="start" aria-labelledby="waitlist-heading">
+          <div className={styles.sectionHeading}>
+            <p className={styles.kicker}>JOIN THE WAITLIST</p>
+            <h2 id="waitlist-heading">Get an invite when we launch</h2>
+            <p>
+              Friendword isn’t on the App Store yet. Leave your email and we’ll send you an invite
+              the moment it opens — no spam, just the launch.
+            </p>
+          </div>
+          <WaitlistForm />
         </section>
 
         <footer className={styles.footer}>

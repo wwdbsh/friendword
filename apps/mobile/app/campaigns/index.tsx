@@ -1,12 +1,26 @@
-import { BenefitsRepo, UnauthenticatedError, type OwnedCampaignBenefit } from '@friendword/data';
-import { colors, fonts, fontSizes, spacing } from '@friendword/ui-tokens';
+import {
+  BenefitsRepo,
+  trackEvent,
+  UnauthenticatedError,
+  type OwnedCampaignBenefit,
+} from '@friendword/data';
+import { colors, fonts, fontSizes, radii, spacing, strokes } from '@friendword/ui-tokens';
+import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { HypeButton, StickerCard, TrustCard } from '../../src/components';
+import { HypeButton, QuietNavAction, StickerCard, TrustCard } from '../../src/components';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
+import {
+  buildIntroducerShareUrl,
+  canShareIntroducedCampaign,
+  formatIntroducedCampaignStatus,
+  getIntroducerLiveHeadline,
+  listMyIntroducedCampaigns,
+  type IntroducedCampaign,
+} from '../../src/services/introducedCampaigns';
 import { isRecoveredServerDraft } from '../../src/services/pitchDraftsSupabase';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 import type { PitchDraft } from '../../src/services/types';
@@ -47,6 +61,26 @@ export function getCampaignName(campaign: Pick<OwnedCampaignBenefit, 'headline' 
   return campaign.slug ?? 'Untitled campaign';
 }
 
+export type IntroducedShareActions = {
+  readonly canShare: boolean;
+  readonly shareUrl: string | null;
+};
+
+// Free sharing is the introducer's default growth action. A live campaign with a
+// slug yields the attributed public URL; anything else (paused/expired/archived,
+// or a withheld slug) exposes no link and no share CTA — status only.
+export function getIntroducedShareActions(campaign: {
+  readonly status: IntroducedCampaign['status'];
+  readonly slug: string | null;
+}): IntroducedShareActions {
+  if (!canShareIntroducedCampaign(campaign) || campaign.slug === null) {
+    return { canShare: false, shareUrl: null };
+  }
+  return { canShare: true, shareUrl: buildIntroducerShareUrl(campaign.slug) };
+}
+
+type IntroducedLoadState = 'loading' | 'ready' | 'signed_out' | 'error';
+
 export default function CampaignsScreen() {
   const router = useRouter();
   const [drafts, setDrafts] = useState<readonly PitchDraft[]>([]);
@@ -54,6 +88,52 @@ export default function CampaignsScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [ownedCampaigns, setOwnedCampaigns] = useState<readonly OwnedCampaignBenefit[]>([]);
   const [ownedCampaignState, setOwnedCampaignState] = useState<OwnedCampaignLoadState>('loading');
+  const [introduced, setIntroduced] = useState<readonly IntroducedCampaign[]>([]);
+  const [introducedState, setIntroducedState] = useState<IntroducedLoadState>('loading');
+  const [copiedCampaignId, setCopiedCampaignId] = useState<string | null>(null);
+  const [introducerShareError, setIntroducerShareError] = useState<string | null>(null);
+
+  const shareIntroducedPitch = useCallback(
+    async (campaign: IntroducedCampaign, shareUrl: string): Promise<void> => {
+      setIntroducerShareError(null);
+      try {
+        const result = await Share.share({
+          message: `${getIntroducerLiveHeadline(campaign.daterDisplayName)} — take a look and pass it on: ${shareUrl}`,
+        });
+        if (result.action === Share.sharedAction) {
+          trackEvent(getSupabaseClient(), 'campaign_shared', {
+            platform: 'mobile',
+            source: 'introducer-share',
+          });
+        }
+      } catch {
+        setIntroducerShareError('The share sheet could not open. Please try again.');
+      }
+    },
+    [],
+  );
+
+  const copyIntroducedPitch = useCallback(
+    async (campaign: IntroducedCampaign, shareUrl: string): Promise<void> => {
+      setIntroducerShareError(null);
+      try {
+        await Clipboard.setStringAsync(shareUrl);
+        setCopiedCampaignId(campaign.campaignId);
+      } catch {
+        setIntroducerShareError('The link could not be copied. Please try again.');
+      }
+    },
+    [],
+  );
+
+  const openIntroducedPitch = useCallback(async (shareUrl: string): Promise<void> => {
+    setIntroducerShareError(null);
+    try {
+      await Linking.openURL(shareUrl);
+    } catch {
+      setIntroducerShareError('The pitch could not open. Please try again.');
+    }
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -61,6 +141,10 @@ export default function CampaignsScreen() {
       setLoading(true);
       setOwnedCampaigns([]);
       setOwnedCampaignState('loading');
+      setIntroduced([]);
+      setIntroducedState('loading');
+      setCopiedCampaignId(null);
+      setIntroducerShareError(null);
       pitchDraftService
         .getMyDrafts()
         .then((savedDrafts) => {
@@ -84,6 +168,8 @@ export default function CampaignsScreen() {
       if (client === null) {
         setOwnedCampaigns([]);
         setOwnedCampaignState('signed_out');
+        setIntroduced([]);
+        setIntroducedState('signed_out');
       } else {
         const benefits = new BenefitsRepo(client);
         void benefits
@@ -100,6 +186,20 @@ export default function CampaignsScreen() {
             }
             setOwnedCampaigns([]);
             setOwnedCampaignState(error instanceof UnauthenticatedError ? 'signed_out' : 'error');
+          });
+
+        void listMyIntroducedCampaigns()
+          .then((campaigns) => {
+            if (active) {
+              setIntroduced(campaigns);
+              setIntroducedState('ready');
+            }
+          })
+          .catch(() => {
+            if (active) {
+              setIntroduced([]);
+              setIntroducedState('error');
+            }
           });
       }
 
@@ -206,6 +306,96 @@ export default function CampaignsScreen() {
             ) : null}
           </TrustCard>
         ))}
+
+        <View style={styles.sectionHeading}>
+          <Text style={styles.sectionTitle}>Pitches you got live</Text>
+          <Text style={styles.message}>
+            Campaigns you introduced that are now public. Sharing the live link is free — the
+            Creator Kit is only an optional add-on.
+          </Text>
+        </View>
+
+        {introducedState === 'loading' ? (
+          <Text style={styles.message}>Loading your live pitches…</Text>
+        ) : null}
+
+        {introducedState === 'error' ? (
+          <StickerCard>
+            <Text style={styles.emptyTitle}>Live pitches could not be loaded</Text>
+            <Text style={styles.message}>Check your connection and reopen this screen.</Text>
+          </StickerCard>
+        ) : null}
+
+        {introducedState === 'ready' && introduced.length === 0 ? (
+          <StickerCard>
+            <Text style={styles.emptyTitle}>No live pitches yet</Text>
+            <Text style={styles.message}>
+              When a friend approves a pitch you made, it goes public here and you can share it.
+            </Text>
+          </StickerCard>
+        ) : null}
+
+        {introduced.map((campaign) => {
+          const { canShare, shareUrl } = getIntroducedShareActions(campaign);
+          return (
+            <StickerCard key={campaign.campaignId}>
+              <View style={styles.draftHeader}>
+                <Text style={styles.friendName}>
+                  {getIntroducerLiveHeadline(campaign.daterDisplayName)}
+                </Text>
+                <View style={styles.statusBadge}>
+                  <Text style={styles.status}>
+                    {formatIntroducedCampaignStatus(campaign.status)}
+                  </Text>
+                </View>
+              </View>
+              {canShare && shareUrl !== null ? (
+                <>
+                  <Text style={styles.message}>
+                    Your free public pitch link is live. Share it anywhere to bring people in.
+                  </Text>
+                  <View style={styles.linkBox}>
+                    <Text numberOfLines={2} style={styles.link}>
+                      {shareUrl}
+                    </Text>
+                  </View>
+                  <HypeButton
+                    label="Share the pitch"
+                    onPress={() => {
+                      void shareIntroducedPitch(campaign, shareUrl);
+                    }}
+                  />
+                  <HypeButton
+                    label={copiedCampaignId === campaign.campaignId ? 'Link copied' : 'Copy link'}
+                    onPress={() => {
+                      void copyIntroducedPitch(campaign, shareUrl);
+                    }}
+                    secondary
+                  />
+                  <QuietNavAction
+                    label="View live pitch"
+                    onPress={() => {
+                      void openIntroducedPitch(shareUrl);
+                    }}
+                  />
+                  {introducerShareError ? (
+                    <Text style={styles.error}>{introducerShareError}</Text>
+                  ) : null}
+                </>
+              ) : (
+                <Text style={styles.message}>
+                  {campaign.status === 'paused'
+                    ? 'This campaign is paused, so its public link is off for now.'
+                    : campaign.status === 'expired'
+                      ? 'This campaign has ended, so its public link is closed.'
+                      : campaign.status === 'archived'
+                        ? 'This campaign is archived and no longer public.'
+                        : 'This campaign’s public link isn’t available right now.'}
+                </Text>
+              )}
+            </StickerCard>
+          );
+        })}
 
         <View style={styles.sectionHeading}>
           <Text style={styles.sectionTitle}>Pitches I’m making</Text>
@@ -433,6 +623,14 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.xs,
   },
   meta: { color: colors.fresh, fontFamily: 'BricolageGrotesqueSemiBold', fontSize: fontSizes.sm },
+  linkBox: {
+    borderColor: colors.ink,
+    borderWidth: strokes.sticker,
+    borderRadius: radii.sm,
+    backgroundColor: colors.background,
+    padding: spacing.md,
+  },
+  link: { color: colors.ink, fontFamily: 'BricolageGrotesqueSemiBold', fontSize: fontSizes.sm },
   changeNote: {
     gap: spacing.xs,
     borderLeftColor: colors.fresh,

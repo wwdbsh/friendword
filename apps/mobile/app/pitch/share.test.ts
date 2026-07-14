@@ -30,6 +30,7 @@ vi.mock('react-native', () => ({
   View: 'div',
 }));
 vi.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'section' }));
+vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn() }));
 vi.mock('../../src/components', () => ({
   HypeButton: 'button',
   QuietNavAction: 'button',
@@ -42,8 +43,12 @@ vi.mock('../../src/services/webOrigin', () => ({
   buildConsentUrl: vi.fn(),
   getWebOrigin: () => 'https://friendword.example',
 }));
+vi.mock('../../src/services/introducedCampaigns', () => ({
+  buildIntroducerShareUrl: (slug: string) =>
+    `https://friendword.example/p/${slug}?src=introducer-share&ref=${slug}`,
+}));
 
-import { getCreatorKitSurface } from './share';
+import { getCreatorKitSurface, getPublishedFreeShareUrl } from './share';
 
 describe('published Creator Kit surface', () => {
   it('maps every benefit state to the safe purchase or re-entry surface', () => {
@@ -52,5 +57,19 @@ describe('published Creator Kit surface', () => {
     expect(getCreatorKitSurface('unavailable')).toBe('purchase');
     expect(getCreatorKitSurface('available')).toBe('open');
     expect(getCreatorKitSurface('error')).toBe('error');
+  });
+});
+
+describe('published free public share (default, not paywalled)', () => {
+  it('builds the attributed public URL when a live slug is passed in', () => {
+    // The free share is the default path; Creator Kit is the optional upsell.
+    expect(getPublishedFreeShareUrl('blair-and-friends')).toBe(
+      'https://friendword.example/p/blair-and-friends?src=introducer-share&ref=blair-and-friends',
+    );
+  });
+
+  it('has no free URL without a slug, so nothing leaks and the kit copy stays honest', () => {
+    expect(getPublishedFreeShareUrl(null)).toBeNull();
+    expect(getPublishedFreeShareUrl('   ')).toBeNull();
   });
 });

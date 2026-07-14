@@ -95,6 +95,15 @@ VALUES (
   'approved',
   now()
 );
+-- H-7 (migration 0039): user 0002 already owns the seed campaign
+-- (20000000-…-0001). The one-active-campaign guard now refuses a second
+-- published/paused campaign per owner, so archive the seed campaign first —
+-- this suite exercises the pass state machine on the campaign below, not the
+-- seed one. (Archiving is an exit transition and is always allowed.)
+UPDATE campaigns SET status = 'archived'
+ WHERE owner_user_id = '00000000-0000-0000-0000-000000000002'
+   AND status IN ('published', 'paused');
+
 INSERT INTO campaigns (id, pitch_draft_id, owner_user_id, status, published_at, ends_at)
 VALUES (
   'c6000000-0000-0000-0000-000000000002',

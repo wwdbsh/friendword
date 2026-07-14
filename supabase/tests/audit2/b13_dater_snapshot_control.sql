@@ -104,6 +104,15 @@ INSERT INTO public.consent_requests (
   encode(digest('dater@example.test', 'sha256'), 'hex')
 );
 
+-- H-7 (migration 0039): the dater 0002 already owns the seed campaign
+-- (20000000-…-0001). The one-active-campaign guard now permits only one
+-- published/paused campaign per owner, and this suite publishes its own draft
+-- below. Archive the seed campaign first (an exit transition is always
+-- allowed); b13 never reads the seed campaign.
+UPDATE campaigns SET status = 'archived'
+ WHERE owner_user_id = '00000000-0000-0000-0000-000000000002'
+   AND status IN ('published', 'paused');
+
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
 

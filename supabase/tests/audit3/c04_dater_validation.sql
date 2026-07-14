@@ -129,6 +129,14 @@ INSERT INTO public.consent_requests (
   encode(digest('c04-dater@example.test', 'sha256'), 'hex')
 );
 
+-- H-7 (migration 0039): dater 0002 already owns the seed campaign; the
+-- one-active-campaign guard now allows one published/paused campaign per
+-- owner. This suite validates the dater's own publish path, so archive the
+-- seed campaign first (exit transitions are always allowed).
+UPDATE campaigns SET status = 'archived'
+ WHERE owner_user_id = '00000000-0000-0000-0000-000000000002'
+   AND status IN ('published', 'paused');
+
 DO $$
 DECLARE
   failures TEXT[] := ARRAY[]::TEXT[];
@@ -361,6 +369,14 @@ INSERT INTO public.consent_requests (
   'email',
   encode(digest('c04-dater2@example.test', 'sha256'), 'hex')
 );
+
+-- H-7 (migration 0039): the dater already published the first draft above, so
+-- archive that campaign before publishing this second draft — one active
+-- campaign per owner. (This section only reads the draft/revision snapshot,
+-- not the first campaign's live state.)
+UPDATE campaigns SET status = 'archived'
+ WHERE owner_user_id = '00000000-0000-0000-0000-000000000002'
+   AND status IN ('published', 'paused');
 
 DO $$
 DECLARE

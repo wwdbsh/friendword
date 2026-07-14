@@ -6,7 +6,9 @@
 
 이 문서는 예측이나 목표를 실제 성과처럼 기록하지 않습니다. 출시 후 재현 가능한 dashboard/export와 원천 이벤트를 근거로 각 항목을 채웁니다.
 
-**증거 원천 규칙 (2026-07-13, Slice 9):** 전환·발행·결제·수락 지표는 `analytics_events`에서 `properties.recorded_by = "server"`인 행(0033 트리거 기록)만 사용합니다. client가 보낼 수 있는 interaction 이벤트(`pitch_viewed_unique` 등)는 노출·유입 지표로만 쓰고, 조작 가능성 한계를 함께 표기합니다. 지표 정의는 `docs/ANALYTICS_PLAN.md`의 "지표 정의" 절을 따릅니다.
+**증거 원천 규칙 (2026-07-14, 3차 감사 Slice 5로 갱신):** exporter는 `k_factor_estimate`를 출력하지 않습니다 — `share_proxy_events_per_published_campaign`(Creator Kit 공유 proxy)과, 서버 권위 referral chain 기반 `attributed_new_campaigns`, refund 차감 `net_paid_transactions`, waitlist 지표를 timezone/window/limitations 메타데이터와 함께 출력합니다. 스토어 배포 전 acquisition 지표는 waitlist conversion입니다(K-factor 주장 금지).
+
+**(구) 증거 원천 규칙 (2026-07-13, Slice 9):** 전환·발행·결제·수락 지표는 `analytics_events`에서 `properties.recorded_by = "server"`인 행(0033 트리거 기록)만 사용합니다. client가 보낼 수 있는 interaction 이벤트(`pitch_viewed_unique` 등)는 노출·유입 지표로만 쓰고, 조작 가능성 한계를 함께 표기합니다. 지표 정의는 `docs/ANALYTICS_PLAN.md`의 "지표 정의" 절을 따릅니다.
 
 ## 제품 퍼널
 

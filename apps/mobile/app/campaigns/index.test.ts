@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@friendword/data', () => ({
   BenefitsRepo: class {},
+  trackEvent: vi.fn(),
   UnauthenticatedError: class extends Error {},
 }));
 vi.mock('@friendword/ui-tokens', () => ({
@@ -17,18 +18,23 @@ vi.mock('@friendword/ui-tokens', () => ({
   },
   fonts: { body: '', display: '' },
   fontSizes: { xs: 1, sm: 1, md: 1, lg: 1, xl: 1 },
+  radii: { sm: 1 },
   spacing: { xs: 1, sm: 1, md: 1, lg: 1, xxl: 1 },
+  strokes: { sticker: 1 },
 }));
 vi.mock('expo-router', () => ({
   useFocusEffect: vi.fn(),
   useRouter: () => ({ push: vi.fn() }),
 }));
 vi.mock('react-native', () => ({
+  Linking: { openURL: vi.fn() },
   ScrollView: 'main',
+  Share: { share: vi.fn(), sharedAction: 'sharedAction' },
   StyleSheet: { create: (styles: object) => styles },
   Text: 'span',
   View: 'div',
 }));
+vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn() }));
 vi.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'section' }));
 vi.mock('../../src/components', () => ({
   HypeButton: 'button',
@@ -43,12 +49,22 @@ vi.mock('../../src/services/pitchDraftsSupabase', () => ({
   }) => draft.server !== null && draft.id === draft.server.draftId,
 }));
 vi.mock('../../src/services/supabaseClient', () => ({ getSupabaseClient: () => null }));
+vi.mock('../../src/services/introducedCampaigns', () => ({
+  buildIntroducerShareUrl: (slug: string) =>
+    `https://friendword.example/p/${slug}?src=introducer-share&ref=${slug}`,
+  canShareIntroducedCampaign: (campaign: { status: string; slug: string | null }) =>
+    campaign.status === 'published' && campaign.slug !== null,
+  formatIntroducedCampaignStatus: (status: string) => status,
+  getIntroducerLiveHeadline: (name: string | null) => `${name ?? 'Your friend'} live`,
+  listMyIntroducedCampaigns: vi.fn(),
+}));
 
 import { PitchDraftSchema } from '../../src/services/types';
 import {
   canGetCampaignPass,
   getCampaignName,
   getIntroducerDraftName,
+  getIntroducedShareActions,
   isCampaignRevival,
 } from './index';
 
@@ -120,5 +136,35 @@ describe('Dater-owned Campaign Pass surface', () => {
     });
 
     expect(getIntroducerDraftName(draft)).toBe('A server-saved introduction');
+  });
+});
+
+describe('Introducer live-campaign share surface', () => {
+  it('exposes the free public URL with attribution and all three actions when live', () => {
+    const actions = getIntroducedShareActions({
+      status: 'published',
+      slug: 'blair-and-friends',
+    });
+    expect(actions).toEqual({
+      canShare: true,
+      shareUrl:
+        'https://friendword.example/p/blair-and-friends?src=introducer-share&ref=blair-and-friends',
+    });
+  });
+
+  it('offers no share CTA and no URL when the slug is withheld or the status is not live', () => {
+    // Slug NULL is the server's link-leak guard for non-public campaigns.
+    expect(getIntroducedShareActions({ status: 'published', slug: null })).toEqual({
+      canShare: false,
+      shareUrl: null,
+    });
+    expect(getIntroducedShareActions({ status: 'paused', slug: 'blair-and-friends' })).toEqual({
+      canShare: false,
+      shareUrl: null,
+    });
+    expect(getIntroducedShareActions({ status: 'expired', slug: null })).toEqual({
+      canShare: false,
+      shareUrl: null,
+    });
   });
 });

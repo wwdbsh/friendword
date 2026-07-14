@@ -6,6 +6,7 @@ import { notFound } from 'next/navigation';
 import { getPublishedPitchBySlug } from '@friendword/data';
 
 import { PitchPlayer } from '@/components/PitchPlayer';
+import { ReferralTracker } from '@/components/ReferralTracker';
 import { ReportCampaignLink } from '@/components/ReportCampaignLink';
 import { getPitchFixture } from '@/fixtures/pitch';
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
@@ -121,6 +122,7 @@ export default async function PitchPage({ params }: PitchPageProps) {
 
   return (
     <main className={styles.page}>
+      <ReferralTracker seedSlug={campaignSlug} />
       <StickerField />
 
       <section className={styles.stageRegion} aria-label={`${pitch.daterName}’s pitch`}>
@@ -204,7 +206,10 @@ export default async function PitchPage({ params }: PitchPageProps) {
       <footer className={`${styles.footer} ${styles.revealSix}`} data-pitch-footer>
         <p className={styles.footerPrompt}>Know someone worth hyping up?</p>
         <div className={styles.footerActions}>
-          <Link className={styles.primarySticker} href="/#pitch-a-friend">
+          <Link
+            className={styles.primarySticker}
+            href={`/?src=public-pitch&ref=${campaignSlug}#start`}
+          >
             Pitch a friend
           </Link>
           <Link className={styles.secondarySticker} href="/#create">

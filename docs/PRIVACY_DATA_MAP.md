@@ -6,12 +6,6 @@
 
 - 음성·사진을 외부 AI 공급자에게 보내기 전에 처리 목적과 공급자 공유를 명시하고 동의받습니다. (구현됨, Slice 1 강화: `ai_processing_consents`가 서버 관리 disclosure revision에 bind되고, **모든** provider usage kind의 예약이 current-revision 동의를 요구합니다. 동의가 없으면 업로드는 Supabase 저장까지만 가고 서버는 구조 검사만 수행합니다 — 외부 AI 호출 0회.)
 
-### 2026-07-14 확정분 (3차 감사 Slice 3, DECISIONS 참조)
-
-- **Introducer 계정 삭제**: 본인이 녹음한 voice는 개인 데이터로 삭제 시점에 즉시 제거하고, voice를 잃은 published/paused 캠페인은 archived로 전이합니다(무성 피치를 계속 공개하지 않음). Dater 소유 데이터는 보존. 물리 storage object 제거는 service-role 삭제 잡이 수행합니다.
-- **RevenueCat review payload**: resolved 후 90일 경과 시 PII를 scrub하고 요약만 유지합니다(`scrub_resolved_purchase_review_payloads`, 정기 ops 대상). open review는 운영 필요로 보존.
-- **로컬 기기 위생(모바일)**: raw consent token은 승인/거절/만료 확인·publish·계정 전환 시 purge되고, 업로드 완료 draft의 로컬 미디어 사본은 publish 후 파일까지 삭제를 시도합니다.
-- **profile-media**: 사용자 본인 prefix에 한해 클라이언트 삭제가 허용되어 Remove/rollback이 storage object를 실제로 제거합니다(orphan cleanup은 잔여 안전망).
 - AI는 친구 발언을 더 강한 사실로 변형하지 않습니다. 범죄 이력, 건강, 성생활, 재산, 직업, 학력 등 민감·객관 주장에는 Dater 확인을 요구합니다.
 - AI 결과는 사람이 편집하고 Dater가 공개 전 최종 승인합니다.
 - 원본 음성은 승인·렌더 완료 후 짧게 보존하고 사용자가 즉시 삭제할 수 있게 합니다. 비용 모델의 초기 lifecycle 기준은 승인 후 7일입니다.
@@ -20,6 +14,14 @@
 - 정부 신분증은 자체 저장하지 않고 가능한 경우 검증 공급자가 처리합니다.
 - analytics에는 민감한 음성·사진·메시지 내용을 보내지 않습니다.
 - 삭제·동의 철회·신고·차단 기능은 결제 여부와 무관합니다.
+
+### 2026-07-14 확정분 (3차 감사 Slice 3·5, DECISIONS 참조)
+
+- **Introducer 계정 삭제**: 본인이 녹음한 voice는 개인 데이터로 삭제 시점에 즉시 제거하고, voice를 잃은 published/paused 캠페인은 archived로 전이합니다(무성 피치를 계속 공개하지 않음). Dater 소유 데이터는 보존. 물리 storage object 제거는 service-role 삭제 잡이 수행합니다.
+- **RevenueCat review payload**: resolved 후 90일 경과 시 PII를 scrub하고 요약만 유지합니다(`scrub_resolved_purchase_review_payloads`, 정기 ops 대상). open review는 운영 필요로 보존.
+- **로컬 기기 위생(모바일)**: raw consent token은 승인/거절/만료 확인·publish·계정 전환 시 purge되고, 업로드 완료 draft의 로컬 미디어 사본은 publish 후 파일까지 삭제를 시도합니다.
+- **profile-media**: 사용자 본인 prefix에 한해 클라이언트 삭제가 허용되어 Remove/rollback이 storage object를 실제로 제거합니다(orphan cleanup은 잔여 안전망).
+- **waitlist 이메일(Slice 5)**: `waitlist_signups`는 출시 초대 연락 목적의 이메일과 유입 캠페인 연결만 저장합니다. service-role 전용 읽기(클라이언트 조회 불가), 시간당 가입 cap, 중복 no-op. 로그·analytics에 이메일을 남기지 않습니다. 초대 발송은 Resend(사용자 게이트) 이후이며, 발송·삭제 정책은 그때 확정합니다.
 
 ## 데이터 유형별 맵
 

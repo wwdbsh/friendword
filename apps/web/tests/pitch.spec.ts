@@ -153,14 +153,26 @@ test('returns not found when the campaign slug is unknown', async ({ page }) => 
   });
 });
 
-test('routes the two pitch footer actions to distinct landing destinations', async ({ page }) => {
+// Slice 5 (GP-P0-2 / H-8): the "Pitch a friend" footer CTA now routes new
+// visitors into the landing waitlist, carrying the pitch's slug as a referral so
+// the source campaign keeps attribution. "Create my Friendword" still deep-links
+// to the create anchor.
+test('routes the pitch footer CTA into the waitlist with referral attribution', async ({
+  page,
+}) => {
   await page.goto('/p/demo-blair');
 
+  // The public pitch seeds its own slug as the first-touch referral.
+  await expect
+    .poll(() => page.evaluate(() => window.sessionStorage.getItem('fw_referral')))
+    .toBe('demo-blair');
+
   const pitchFriend = page.getByRole('link', { name: 'Pitch a friend' });
-  await expect(pitchFriend).toHaveAttribute('href', '/#pitch-a-friend');
+  await expect(pitchFriend).toHaveAttribute('href', '/?src=public-pitch&ref=demo-blair#start');
   await pitchFriend.click();
-  await page.waitForURL('**/#pitch-a-friend');
-  await expect(page.locator('#pitch-a-friend')).toBeVisible();
+  await page.waitForURL('**/?src=public-pitch&ref=demo-blair#start');
+  await expect(page.locator('#start')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Get an invite when we launch' })).toBeVisible();
 
   await page.goto('/p/demo-blair');
   const createFriendword = page.getByRole('link', { name: 'Create my Friendword' });

@@ -159,6 +159,14 @@ BEGIN
     'email',
     encode(digest('dater@example.test', 'sha256'), 'hex')
   );
+  -- H-7 (migration 0039): user 0002 already owns the seed campaign; the
+  -- one-active-campaign guard now allows only one published/paused campaign
+  -- per owner. This suite records analytics off its own campaign below, so
+  -- archive the seed campaign first (an exit transition is always allowed).
+  UPDATE public.campaigns SET status = 'archived'
+   WHERE owner_user_id = '00000000-0000-0000-0000-000000000002'
+     AND status IN ('published', 'paused');
+
   INSERT INTO public.campaigns (
     id, pitch_draft_id, owner_user_id, status, published_at, slug, ends_at
   ) VALUES (

@@ -117,6 +117,17 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
+-- H-7 (migration 0039): dater 0002 already owns the seed campaign
+-- (20000000-…-0001). The one-active-campaign guard fires BEFORE the identity
+-- gate, so leaving the seed campaign active would let the guard — not the
+-- identity gate this suite is asserting — block every publish probe. Archive
+-- it first so the identity gate stays the authoritative blocker, and so the
+-- final evidenced publish (dater 0002's single active campaign) succeeds. The
+-- interest probes below are retargeted to that freshly published campaign.
+UPDATE campaigns SET status = 'archived'
+ WHERE owner_user_id = '00000000-0000-0000-0000-000000000002'
+   AND status IN ('published', 'paused');
+
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
 
@@ -267,6 +278,15 @@ END;
 $$;
 RESET ROLE;
 
+-- Capture the campaign just published for dater 0002 so the interest probes
+-- below can target it (the seed campaign was archived for the H-7 guard).
+SELECT set_config(
+  'b06.published_campaign',
+  (SELECT id::text FROM public.campaigns
+    WHERE pitch_draft_id = 'b0600000-0000-0000-0000-000000000001'),
+  true
+);
+
 -- Interest requires server evidence in addition to a self-declared adult profile.
 INSERT INTO auth.users (id, email)
 VALUES ('b0600000-0000-0000-0000-000000000101', 'audit2-interest@example.test');
@@ -311,7 +331,7 @@ DECLARE
 BEGIN
   BEGIN
     PERFORM * FROM public.submit_interest(
-      '20000000-0000-0000-0000-000000000001',
+      current_setting('b06.published_campaign')::uuid,
       'Self-declared DOB is not evidence.'
     );
   EXCEPTION WHEN OTHERS THEN
@@ -367,7 +387,7 @@ DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM public.submit_interest(
-      '20000000-0000-0000-0000-000000000001',
+      current_setting('b06.published_campaign')::uuid,
       'Current adult and liveness evidence exists.'
     )
   ) THEN

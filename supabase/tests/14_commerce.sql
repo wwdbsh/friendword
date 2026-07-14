@@ -706,9 +706,14 @@ INSERT INTO pitch_drafts (
   body
 )
 VALUES (
+  -- H-7 (migration 0039): user 0002 already owns the seed campaign, which
+  -- this suite still needs live after this block, so the one-active-campaign
+  -- guard forbids a second 0002 campaign. This "second pass" scenario is
+  -- owner-identity-agnostic, so it is re-homed on user 0003 (who owns no other
+  -- campaign). Every 0002 reference in this block moves to 0003 in lockstep.
   '14000000-0000-0000-0000-000000000030',
   '00000000-0000-0000-0000-000000000001',
-  '00000000-0000-0000-0000-000000000002',
+  '00000000-0000-0000-0000-000000000003',
   'published',
   'Second pass campaign',
   'Second pass campaign body'
@@ -722,7 +727,7 @@ INSERT INTO consent_requests (
 )
 VALUES (
   '14000000-0000-0000-0000-000000000030',
-  '00000000-0000-0000-0000-000000000002',
+  '00000000-0000-0000-0000-000000000003',
   encode(digest('commerce-second-pass-token', 'sha256'), 'hex'),
   'approved',
   now()
@@ -738,7 +743,7 @@ INSERT INTO campaigns (
 VALUES (
   '14000000-0000-0000-0000-000000000031',
   '14000000-0000-0000-0000-000000000030',
-  '00000000-0000-0000-0000-000000000002',
+  '00000000-0000-0000-0000-000000000003',
   'published',
   now(),
   now() + INTERVAL '14 days'
@@ -747,7 +752,7 @@ INSERT INTO campaign_memberships (campaign_id, user_id, role)
 VALUES
   (
     '14000000-0000-0000-0000-000000000031',
-    '00000000-0000-0000-0000-000000000002',
+    '00000000-0000-0000-0000-000000000003',
     'DATER_OWNER'
   ),
   (
@@ -766,7 +771,7 @@ INSERT INTO purchase_intents (
 )
 VALUES (
   '14000000-0000-0000-0000-000000000032',
-  '00000000-0000-0000-0000-000000000002',
+  '00000000-0000-0000-0000-000000000003',
   'campaign_30d_1999',
   'CAMPAIGN',
   '14000000-0000-0000-0000-000000000031',
@@ -783,7 +788,7 @@ BEGIN
     PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(
       'commerce-pass-cross-scope',
       'INITIAL_PURCHASE',
-      '00000000-0000-0000-0000-000000000002',
+      '00000000-0000-0000-0000-000000000003',
       'campaign_30d_1999',
       '14000000-0000-0000-0000-000000000032',
       'commerce-pass-cross-scope-tx',
@@ -805,7 +810,7 @@ BEGIN
   PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(
     'commerce-pass-out-of-order-refund',
     'REFUND',
-    '00000000-0000-0000-0000-000000000002',
+    '00000000-0000-0000-0000-000000000003',
     'campaign_30d_1999',
     '14000000-0000-0000-0000-000000000032',
     'commerce-pass-out-of-order-tx',
@@ -814,7 +819,7 @@ BEGIN
   PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(
     'commerce-pass-out-of-order-purchase',
     'INITIAL_PURCHASE',
-    '00000000-0000-0000-0000-000000000002',
+    '00000000-0000-0000-0000-000000000003',
     'campaign_30d_1999',
     '14000000-0000-0000-0000-000000000032',
     'commerce-pass-out-of-order-tx',

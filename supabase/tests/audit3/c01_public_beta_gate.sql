@@ -14,31 +14,40 @@ BEGIN;
 -- validator (campaigns_validate_publication) is satisfied and the ONLY thing
 -- that can block a publish is the public beta gate. Drafts are never
 -- publish-gated, so these inserts are safe regardless of the gate state.
+-- H-7 (migration 0039): the one-active-campaign guard now allows only one
+-- published/paused campaign per owner. This suite keeps the SEED campaign
+-- (20000000-…-0001, owner 0002) active for its own ends_at-renewal and
+-- published->paused probes, and simultaneously mints a paused (B) plus two
+-- published (C, D) probe campaigns that would coexist. So each probe campaign
+-- gets its OWN campaign-free owner (subject == owner, per the publish
+-- validator): A→0001, B→0003, C→0004, D→0001 (A is always rolled back by the
+-- gate, so it may share 0001 with D without ever coexisting). This changes
+-- only WHO owns each probe, not WHAT the beta gate is asserted to do.
 INSERT INTO pitch_drafts (id, created_by_user_id, subject_user_id, status, headline, body)
 VALUES
   ('c0100000-0000-0000-0000-000000000001',
-   '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002',
+   '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001',
    'published', 'Audit3 draft A', 'Direct publish INSERT probe.'),
   ('c0100000-0000-0000-0000-000000000002',
-   '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002',
+   '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000003',
    'published', 'Audit3 draft B', 'Paused->published transition probe.'),
   ('c0100000-0000-0000-0000-000000000003',
-   '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002',
+   '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000004',
    'published', 'Audit3 draft C', 'Allowlisted preview probe.'),
   ('c0100000-0000-0000-0000-000000000004',
-   '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002',
+   '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001',
    'published', 'Audit3 draft D', 'Gate-on publish probe.');
 
 INSERT INTO consent_requests (id, pitch_draft_id, subject_user_id, token_hash, status, responded_at)
 VALUES
   ('c1100000-0000-0000-0000-000000000001', 'c0100000-0000-0000-0000-000000000001',
-   '00000000-0000-0000-0000-000000000002', 'audit3-consent-a', 'approved', now() - INTERVAL '1 day'),
+   '00000000-0000-0000-0000-000000000001', 'audit3-consent-a', 'approved', now() - INTERVAL '1 day'),
   ('c1100000-0000-0000-0000-000000000002', 'c0100000-0000-0000-0000-000000000002',
-   '00000000-0000-0000-0000-000000000002', 'audit3-consent-b', 'approved', now() - INTERVAL '1 day'),
+   '00000000-0000-0000-0000-000000000003', 'audit3-consent-b', 'approved', now() - INTERVAL '1 day'),
   ('c1100000-0000-0000-0000-000000000003', 'c0100000-0000-0000-0000-000000000003',
-   '00000000-0000-0000-0000-000000000002', 'audit3-consent-c', 'approved', now() - INTERVAL '1 day'),
+   '00000000-0000-0000-0000-000000000004', 'audit3-consent-c', 'approved', now() - INTERVAL '1 day'),
   ('c1100000-0000-0000-0000-000000000004', 'c0100000-0000-0000-0000-000000000004',
-   '00000000-0000-0000-0000-000000000002', 'audit3-consent-d', 'approved', now() - INTERVAL '1 day');
+   '00000000-0000-0000-0000-000000000001', 'audit3-consent-d', 'approved', now() - INTERVAL '1 day');
 
 -- Close both gates (seed.sql opened them for the other local suites).
 UPDATE app_config SET value = 'off'
@@ -60,7 +69,7 @@ BEGIN
     VALUES (
       'c0100000-0000-0000-0000-0000000000a1',
       'c0100000-0000-0000-0000-000000000001',
-      '00000000-0000-0000-0000-000000000002',
+      '00000000-0000-0000-0000-000000000001',
       'published',
       now()
     );
@@ -83,7 +92,7 @@ BEGIN
   VALUES (
     'c0100000-0000-0000-0000-0000000000a2',
     'c0100000-0000-0000-0000-000000000002',
-    '00000000-0000-0000-0000-000000000002',
+    '00000000-0000-0000-0000-000000000003',
     'paused'
   );
   blocked := false;
@@ -178,7 +187,7 @@ BEGIN
 
   BEGIN
     INSERT INTO campaigns (id, pitch_draft_id, owner_user_id, status, published_at, slug)
-    VALUES (camp_c, draft_c, '00000000-0000-0000-0000-000000000002',
+    VALUES (camp_c, draft_c, '00000000-0000-0000-0000-000000000004',
             'published', now(), 'audit3-preview-camp');
   EXCEPTION WHEN OTHERS THEN
     failures := array_append(failures, 'allowlisted draft could not publish while the gate is closed: ' || SQLERRM);
@@ -210,7 +219,7 @@ DECLARE
 BEGIN
   BEGIN
     INSERT INTO campaigns (id, pitch_draft_id, owner_user_id, status, published_at, slug)
-    VALUES (camp_d, draft_d, '00000000-0000-0000-0000-000000000002',
+    VALUES (camp_d, draft_d, '00000000-0000-0000-0000-000000000001',
             'published', now(), 'audit3-gate-on-camp');
   EXCEPTION WHEN OTHERS THEN
     failures := array_append(failures, 'publish transition was blocked while the gate is open: ' || SQLERRM);

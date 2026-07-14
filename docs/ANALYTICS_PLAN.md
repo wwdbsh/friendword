@@ -59,7 +59,9 @@ report_submitted / user_blocked
 - 집계 timezone은 **UTC**, 기간은 ISO 주(월요일 시작)를 기본으로 명시합니다.
 - `unique external viewers` = `pitch_viewed_unique` 수. 브라우저 세션당 1회로 dedupe되며 시크릿 창·세션 초기화로 부풀릴 수 있는 **약한 지표**입니다 — 성장 증거로 쓸 때 한계를 함께 표기합니다.
 - 전환율 분모·분자는 전부 server-recorded outcome으로 계산합니다(view→interest만 분모가 client 이벤트).
-- `campaign K-factor` = (해당 코호트 캠페인의 `?src` attribution이 붙은 `pitch_viewed_unique`에서 시작해 **새로 발행된 캠페인** 수) ÷ (코호트의 발행 캠페인 수). **이 지표는 아직 측정 불가합니다(3차 감사 H-8)**: source campaign→new user→new campaign을 연결하는 durable referral chain이 DB에 없습니다. 현재 exporter(`scripts/export-growth-evidence.mjs`)가 출력하는 `k_factor_estimate`는 실제로는 `campaign_shared`(Creator Kit의 card download/caption copy 시 기록되는 proxy) ÷ 발행 캠페인 수이며 **K-factor가 아닙니다**. Slice 5에서 지표를 `share_proxy_events_per_published_campaign`으로 재명명하고 referral chain을 구현하기 전까지 어떤 산출값도 K-factor라고 부르지 않습니다.
+- **referral chain (Slice 5, 2026-07-14 구현)**: 공개 pitch의 `?ref=<slug>`가 `fw_referral`(first-touch)로 보존되고, 로그인 사용자는 `claim_referral`로 사용자당 1개 소스를 서버에 기록하며, 새 캠페인이 처음 published될 때 서버 트리거가 `referral_claims.new_campaign_id`를 채웁니다(client 위조 불가). exporter는 이를 `attributed_new_campaigns`로 출력합니다 — **아직 K-factor라고 부르지 않습니다**(코호트·기간 정의 전이며, 스토어 배포 전 acquisition은 waitlist 전환으로 측정).
+- 구 `k_factor_estimate`는 제거되었고 `share_proxy_events_per_published_campaign`(Creator Kit 공유 액션 proxy ÷ 발행 캠페인)으로 재명명되었습니다 — 전환 지표가 아닙니다.
+- 서버 권위 outcome 지표(`interests_submitted`/`interests_accepted` 등)는 `recorded_by='server'` 행만 집계하고, client interaction(`pitch_viewed_unique`/`interest_started`)은 위조 가능 한계를 명시해 분리 출력합니다. 결제는 REFUND lineage를 차감한 `net_paid_transactions`입니다. 모든 exporter 출력에 timezone(UTC)·window·지표별 source_of_truth/limitations 메타데이터가 포함됩니다(감사 H-9).
 
 ## 초기 가설과 판정선
 

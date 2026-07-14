@@ -40,6 +40,31 @@ test('renders the acquisition journey and preserves landing attribution', async 
     .toBe('launch-partner');
 });
 
+// Slice 5 (GP-P0-2 / H-8): the landing carries an honest waitlist — the app is
+// not on any store, so the only real acquisition surface is an email invite.
+// Referral attribution from a public pitch (?ref) is preserved first-touch.
+test('renders the honest waitlist and preserves referral attribution', async ({ page }) => {
+  await page.goto('/?src=public-pitch&ref=demo-blair');
+
+  const waitlist = page.locator('#start');
+  await expect(waitlist).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Get an invite when we launch' })).toBeVisible();
+  await expect(waitlist.getByText('Friendword isn’t on the App Store yet.')).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Email' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Join the waitlist' })).toBeVisible();
+
+  // ?ref is preserved as the first-touch referral for a later claim.
+  await expect
+    .poll(() => page.evaluate(() => window.sessionStorage.getItem('fw_referral')))
+    .toBe('demo-blair');
+
+  // The waitlist CTA meets the 44px touch target minimum.
+  const height = await page
+    .getByRole('button', { name: 'Join the waitlist' })
+    .evaluate((element) => element.getBoundingClientRect().height);
+  expect(height).toBeGreaterThanOrEqual(44);
+});
+
 // Second audit §8-16: English is the launch locale. The html lang attribute
 // and every public acquisition surface must carry no Korean product copy.
 test('ships English as the default public locale with no Korean copy', async ({ page }) => {

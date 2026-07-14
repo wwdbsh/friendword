@@ -90,7 +90,7 @@ Creator Launch만으로 100개 무료 캠페인을 보전하려면 약 19% 구�
 
 1. **Render late**: preview는 client-side motion, 서버 MP4는 Dater 최종 승인 후 1회만 생성합니다.
 2. **Verify late**: Dater는 승인 직전, Interested Person은 프로필 제출 직전에 liveness를 실행합니다.
-3. **One free campaign**: verified Dater당 무료 활성 캠페인 1개, 기본 theme, server re-cut 없음으로 제한합니다. **(미구현 — 3차 감사 H-7: 이 수량을 강제하는 DB guard/constraint가 없어 현재는 문서상 정책일 뿐입니다. Slice 5에서 서버 강제 예정.)**
+3. **One free campaign**: owner당 활성(published/paused) 캠페인 1개를 DB 트리거+advisory lock으로 강제합니다(3차 감사 Slice 5, migration 0039 — Campaign Pass는 기간 상품이지 수량 상품이 아니므로 pass 유무와 무관). 기본 theme, server re-cut 없음 제한은 유지.
 4. **Finite free cohort**: 초기 무료 캠페인은 월 100개처럼 예산 슬롯을 두고 소진 후 waitlist/다음 달 발급으로 전환합니다. 기존 캠페인과 안전 기능은 유지합니다.
 5. **Lifecycle deletion**: 원본 음성·실패 render는 승인 후 7일, 만료 캠페인의 대형 export는 grace period 후 삭제합니다.
 6. **Rate limit**: 전화번호·device·IP·campaign 기준 OTP, AI generation, liveness와 render 횟수를 제한합니다.

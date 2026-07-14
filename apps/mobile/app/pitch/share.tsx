@@ -1,5 +1,6 @@
 import { colors, fonts, fontSizes, radii, spacing, strokes } from '@friendword/ui-tokens';
 import { PurchasesRepo, trackEvent } from '@friendword/data';
+import * as Clipboard from 'expo-clipboard';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Linking, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
@@ -7,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { HypeButton, QuietNavAction, TrustCard } from '../../src/components';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
+import { buildIntroducerShareUrl } from '../../src/services/introducedCampaigns';
 import { hasFinalizedConsent } from '../../src/services/pitchDrafts';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 import type { PitchDraft } from '../../src/services/types';
@@ -14,6 +16,20 @@ import { buildConsentUrl, getWebOrigin } from '../../src/services/webOrigin';
 
 export type CreatorBenefitState = 'idle' | 'loading' | 'available' | 'unavailable' | 'error';
 export type CreatorKitSurface = 'checking' | 'purchase' | 'open' | 'error';
+
+/**
+ * The free public pitch URL an introducer shares once their pitch is published.
+ * The campaign slug arrives as a navigation param from the RPC-backed live-pitch
+ * card (the draft record itself carries no slug), so this returns null whenever a
+ * slug is absent — free sharing then simply isn't offered on this screen and the
+ * Creator Kit copy must not imply sharing is locked.
+ */
+export function getPublishedFreeShareUrl(slug: string | null | undefined): string | null {
+  if (typeof slug !== 'string' || slug.trim().length === 0) {
+    return null;
+  }
+  return buildIntroducerShareUrl(slug.trim());
+}
 
 export function getCreatorKitSurface(state: CreatorBenefitState): CreatorKitSurface {
   switch (state) {
@@ -33,10 +49,16 @@ export function getCreatorKitSurface(state: CreatorBenefitState): CreatorKitSurf
 
 export default function SharePitchScreen() {
   const router = useRouter();
-  const { draftId, resent } = useLocalSearchParams<{ draftId: string; resent?: string }>();
+  const { draftId, resent, slug } = useLocalSearchParams<{
+    draftId: string;
+    resent?: string;
+    slug?: string;
+  }>();
   const [draft, setDraft] = useState<PitchDraft | null>(null);
   const [loading, setLoading] = useState(true);
   const [shareError, setShareError] = useState<string | null>(null);
+  const [publicShareError, setPublicShareError] = useState<string | null>(null);
+  const [publicLinkCopied, setPublicLinkCopied] = useState(false);
   const [kitError, setKitError] = useState<string | null>(null);
   const [creatorBenefitState, setCreatorBenefitState] = useState<CreatorBenefitState>('idle');
   const [creditRefresh, setCreditRefresh] = useState(0);
@@ -86,6 +108,7 @@ export default function SharePitchScreen() {
   const isPublished = draft?.status === 'published' && serverDraftId !== null;
   const kitUrl = serverDraftId === null ? null : `${getWebOrigin()}/kit/${serverDraftId}`;
   const creatorKitSurface = getCreatorKitSurface(creatorBenefitState);
+  const publicShareUrl = getPublishedFreeShareUrl(slug);
 
   useFocusEffect(
     useCallback(() => {
@@ -145,6 +168,52 @@ export default function SharePitchScreen() {
     }
   };
 
+  const sharePublicPitch = async (): Promise<void> => {
+    if (publicShareUrl === null) {
+      return;
+    }
+    setPublicShareError(null);
+    try {
+      const result = await Share.share({
+        message: `${friendName}'s pitch is live on Friendword — take a look and pass it on: ${publicShareUrl}`,
+      });
+      if (result.action === Share.sharedAction) {
+        trackEvent(getSupabaseClient(), 'campaign_shared', {
+          platform: 'mobile',
+          source: 'introducer-share',
+          pitch_draft_id: serverDraftId,
+        });
+      }
+    } catch {
+      setPublicShareError('The share sheet could not open. Please try again.');
+    }
+  };
+
+  const copyPublicPitch = async (): Promise<void> => {
+    if (publicShareUrl === null) {
+      return;
+    }
+    setPublicShareError(null);
+    try {
+      await Clipboard.setStringAsync(publicShareUrl);
+      setPublicLinkCopied(true);
+    } catch {
+      setPublicShareError('The link could not be copied. Please try again.');
+    }
+  };
+
+  const openPublicPitch = async (): Promise<void> => {
+    if (publicShareUrl === null) {
+      return;
+    }
+    setPublicShareError(null);
+    try {
+      await Linking.openURL(publicShareUrl);
+    } catch {
+      setPublicShareError('The pitch could not open. Please try again.');
+    }
+  };
+
   const openKit = async (): Promise<void> => {
     if (kitUrl === null) {
       return;
@@ -186,12 +255,50 @@ export default function SharePitchScreen() {
           </Text>
           <Text style={styles.subtitle}>
             {isPublished
-              ? 'Open its static Creator Kit: one 9:16 share card and a caption pack.'
+              ? publicShareUrl !== null
+                ? `Share ${friendName}’s live pitch for free — anywhere you like. The Creator Kit below is an optional extra, never a lock on sharing.`
+                : 'Sharing the live pitch is always free from your campaigns list. The Creator Kit here is an optional 9:16 share card and caption pack.'
               : isResent
                 ? `${friendName} can review the latest revision at the same private link.`
                 : `One last move: send ${friendName} the private approval invite. Nothing goes public until they say yes.`}
           </Text>
         </View>
+
+        {isPublished && publicShareUrl !== null ? (
+          <TrustCard>
+            <Text style={styles.cardTitle}>{friendName}’s pitch is live — share it free</Text>
+            <Text style={styles.subtitle}>
+              This is your public pitch link. Share it anywhere to bring people in — no purchase
+              needed.
+            </Text>
+            <View style={styles.linkBox}>
+              <Text numberOfLines={2} style={styles.link}>
+                {publicShareUrl}
+              </Text>
+            </View>
+            <HypeButton
+              label="Share the pitch"
+              onPress={() => {
+                void sharePublicPitch();
+              }}
+              variant="trust"
+            />
+            <HypeButton
+              label={publicLinkCopied ? 'Link copied' : 'Copy link'}
+              onPress={() => {
+                void copyPublicPitch();
+              }}
+              secondary
+            />
+            <QuietNavAction
+              label="View live pitch"
+              onPress={() => {
+                void openPublicPitch();
+              }}
+            />
+            {publicShareError ? <Text style={styles.error}>{publicShareError}</Text> : null}
+          </TrustCard>
+        ) : null}
 
         {loading ? <Text style={styles.subtitle}>Loading your invite…</Text> : null}
 
@@ -262,10 +369,10 @@ export default function SharePitchScreen() {
 
         {isPublished && creatorKitSurface === 'purchase' && serverDraftId !== null ? (
           <TrustCard>
-            <Text style={styles.cardTitle}>Unlock this static Creator Kit</Text>
+            <Text style={styles.cardTitle}>Optional: unlock the Creator Kit</Text>
             <Text style={styles.subtitle}>
-              Creator Launch is one credit for a 9:16 share card and caption pack for this published
-              pitch. Once unlocked, the kit stays available.
+              Sharing the live pitch is already free. Creator Launch is a separate one-credit add-on
+              for a 9:16 share card and caption pack. Once unlocked, the kit stays available.
             </Text>
             <HypeButton
               label="Get Creator Launch"

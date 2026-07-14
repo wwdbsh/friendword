@@ -13,6 +13,7 @@ const config: ExpoConfig = {
   orientation: 'portrait',
   scheme: 'friendword',
   userInterfaceStyle: 'light',
+  icon: './assets/icon.png',
   ios: {
     bundleIdentifier: 'com.friendword.app',
     supportsTablet: true,
@@ -25,6 +26,10 @@ const config: ExpoConfig = {
   },
   android: {
     package: 'com.friendword.app',
+    adaptiveIcon: {
+      foregroundImage: './assets/adaptive-icon.png',
+      backgroundColor: '#FF5B2E',
+    },
   },
   plugins: [
     'expo-router',
@@ -41,9 +46,21 @@ const config: ExpoConfig = {
       },
     ],
     'expo-font',
-    'expo-splash-screen',
+    [
+      'expo-splash-screen',
+      {
+        image: './assets/splash-icon.png',
+        imageWidth: 240,
+        backgroundColor: '#FFF6EA',
+      },
+    ],
   ],
   extra: {
+    // EAS project link: `pnpm dlx eas-cli init` prints the project ID; paste it
+    // into EAS_PROJECT_ID in the root .env (not a secret — safe to commit too).
+    eas: {
+      projectId: process.env['EAS_PROJECT_ID'] ?? '',
+    },
     supabaseUrl: process.env['EXPO_PUBLIC_SUPABASE_URL'] ?? '',
     supabaseAnonKey: process.env['EXPO_PUBLIC_SUPABASE_ANON_KEY'] ?? '',
     webOrigin: process.env['EXPO_PUBLIC_WEB_ORIGIN'] ?? '',

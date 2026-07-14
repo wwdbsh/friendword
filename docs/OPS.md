@@ -226,3 +226,26 @@ rollback에서 **이번 세션에 업로드한** `profile-media` 객체를 실�
 재제출로 참조 해제한 뒤 orphan cleanup이 수거합니다. 즉 orphan 미디어 스윕은 **잔여
 안전망**이며, 정상 경로에서는 대부분의 객체가 즉시 정리됩니다. rollback 실패는 사용자
 플로우를 막지 않고 콘솔 경고(`interest rollback: …`)로 남으며, 남은 객체는 스윕이 처리합니다.
+
+## TestFlight 배포 채널 (2026-07-14 신설)
+
+목표: 상헌 님 실기기에서 장소 제약 없이 최신 빌드를 TestFlight로 수령. Shipaton 규칙과 정합 — 8/1 전 **비공개 테스트는 허용**, 첫 **공개** App Store release만 8/1~9/30 창구 내(App Review 조기 제출 + 수동 release 전략, HACKATHON_RULES.md).
+
+### 구성 (커밋됨)
+- `apps/mobile/eas.json` — development(내부·dev client)/preview(내부 배포)/production(TestFlight, `autoIncrement`+remote 버전) 프로필.
+- `apps/mobile/assets/` — icon.png(1024, Devpost 요건 겸용)·adaptive-icon.png·splash-icon.png. app.config.ts에 배선.
+- `extra.eas.projectId`는 루트 `.env`의 `EAS_PROJECT_ID`에서 주입(비밀 아님).
+
+### 1회 셋업 (사용자 게이트 — 대화형이라 직접 실행)
+1. Apple Developer Program 멤버십(연 $99, 미가입 시 승인까지 최대 48h).
+2. Expo 계정: `pnpm dlx eas-cli login`
+3. `cd apps/mobile && pnpm dlx eas-cli init` → 출력된 project ID를 루트 `.env`에 `EAS_PROJECT_ID=<uuid>`로 추가.
+4. 빌드 env 업로드(값은 로컬에만): `pnpm dlx eas-cli env:push production --path ../../.env` 후 EAS 대시보드에서 EXPO_PUBLIC_* 3종만 남기고 서버 전용 키는 제거(클라이언트 번들에 불필요).
+5. 첫 빌드: `pnpm dlx eas-cli build --platform ios --profile production` (Apple 로그인·인증서/프로파일은 EAS가 자동 관리 — 첫 실행에서 대화형 승인).
+6. 제출: `pnpm dlx eas-cli submit --platform ios --latest` (App Store Connect 앱 레코드 자동 생성 가능).
+7. App Store Connect → TestFlight → Internal Testing 그룹 생성 → 본인 Apple ID 추가 → 폰의 TestFlight 앱에서 설치. 이후 새 빌드는 5~6번 반복이면 자동 알림.
+
+### 반복 릴리스
+`cd apps/mobile && pnpm dlx eas-cli build -p ios --profile production && pnpm dlx eas-cli submit -p ios --latest`
+- 내부 테스터 전용인 동안 App Review 불필요(Internal Testing). External 그룹·공개 App Store release는 8/1 이후.
+- `real_payments_enabled=off`·`public_beta_enabled=off` 서버 게이트는 TestFlight 빌드에도 동일하게 적용됨(클라이언트 배포와 무관).

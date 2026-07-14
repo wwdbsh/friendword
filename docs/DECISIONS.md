@@ -249,3 +249,10 @@
 - **이유**: 3차 감사 §8(trust 순간의 과도한 hype 강도·인지 부담·contrast 미검사·44px)·§10 Slice 7·§11 browser/device. 시뮬레이터 QA가 green test가 놓친 부팅 불가 결함을 즉시 드러냄 — "green test는 완료 증거가 아니다"의 실증.
 - **검토 대안**: wizard식 단계 분리(기존 스펙 커버리지 손실·상태 재작성 위험 — 기각), metro blockList(이동으로 근본 해소 가능 — 문서화만), kit까지 함께 하향(70% expression 표면 훼손 — 기각).
 - **영향**: ui-tokens 20 테스트(음성가드 2), 모바일 104(가드 1 포함), Playwright 46(consent 회귀 5 추가), 44px 실측표(§보고). 실기기 iOS QA만 사용자 게이트로 잔존. interest 전용 trust 모듈은 후속 항목.
+
+## 2026-07-14: TestFlight 배포 채널 신설 (Advisor 단독, 사용자 요청)
+
+- **결정**: EAS Build/Submit 기반 TestFlight 내부 테스트 채널을 만든다 — `apps/mobile/eas.json`(development/preview/production, remote 버전·autoIncrement), 앱 아이콘/스플래시 자산(Hype Mixtape: tangerine 필드+cream 스피치 버블+ink/flirt waveform+hype 스타 — 1024 아이콘은 Devpost 제출 요건 겸용), `extra.eas.projectId`는 `.env`의 `EAS_PROJECT_ID` 주입. 대화형 크리덴셜 단계(Apple Developer Program, eas login/init, env:push, 첫 빌드 승인)는 전부 사용자 게이트로 OPS.md 런북에 분리한다. 키·시크릿 값은 Claude가 수신하지 않는다.
+- **이유**: 실기기 QA(Slice 7 잔여 사용자 게이트)를 장소 제약 없이 반복 가능하게. Shipaton 규칙상 8/1 전 비공개 테스트 허용 — 공개 release만 창구 내(수동 release 전략 유지).
+- **검토 대안**: 로컬 케이블 설치(장소 제약 — 기각), Ad Hoc 배포(기기 UDID 관리 부담 — 기각), 공개 App Store 조기 출시(Shipaton 규칙 위반 — 금지).
+- **영향**: expo config 정상 해석·모바일 typecheck green. 잔여: 사용자 1회 셋업(OPS.md) 후 첫 TestFlight 빌드. RevenueCat sandbox 검증(Slice 8)은 TestFlight 빌드에서 이어서 가능.

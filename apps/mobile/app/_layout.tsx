@@ -11,6 +11,8 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
+import { shouldPurgeConsentTokensOnAuthChange } from '../src/services/authDraftPurge';
+import { pitchDraftService } from '../src/services/draftServiceInstance';
 import {
   syncPurchasesIdentity,
   type PurchasesIdentitySyncResult,
@@ -74,7 +76,18 @@ export default function RootLayout() {
         return;
       }
       relevantAuthEventSeen = true;
-      syncIfUserChanged(session?.user.id ?? null);
+      const nextUserId = session?.user.id ?? null;
+      // Read the previous user before syncIfUserChanged advances it: a sign-out
+      // or account switch must wipe every draft's raw consent bearer token.
+      if (shouldPurgeConsentTokensOnAuthChange(event, lastObservedUserId, nextUserId)) {
+        void pitchDraftService.purgeAllConsentTokens().catch((purgeError: unknown) => {
+          console.warn(
+            'Consent token purge on auth change failed:',
+            purgeError instanceof Error ? purgeError.message : 'Unknown purge error.',
+          );
+        });
+      }
+      syncIfUserChanged(nextUserId);
     });
 
     void client.auth

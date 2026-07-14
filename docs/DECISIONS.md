@@ -194,3 +194,10 @@
 - **이유**: 3차 감사 P0-NEW-3(정상 UI 403 + direct 우회 publish), P0-2(manual 경로 회귀의 정책 부재), CP-1.
 - **검토 대안**: Dater upload를 Introducer 위임 검증으로 우회(주체 불일치·감사 명시 기각), Dater edit 시 AI 재추출(Dater 경로에 비용·동의 추가 — 확인 강제로 대체), transcript를 read 시점 revision 조인으로 해결(reader 전면 개편 — atomic copy 채택).
 - **영향**: audit3 c04 + 웹 audit3 8테스트(dater 인가 매트릭스) red→green. b13은 dater_edited 계약으로 갱신. consent Playwright에 동의 스텝 반영(40 passed). e2e-production에 mock 없는 Dater upload→validate→moderate→revision→publish 단계(6k) 추가. Dater "사진 교체" 대표 기능이 정상 UI 경로에서 실제로 동작.
+
+## 2026-07-14: 계정 가드 전수·introducer 삭제 정책·review payload 보존 (Slice 3, H-1·H-2·H-4·H-5·H-6)
+
+- **결정**: (1) **가드 전수 원칙** — authenticated가 실행 가능한 모든 SECURITY DEFINER RPC는 예외 없이 `private.assert_active_account`를 지난다(0037). 예외는 anon 표면(get_ai_disclosure_revision 등)과 service-role 전용 함수(reserve/reconcile — target_user 검사로 커버)뿐이며 인벤토리 표로 기록한다. (2) **Introducer 삭제는 프라이버시 우선**: 본인이 녹음한 voice는 개인 데이터로 보고 삭제하며, voice를 잃은 published/paused campaign은 archived로 전이한다(Introducer 원본 음성이 감정적 중심이라는 제품 경계 §8 — 음성 없는 피치를 계속 공개하지 않는다). Dater 소유 데이터는 보존. (3) **purchase_event_reviews payload**: resolved 후 90일 경과 시 PII scrub(요약 유지), open review는 운영 필요로 보존. (4) **H-4**: raw consent token은 승인/거절/만료 확인 시·publish 시·계정 전환 시 로컬에서 purge, 업로드 완료 draft의 로컬 미디어 사본도 publish 후 정리. (5) **H-5**: profile-media에 owner-prefix client DELETE policy를 열고 웹 Remove/rollback이 storage object를 실제 삭제(orphan cleanup은 잔여 안전망으로 강등). pitch-media는 client DELETE 불허 유지. (6) **H-6**: 정기 ops는 GitHub Actions cron(`scheduled-ops.yml`)을 표준 실행 경로로 하되, 시크릿 등록 전까지 비활성임을 명시(사용자 게이트) — "자동화 완료" 주장은 시크릿 등록·실행 증적 후에만.
+- **이유**: 3차 감사 H-1(suspended/deleted의 RPC 우회 read), H-2(삭제 정책·보존 미정), H-4(bearer token 로컬 잔존), H-5(storage orphan), H-6(스케줄러 미연결).
+- **검토 대안**: introducer 삭제 시 voice 보존·재귀속(타인 소유 캠페인 유지에 유리하나 삭제권·음성 개인정보 원칙과 충돌 — 기각), campaign paused 전이(재개 시 음성 부재 상태 노출 — archived 채택), review payload 무기한 보존(분쟁 대응에 유리하나 PII 최소화 원칙 위반 — 90일 채택).
+- **영향**: audit3 c05가 가드 매트릭스·삭제 시나리오·scrub·DELETE policy를 회귀로 고정. PRIVACY_DATA_MAP·OPS 갱신 대상.

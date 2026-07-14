@@ -10,9 +10,19 @@ import {
   type PitchRelationship,
   type PitchReview,
 } from './types';
-import { purgeInvitationContact } from './draftStorage';
+import {
+  isConsentConcludedStatus,
+  purgeConsentToken,
+  purgeUploadedMedia,
+  purgeableMediaUris,
+  purgeInvitationContact,
+} from './draftStorage';
+import { deleteLocalMediaFile } from './mediaFiles';
 
 const STORAGE_KEY = '@friendword/pitch-drafts';
+
+/** What a {@link PitchDraftService.purgeSensitiveDraftData} call clears. */
+export type PurgeScope = 'consent' | 'publish';
 
 export type PitchDraftStorage = {
   getItem(key: string): Promise<string | null>;
@@ -30,6 +40,8 @@ export interface PitchDraftService {
   saveReview(id: PitchDraftId, review: PitchReview): Promise<PitchDraft>;
   finalizeConsent(id: PitchDraftId): Promise<PitchDraft>;
   purgeInvitationContact(id: PitchDraftId): Promise<PitchDraft>;
+  purgeSensitiveDraftData(id: PitchDraftId, scope: PurgeScope): Promise<PitchDraft>;
+  purgeAllConsentTokens(): Promise<number>;
   getMyDrafts(): Promise<readonly PitchDraft[]>;
 }
 
@@ -61,7 +73,10 @@ export class PitchDraftSubmissionError extends Error {
 export class MockPitchDraftService implements PitchDraftService {
   private pending: Promise<void> = Promise.resolve();
 
-  constructor(private readonly storage: PitchDraftStorage = AsyncStorage) {}
+  constructor(
+    private readonly storage: PitchDraftStorage = AsyncStorage,
+    private readonly deleteMediaFile: (uri: string) => Promise<void> = deleteLocalMediaFile,
+  ) {}
 
   async createDraft(): Promise<PitchDraft> {
     return this.runExclusive(async () => {
@@ -186,13 +201,14 @@ export class MockPitchDraftService implements PitchDraftService {
     id: PitchDraftId,
     state: Pick<PitchDraft, 'status' | 'review'> & Partial<Pick<PitchDraft, 'updatedAt'>>,
   ): Promise<PitchDraft> {
-    return this.runExclusive(async () => {
+    const orphanedUris: string[] = [];
+    const synced = await this.runExclusive(async () => {
       const drafts = await this.readDrafts();
       const current = drafts.find((draft) => draft.id === id);
       if (current === undefined) {
         throw new PitchDraftNotFoundError(id);
       }
-      const synced = PitchDraftListSchema.element.parse({
+      let next = PitchDraftListSchema.element.parse({
         ...current,
         ...state,
         updatedAt:
@@ -200,9 +216,71 @@ export class MockPitchDraftService implements PitchDraftService {
             ? current.updatedAt
             : state.updatedAt,
       });
-      await this.writeDrafts(drafts.map((draft) => (draft.id === id ? synced : draft)));
-      return synced;
+      // Observing a concluded consent request is the moment the bearer token
+      // stops being useful — drop it. Once published, the server holds the
+      // media originals, so the uploaded local copies go too.
+      if (isConsentConcludedStatus(next.status)) {
+        next = purgeConsentToken(next);
+        if (next.status === 'published') {
+          orphanedUris.push(...purgeableMediaUris(next));
+          next = purgeUploadedMedia(next);
+        }
+      }
+      await this.writeDrafts(drafts.map((draft) => (draft.id === id ? next : draft)));
+      return next;
     });
+    await this.deleteMediaFiles(orphanedUris);
+    return synced;
+  }
+
+  /**
+   * Single entry point for clearing sensitive local state once a draft reaches
+   * a terminal point. `'consent'` drops just the bearer token; `'publish'`
+   * additionally clears the uploaded on-device media and deletes those files.
+   */
+  async purgeSensitiveDraftData(id: PitchDraftId, scope: PurgeScope): Promise<PitchDraft> {
+    const orphanedUris: string[] = [];
+    const result = await this.updateDraft(id, (draft) => {
+      let next = purgeConsentToken(draft);
+      if (scope === 'publish') {
+        orphanedUris.push(...purgeableMediaUris(next));
+        next = purgeUploadedMedia(next);
+      }
+      return next;
+    });
+    await this.deleteMediaFiles(orphanedUris);
+    return result;
+  }
+
+  /**
+   * Strips the raw consent token from every stored draft. Called on sign-out
+   * and account switch so a shared device never leaves a previous user's bearer
+   * secrets behind. Local media is intentionally left in place — draft
+   * ownership across an account switch is ambiguous, so only the token goes.
+   * Returns the number of drafts that still held a token.
+   */
+  async purgeAllConsentTokens(): Promise<number> {
+    return this.runExclusive(async () => {
+      const drafts = await this.readDrafts();
+      let removed = 0;
+      const next = drafts.map((draft) => {
+        if (draft.server === null || draft.server.consentToken === null) {
+          return draft;
+        }
+        removed += 1;
+        return purgeConsentToken(draft);
+      });
+      if (removed > 0) {
+        await this.writeDrafts(next);
+      }
+      return removed;
+    });
+  }
+
+  private async deleteMediaFiles(uris: readonly string[]): Promise<void> {
+    for (const uri of uris) {
+      await this.deleteMediaFile(uri);
+    }
   }
 
   async restoreServerDraft(draft: PitchDraft): Promise<PitchDraft> {

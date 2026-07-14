@@ -23,6 +23,7 @@ import {
 } from '@/lib/aiConsent';
 import { EmailSignIn } from '@/components/EmailSignIn';
 import { requestTextModeration } from '@/lib/moderateText';
+import { removeOwnProfilePhotos } from '@/lib/profileMedia';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { useSession } from '@/lib/useSession';
 
@@ -35,7 +36,6 @@ const DATING_INTENTS = [
 ] as const;
 
 const MAX_PROFILE_PHOTOS = 6;
-const PROFILE_MEDIA_BUCKET = 'profile-media';
 
 type InterestFlowProps = {
   readonly campaignId: string;
@@ -46,31 +46,16 @@ type InterestFlowProps = {
 type UploadedPhoto = {
   readonly storagePath: string;
   readonly previewUrl: string;
+  /**
+   * True only for objects uploaded during THIS session. Removing such a photo
+   * deletes its storage object immediately (it is not yet referenced by a saved
+   * profile). Prefilled photos (false) are still referenced by the saved
+   * dating_profiles.photos, so they are unreferenced by re-submitting and swept
+   * later by orphan cleanup — deleting them on Remove would break the saved
+   * profile if the user never submits.
+   */
+  readonly uploadedThisSession: boolean;
 };
-
-function profilePhotoObjectName(storagePath: string): string | null {
-  const prefix = `${PROFILE_MEDIA_BUCKET}/`;
-  return storagePath.startsWith(prefix) ? storagePath.slice(prefix.length) : null;
-}
-
-async function rollbackProfilePhotoUploads(
-  client: BrowserSupabaseClient,
-  storagePaths: readonly string[],
-): Promise<boolean> {
-  const objectNames = storagePaths
-    .map(profilePhotoObjectName)
-    .filter((objectName): objectName is string => objectName !== null);
-  if (objectNames.length === 0) {
-    return true;
-  }
-
-  try {
-    const { error } = await client.storage.from(PROFILE_MEDIA_BUCKET).remove(objectNames);
-    return error === null;
-  } catch {
-    return false;
-  }
-}
 
 function errorCopy(error: unknown): string {
   const cause = error instanceof DataLayerError ? error.cause : error;
@@ -172,7 +157,7 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
           profile.photos.map((path) =>
             repo
               .createPhotoViewUrl(path)
-              .then((url) => ({ storagePath: path, previewUrl: url }))
+              .then((url) => ({ storagePath: path, previewUrl: url, uploadedThisSession: false }))
               .catch(() => null),
           ),
         );
@@ -285,24 +270,53 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
         }
         const previewUrl = URL.createObjectURL(file);
         previewUrls.push(previewUrl);
-        uploaded.push({ storagePath, previewUrl });
+        uploaded.push({ storagePath, previewUrl, uploadedThisSession: true });
       }
       setPhotos((current) => [...current, ...uploaded]);
     } catch (uploadError: unknown) {
-      const rollbackComplete = await rollbackProfilePhotoUploads(client, uploadedStoragePaths);
+      const ownerUserId = session?.user.id ?? '';
+      const rollback = await removeOwnProfilePhotos(client, uploadedStoragePaths, ownerUserId);
+      // The user flow is never blocked by a cleanup failure; a residual object
+      // is caught by the orphan-media sweep. But a persistent failure means the
+      // 0037 DELETE policy or storage is wrong, so it is logged loudly.
+      if (rollback.failed > 0) {
+        console.warn(
+          `interest rollback: removed ${rollback.removed}/${rollback.attempted} uploaded photo(s); ${rollback.failed} left for orphan cleanup`,
+        );
+      }
       for (const previewUrl of previewUrls) {
         URL.revokeObjectURL(previewUrl);
       }
-      if (!rollbackComplete) {
-        setError(
-          'The upload failed, and cleanup could not finish. Wait a moment before trying again.',
-        );
-      } else {
-        setError(uploadError instanceof Error ? uploadFailureMessage : errorCopy(uploadError));
-      }
+      setError(uploadError instanceof Error ? uploadFailureMessage : errorCopy(uploadError));
     } finally {
       setUploading(false);
     }
+  }
+
+  async function handleRemovePhoto(target: UploadedPhoto) {
+    if (client === null) {
+      return;
+    }
+    // Only objects uploaded this session are deleted here (they are not yet
+    // referenced by a saved profile). Prefilled photos are dropped from local
+    // state only — re-submitting unreferences them and orphan cleanup sweeps
+    // them; deleting a still-referenced object would break the saved profile.
+    if (target.uploadedThisSession) {
+      const ownerUserId = session?.user.id ?? '';
+      const outcome = await removeOwnProfilePhotos(client, [target.storagePath], ownerUserId);
+      if (outcome.removed === 0) {
+        // Surface, do not silently hide: keep the photo so Remove is retryable.
+        setError('We could not remove that photo. Try again in a moment.');
+        return;
+      }
+    }
+    if (target.previewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(target.previewUrl);
+    }
+    setPhotos((current) =>
+      current.filter((candidate) => candidate.storagePath !== target.storagePath),
+    );
+    setError(null);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -569,16 +583,9 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
                       <button
                         className={styles.quietAction}
                         type="button"
+                        disabled={uploading || submitting}
                         onClick={() => {
-                          if (photo.previewUrl.startsWith('blob:')) {
-                            URL.revokeObjectURL(photo.previewUrl);
-                          }
-                          setPhotos((current) =>
-                            current.filter(
-                              (candidate) => candidate.storagePath !== photo.storagePath,
-                            ),
-                          );
-                          setError(null);
+                          void handleRemovePhoto(photo);
                         }}
                       >
                         Remove photo {index + 1}

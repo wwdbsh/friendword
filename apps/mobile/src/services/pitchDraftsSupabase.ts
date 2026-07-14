@@ -17,6 +17,7 @@ import {
   MockPitchDraftService,
   PitchDraftSubmissionError,
   type PitchDraftService,
+  type PurgeScope,
 } from './pitchDrafts';
 import {
   EMPTY_PITCH_STRUCTURE,
@@ -163,6 +164,14 @@ export class HybridPitchDraftService implements PitchDraftService {
 
   purgeInvitationContact(id: PitchDraftId): Promise<PitchDraft> {
     return this.local.purgeInvitationContact(id);
+  }
+
+  purgeSensitiveDraftData(id: PitchDraftId, scope: PurgeScope): Promise<PitchDraft> {
+    return this.local.purgeSensitiveDraftData(id, scope);
+  }
+
+  purgeAllConsentTokens(): Promise<number> {
+    return this.local.purgeAllConsentTokens();
   }
 
   async getMyDrafts(): Promise<readonly PitchDraft[]> {

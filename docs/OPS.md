@@ -170,13 +170,44 @@ SELECT date_trunc('month', now()) AS month,
 
 - 긴급 차단: `UPDATE app_config SET value = 'on' WHERE key = 'provider_kill_switch';`
 
-## 정기 운영 실행 (수동 스케줄 — 자동화는 배포 환경 결정 대기)
+## 정기 운영 실행 (GitHub Actions cron — 3차 감사 H-6)
+
+표준 실행 경로는 GitHub Actions 워크플로 `.github/workflows/scheduled-ops.yml`입니다.
+매시(`cron: '0 * * * *'`) `node scripts/run-scheduled-ops.mjs`를 실행하고, Actions 탭에서
+`workflow_dispatch`로 수동 드릴도 가능합니다. 잡은 캠페인 만료 + 계정 삭제 처리 +
+orphan 미디어 **dry-run**만 수행하며, orphan 실제 삭제(`--apply`)는 아래의 검토형 수동
+드릴로 유지합니다.
+
+**시크릿 게이트(사용자 입력 필요 — 등록 전까지 워크플로는 비활성):** 잡 앞단의 preflight
+스텝이 시크릿 미설정을 감지하면 명확한 메시지로 즉시 실패해 빈 DB를 향해 실행되지
+않습니다. 아래 이름의 시크릿을 저장소 Settings → Secrets and variables → Actions에
+**사용자가 직접** 등록해야 활성화됩니다(값은 이 문서·워크플로·어떤 diff에도 남기지 않습니다).
+
+| secret 이름                                      | 용도                                           |
+| ------------------------------------------------ | ---------------------------------------------- |
+| `SUPABASE_URL` (또는 `NEXT_PUBLIC_SUPABASE_URL`) | 대상 프로젝트 URL                              |
+| `SUPABASE_SERVICE_ROLE_KEY`                      | service-role 키 — 정기 운영은 service-only이다 |
+
+수동/로컬 실행:
 
 ```bash
 node scripts/run-scheduled-ops.mjs          # 캠페인 만료 + 삭제 처리 + orphan dry-run
-node scripts/run-scheduled-ops.mjs --apply  # orphan 실제 삭제 포함
+node scripts/run-scheduled-ops.mjs --apply  # orphan 실제 삭제 포함(검토 후에만)
 node scripts/expire-campaigns.mjs           # 만료만 단독 실행
 ```
 
 - 캠페인 만료(Slice 9, 0033): `expire_due_campaigns()`는 service role 전용이며 `ends_at`이 지난 published/paused 캠페인을 `expired`로 전환한다. 공개 페이지는 `ends_at` 기준으로 이미 404이므로 잡이 늦어도 노출 사고는 없지만, inbox 상태·`campaign_expired` 이벤트·재개 차단의 일관성을 위해 최소 일 1회 실행한다. 만료된 캠페인은 재개 불가, 아카이브만 가능하다.
-- 권장 주기: 최소 일 1회. 실제 cron/스케줄러 연결은 배포 환경(호스팅·시크릿) 확정 후 설정하고 이 문서에 기록합니다. "account deletion automated"는 스케줄러가 실제로 물릴 때까지 주장하지 않습니다.
+- 권장 주기: 워크플로 기본 매시. cron cadence는 후보 수·실패율이 안정된 뒤 조정합니다.
+- **실패 시 확인 순서:** ① 시크릿 3종이 등록됐는지(preflight 실패 메시지) → ② 어떤 pass가 non-zero로 종료했는지 로그의 `scheduled ops: <label> exited …` → ③ 해당 스크립트를 로컬에서 같은 시크릿으로 단독 재실행해 재현 → ④ 계정 삭제는 `process-deletions.mjs`가 `processing` 1시간 lease로 자동 재claim하므로 재실행이 안전. orphan `--apply`는 dry-run의 `unknown_age=0`과 후보 수를 검토한 뒤에만.
+- "account deletion automated"는 위 시크릿이 실제로 등록되어 스케줄러가 물린 뒤에만 주장합니다. 미설정 상태에서는 워크플로가 preflight에서 실패하므로 자동화된 것이 아닙니다.
+
+### Interest 사진 저장소 정리 (3차 감사 H-5)
+
+웹 interest 플로우(`apps/web/.../InterestFlow.tsx`)는 이제 사진 Remove와 제출 실패
+rollback에서 **이번 세션에 업로드한** `profile-media` 객체를 실제로 삭제합니다
+(`apps/web/src/lib/profileMedia.ts`). 삭제는 호출자 owner prefix(`<user-id>/…`)로 한정되며,
+서버 측 권한은 migration 0037의 owner-prefix client DELETE policy입니다. prefill된(저장된
+프로필이 참조 중인) 사진은 Remove 시 storage에서 바로 지우지 않고 로컬에서만 내려
+재제출로 참조 해제한 뒤 orphan cleanup이 수거합니다. 즉 orphan 미디어 스윕은 **잔여
+안전망**이며, 정상 경로에서는 대부분의 객체가 즉시 정리됩니다. rollback 실패는 사용자
+플로우를 막지 않고 콘솔 경고(`interest rollback: …`)로 남으며, 남은 객체는 스윕이 처리합니다.

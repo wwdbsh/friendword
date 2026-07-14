@@ -45,12 +45,23 @@ vi.mock('../../src/services/pitchDraftsSupabase', () => ({
 vi.mock('../../src/services/supabaseClient', () => ({ getSupabaseClient: () => null }));
 
 import { PitchDraftSchema } from '../../src/services/types';
-import { canGetCampaignPass, getCampaignName, getIntroducerDraftName } from './index';
+import {
+  canGetCampaignPass,
+  getCampaignName,
+  getIntroducerDraftName,
+  isCampaignRevival,
+} from './index';
 
 describe('Dater-owned Campaign Pass surface', () => {
-  it('shows the purchase CTA only for a published campaign without an active pass', () => {
+  it('offers the pass for a live campaign or an expired campaign the owner can revive', () => {
+    // Published campaigns extend; expired campaigns revive — a paid Campaign
+    // Pass is the only revival path (DECISIONS 2026-07-14 point 2). An active
+    // pass, a paused (voluntary hold), or an archived campaign show no CTA.
     expect(
       canGetCampaignPass({ status: 'published', pass: { active: false, expiresAt: null } }),
+    ).toBe(true);
+    expect(
+      canGetCampaignPass({ status: 'expired', pass: { active: false, expiresAt: null } }),
     ).toBe(true);
     expect(
       canGetCampaignPass({ status: 'published', pass: { active: true, expiresAt: null } }),
@@ -58,6 +69,15 @@ describe('Dater-owned Campaign Pass surface', () => {
     expect(canGetCampaignPass({ status: 'paused', pass: { active: false, expiresAt: null } })).toBe(
       false,
     );
+    expect(
+      canGetCampaignPass({ status: 'archived', pass: { active: false, expiresAt: null } }),
+    ).toBe(false);
+  });
+
+  it('marks only expired campaigns as a revival so the paywall can be honest', () => {
+    expect(isCampaignRevival('expired')).toBe(true);
+    expect(isCampaignRevival('published')).toBe(false);
+    expect(isCampaignRevival('paused')).toBe(false);
   });
 
   it('uses the draft headline, then slug, for the campaign name', () => {

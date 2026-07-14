@@ -26,7 +26,11 @@ export default function PaywallScreen() {
     intent?: string | string[];
     draftId?: string | string[];
     campaignId?: string | string[];
+    revive?: string | string[];
   }>();
+  // Set by the campaigns screen only when the buyer is reviving an expired
+  // campaign, so the confirmation stays honest about the pending revival.
+  const isRevival = firstParam(params.revive) === 'true';
   const productIntent = useMemo(
     () =>
       parseProductIntentParams({
@@ -151,11 +155,7 @@ export default function PaywallScreen() {
     return (
       <FlowMessage
         title="Purchase confirmed"
-        body={
-          productIntent.intent === 'creator_launch'
-            ? 'Open this pitch’s Creator Kit to unlock its 9:16 share card and caption pack.'
-            : 'Campaign Pass added 30 days and unlocked campaign funnel analytics.'
-        }
+        body={getConfirmedBody(productIntent, isRevival)}
         onBack={() => router.back()}
       />
     );
@@ -289,6 +289,24 @@ function FlowMessage({
       </View>
     </SafeAreaView>
   );
+}
+
+export function getConfirmedBody(intent: ProductIntent, revive: boolean): string {
+  if (intent.intent === 'creator_launch') {
+    return 'Open this pitch’s Creator Kit to unlock its 9:16 share card and caption pack.';
+  }
+  if (revive) {
+    // Honest revival copy: the entitlement is recorded and the campaign is
+    // being revived, but during the private beta the revival can be pending
+    // review before it goes live again (DECISIONS 2026-07-14 point 2). We do
+    // not claim funnel analytics are live yet.
+    return 'Your Campaign Pass is recorded and this campaign is being revived with 30 more days from purchase. During our private beta, the revival can stay pending review for a short while before it is live again — you keep the days you paid for.';
+  }
+  return 'Campaign Pass added 30 days and unlocked campaign funnel analytics.';
+}
+
+function firstParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 function getPaywallCopy(intent: ProductIntent): {

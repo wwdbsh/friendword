@@ -114,13 +114,16 @@ INSERT INTO purchase_intents (
   status,
   expires_at
 )
+-- 0038 enforces one issued intent per scope, so this stale intent (used to
+-- prove the webhook parks a lapsed-intent purchase for review) is seeded as
+-- 'expired' rather than a second issued row for the live creator_intent scope.
 VALUES (
   '14000000-0000-0000-0000-000000000001',
   '00000000-0000-0000-0000-000000000004',
   'creator_launch_credit_499',
   'PITCH_DRAFT',
   '10000000-0000-0000-0000-000000000002',
-  'issued',
+  'expired',
   now() - INTERVAL '1 second'
 );
 
@@ -639,10 +642,13 @@ BEGIN
     'commerce-pass-tx',
     'commerce-pass-original'
   ));
+  -- 0038 (third audit P0-6): a pass now STACKS 30 days on top of the
+  -- remaining window instead of taking max(window, 30d). The campaign had a
+  -- 14-day window left, so the paid window becomes 14 + 30 = 44 days.
   SELECT extract(epoch FROM (ends_at - now())) / 86400 INTO actual_days
     FROM campaigns
    WHERE id = '20000000-0000-0000-0000-000000000001';
-  IF actual_days < 29.99 OR actual_days > 30.01
+  IF actual_days < 43.99 OR actual_days > 44.01
      OR pass_result #>> '{benefit,kind}' <> 'campaign_pass'
      OR NOT EXISTS (
        SELECT 1
@@ -651,7 +657,7 @@ BEGIN
           AND product_id = 'campaign_30d_1999'
           AND active
      ) THEN
-    RAISE EXCEPTION 'campaign pass did not extend and activate the entitlement for 30 days';
+    RAISE EXCEPTION 'campaign pass did not stack 30d onto the remaining window';
   END IF;
 
   PERFORM record_revenuecat_event(pg_temp.revenuecat_payload(
@@ -900,6 +906,10 @@ INSERT INTO purchase_intents (
   status,
   expires_at
 )
+-- 0038 allows only one issued intent per scope. These two intents seed two
+-- separate pass lineages (c and d) for the refund/renewal lineage tests
+-- below; the webhook attributes a purchase to a consumed intent just as well,
+-- so they are seeded 'consumed' to avoid colliding on the live scope slot.
 VALUES
   (
     '14000000-0000-0000-0000-000000000040',
@@ -907,7 +917,7 @@ VALUES
     'campaign_30d_1999',
     'CAMPAIGN',
     '20000000-0000-0000-0000-000000000001',
-    'issued',
+    'consumed',
     now() + INTERVAL '1 hour'
   ),
   (
@@ -916,7 +926,7 @@ VALUES
     'campaign_30d_1999',
     'CAMPAIGN',
     '20000000-0000-0000-0000-000000000001',
-    'issued',
+    'consumed',
     now() + INTERVAL '1 hour'
   );
 

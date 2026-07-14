@@ -131,6 +131,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'not configured' }, { status: 501 });
   }
 
+  // The record RPC takes a single jsonb `payload`; alias attribution is derived
+  // DB-side from `payload.aliases` (0038), keeping the payload the one source of
+  // truth so the route cannot pass a divergent alias set (audit P0-3).
   const { data, error } = await serviceClient.rpc('record_revenuecat_event', { payload });
   if (error !== null) {
     // Every RPC failure is retryable from RevenueCat's point of view:

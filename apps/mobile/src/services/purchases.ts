@@ -160,24 +160,32 @@ async function runFlow(
   const dependencies = options.dependencies ?? createProductionDependencies();
   const productId = getProductId(intent);
   const scopeId = intent.intent === 'creator_launch' ? intent.draftId : intent.campaignId;
-  await dependencies.ensureIdentity();
-  throwIfAborted(options.signal);
-  const purchaseIntentId = await dependencies.issueIntent(productId, scopeId);
-  throwIfAborted(options.signal);
-
-  await dependencies.setAttributes({
-    purchase_intent_id: purchaseIntentId,
+  const scopedContext = {
     pitch_draft_id: intent.intent === 'creator_launch' ? intent.draftId : null,
     campaign_id: intent.intent === 'campaign_pass' ? intent.campaignId : null,
-  });
+  } as const;
+
+  await dependencies.ensureIdentity();
   throwIfAborted(options.signal);
 
   if (operation === 'purchase') {
+    // A purchase mints a fresh purchase intent and stamps it so the webhook
+    // can attribute the transaction back to this buyer, scope, and draft.
+    const purchaseIntentId = await dependencies.issueIntent(productId, scopeId);
+    throwIfAborted(options.signal);
+    await dependencies.setAttributes({ purchase_intent_id: purchaseIntentId, ...scopedContext });
+    throwIfAborted(options.signal);
     if (packageIdentifier === null) {
       throw new Error('package identifier is required for purchase');
     }
     await dependencies.purchase(packageIdentifier, productId);
   } else {
+    // Restore recovers an already-owned purchase, so it must NOT issue a new
+    // intent (that step blocks restore whenever an active benefit already
+    // exists — audit P0-6 / DECISIONS 2026-07-14 point 3). Identity is still
+    // guaranteed and scoped context may be sent, but never purchase_intent_id.
+    await dependencies.setAttributes({ ...scopedContext });
+    throwIfAborted(options.signal);
     await dependencies.restore();
   }
   throwIfAborted(options.signal);

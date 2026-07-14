@@ -75,7 +75,13 @@ vi.mock('./purchases', () => ({
 vi.mock('./supabaseClient', () => ({ getSupabaseClient: () => null }));
 vi.mock('./webOrigin', () => ({ getWebOrigin: () => 'https://friendword.example' }));
 
-import PaywallScreen, { getExistingBenefitFromRejection } from '../../app/paywall';
+import PaywallScreen, {
+  getConfirmedBody,
+  getExistingBenefitFromRejection,
+} from '../../app/paywall';
+
+const CAMPAIGN_ID = '20000000-0000-4000-8000-000000000002';
+const DRAFT_ID = '10000000-0000-4000-8000-000000000001';
 
 describe('PaywallScreen', () => {
   it('shows an error and no catalog when product intent is missing', () => {
@@ -100,9 +106,27 @@ describe('PaywallScreen', () => {
     ).toBe('creator_kit');
     expect(
       getExistingBenefitFromRejection(
-        { intent: 'campaign_pass', campaignId: '20000000-0000-4000-8000-000000000002' },
+        { intent: 'campaign_pass', campaignId: CAMPAIGN_ID },
         new Error('already has an active Campaign Pass'),
       ),
     ).toBe('campaign_pass');
+  });
+
+  it('tells a reviving buyer the campaign is coming back instead of promising live analytics', () => {
+    const revive = getConfirmedBody({ intent: 'campaign_pass', campaignId: CAMPAIGN_ID }, true);
+    // Honest revival copy: entitlement recorded, campaign coming back, and the
+    // private-beta pending caveat — never a flat "analytics are live" claim.
+    expect(revive.toLowerCase()).toContain('revive');
+    expect(revive.toLowerCase()).toMatch(/pending|shortly|beta|review/);
+    expect(revive).not.toContain('unlocked campaign funnel analytics.');
+  });
+
+  it('keeps the direct confirmation copy for a normal (non-revival) purchase', () => {
+    expect(getConfirmedBody({ intent: 'campaign_pass', campaignId: CAMPAIGN_ID }, false)).toContain(
+      'unlocked campaign funnel analytics',
+    );
+    expect(getConfirmedBody({ intent: 'creator_launch', draftId: DRAFT_ID }, false)).toContain(
+      'Creator Kit',
+    );
   });
 });

@@ -201,3 +201,16 @@
 - **이유**: 3차 감사 H-1(suspended/deleted의 RPC 우회 read), H-2(삭제 정책·보존 미정), H-4(bearer token 로컬 잔존), H-5(storage orphan), H-6(스케줄러 미연결).
 - **검토 대안**: introducer 삭제 시 voice 보존·재귀속(타인 소유 캠페인 유지에 유리하나 삭제권·음성 개인정보 원칙과 충돌 — 기각), campaign paused 전이(재개 시 음성 부재 상태 노출 — archived 채택), review payload 무기한 보존(분쟁 대응에 유리하나 PII 최소화 원칙 위반 — 90일 채택).
 - **영향**: audit3 c05가 가드 매트릭스·삭제 시나리오·scrub·DELETE policy를 회귀로 고정. PRIVACY_DATA_MAP·OPS 갱신 대상.
+
+## 2026-07-14: Commerce 상태기계 확정 — Pass 재구매·연장·restore·alias·refund 계약 (Slice 4, P0-3·P0-5·P0-6)
+
+- **결정**: (1) **Intent 동시성**: `purchase_intents`에 (user, product, scope) partial unique(issued) + `issue_purchase_intent` advisory lock — double-tap은 기존 intent 재사용. (2) **Campaign Pass 상태기계** — 2026-07-13 "만료 후 재개 불가" 결정을 명시적으로 개정한다: **무료 resume 불가는 유지**하되, **유료 Campaign Pass 구매가 expired 캠페인의 유일한 재개 경로**가 된다. "30일 추가"는 `GREATEST(now, ends_at) + 30일`로 확정(active면 잔여기간 뒤에 추가, lapse면 구매 시점부터 — scheduler 지연과 무관하게 동일). grant 시 expired→published 전이는 0034 public-beta 게이트의 지배를 받는다: 비공개 베타 중에는 entitlement는 기록하되 revival은 review 큐('revival_blocked_by_beta_gate')로 보류하고 게이트 해제 후 반영한다(돈을 받았으면 벤핏 기록이 유실되지 않아야 한다). paused 캠페인의 grant는 창만 연장하고 paused를 유지(자발적 중지 존중). (3) **Restore는 intent 무발급**: restore는 기존 구매의 복원이므로 클라이언트가 새 purchase intent를 만들지 않는다(이 결함이 active benefit 존재 시 restore를 막고 있었다). (4) **Alias 귀속**: 웹훅 벤핏 owner resolution은 raw_app_user_id 실패 시 aliases 배열로 귀속한다. TRANSFER는 service-role `resolve_purchase_event_review(reassign/dismiss)`로 운영 종결하며 OPS 런북에 절차를 기록한다. (5) **Refund/consumed kit**: refund는 available/reserved credit을 회수하지만 **consumed credit으로 이미 생성된 Creator kit은 회수하지 않는다**(전달 완료된 소모성 디지털 재화; 반복 refund는 운영 review 신호).
+- **이유**: 3차 감사 P0-5(intent 동시성·refund 계약 불명), P0-6(상태기계 모순·restore 차단·"30일"의 이중 해석), P0-3(alias 미사용·transfer 도구 부재).
+- **검토 대안**: 만료 즉시 삭제/영구 종결(문서의 재구매 약속과 충돌 — 기각), "30일"을 항상 구매 시점 기준(active 사용자의 잔여 가치 소멸 — 기각), restore에도 intent(이중 발급·차단 재현 — 기각), TRANSFER 자동 재귀속(소유권 분쟁 자동화 위험 — 운영 도구 채택).
+- **영향**: audit3 c06이 계약을 회귀로 고정. FRIENDWORD_HANDOFF 원 계약과의 차이는 이 문서가 canonical. REVENUECAT_SETUP·OPS 갱신 대상. sandbox 실왕복(purchase→restore→refund→transfer)은 사용자 게이트로 잔존.
+
+## 2026-07-14: Slice 4 구현 확정 — record RPC는 payload 단일 시그니처 (계약 개정)
+
+- **결정**: `record_revenuecat_event(payload JSONB)` 단일 시그니처를 유지하고 alias는 서버가 `payload->'aliases'`에서 파생한다. 별도 `event_aliases TEXT[]` 파라미터(초기 계약안)는 채택하지 않는다 — 라우트가 payload와 다른 배열을 넘겨 어긋날 수 있는 경로를 없애는 서버 권위 원칙. 웹 라우트 테스트가 "별도 파라미터를 넘기지 않음"까지 회귀로 고정.
+- **이유**: 병렬 워커 간 계약 불일치를 Advisor 통합 검증에서 발견(mock 스파이 테스트는 실제 PostgREST 시그니처 해석을 검증하지 못함) — 단일 소스 계약으로 수렴.
+- **영향**: 이 유형(신규 RPC의 라우트-DB 시그니처)은 향후 mock-free 검증(e2e 또는 hosted 드릴)을 acceptance에 포함한다.

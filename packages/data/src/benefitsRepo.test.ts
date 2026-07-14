@@ -20,8 +20,10 @@ import { createBrowserClient } from './client';
 const USER_ID = '00000000-0000-4000-8000-000000000001';
 const PUBLISHED_ID = '10000000-0000-4000-8000-000000000001';
 const PAUSED_ID = '20000000-0000-4000-8000-000000000002';
+const EXPIRED_ID = '50000000-0000-4000-8000-000000000005';
 const PUBLISHED_DRAFT_ID = '30000000-0000-4000-8000-000000000003';
 const PAUSED_DRAFT_ID = '40000000-0000-4000-8000-000000000004';
+const EXPIRED_DRAFT_ID = '60000000-0000-4000-8000-000000000006';
 
 describe('BenefitsRepo owned campaigns', () => {
   beforeEach(() => {
@@ -53,6 +55,12 @@ describe('BenefitsRepo owned campaigns', () => {
           slug: 'paused-intro',
           status: 'paused',
         },
+        {
+          id: EXPIRED_ID,
+          pitch_draft_id: EXPIRED_DRAFT_ID,
+          slug: 'lapsed-intro',
+          status: 'expired',
+        },
       ],
       error: null,
     });
@@ -61,6 +69,7 @@ describe('BenefitsRepo owned campaigns', () => {
       data: [
         { id: PUBLISHED_DRAFT_ID, headline: 'Summer intro' },
         { id: PAUSED_DRAFT_ID, headline: null },
+        { id: EXPIRED_DRAFT_ID, headline: 'Lapsed intro' },
       ],
       error: null,
     });
@@ -74,7 +83,10 @@ describe('BenefitsRepo owned campaigns', () => {
     }));
   });
 
-  it('loads only published or paused campaigns owned by the signed-in dater with pass state', async () => {
+  it('surfaces published, paused, and expired campaigns owned by the dater with pass state', async () => {
+    // Expired campaigns are surfaced so the owner can revive them with a paid
+    // Campaign Pass (the only revival path — DECISIONS 2026-07-14 point 2).
+    // archived stays excluded: the DB refuses to grant a pass to it.
     const repo = new BenefitsRepo(createBrowserClient('https://project.example', 'anon-key'));
 
     await expect(repo.listMyOwnedCampaigns()).resolves.toEqual([
@@ -94,9 +106,17 @@ describe('BenefitsRepo owned campaigns', () => {
         status: 'paused',
         pass: { active: true, expiresAt: '2026-08-12T00:00:00Z' },
       },
+      {
+        id: EXPIRED_ID,
+        pitchDraftId: EXPIRED_DRAFT_ID,
+        slug: 'lapsed-intro',
+        headline: 'Lapsed intro',
+        status: 'expired',
+        pass: { active: false, expiresAt: null },
+      },
     ]);
     expect(mocks.campaignsEq).toHaveBeenCalledWith('owner_user_id', USER_ID);
-    expect(mocks.campaignsIn).toHaveBeenCalledWith('status', ['published', 'paused']);
-    expect(mocks.rpc).toHaveBeenCalledTimes(2);
+    expect(mocks.campaignsIn).toHaveBeenCalledWith('status', ['published', 'paused', 'expired']);
+    expect(mocks.rpc).toHaveBeenCalledTimes(3);
   });
 });

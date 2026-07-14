@@ -161,18 +161,35 @@ describe('purchase confirmation sequence', () => {
     expect(now).toBe(2_000);
   });
 
-  it('uses the same intent and benefit confirmation path after restore', async () => {
-    const issueIntent = vi.fn().mockResolvedValue('restore-intent-id');
-    const setAttributes = vi.fn().mockResolvedValue(undefined);
-    const restore = vi.fn().mockResolvedValue(undefined);
-    const onAwaitingConfirmation = vi.fn();
+  it('restores without issuing a new intent, then confirms the existing benefit', async () => {
+    // Restore is the recovery of an already-owned purchase. Issuing a fresh
+    // purchase intent here blocks restore whenever an active benefit already
+    // exists (audit P0-6 / DECISIONS 2026-07-14 point 3), so the restore path
+    // must skip issueIntent entirely and never stamp purchase_intent_id.
+    const events: string[] = [];
+    const issueIntent = vi.fn(async () => {
+      events.push('intent');
+      return 'must-not-be-issued';
+    });
+    const setAttributes = vi.fn(async (attributes: Readonly<Record<string, string | null>>) => {
+      events.push(`attributes:${JSON.stringify(attributes)}`);
+    });
+    const restore = vi.fn(async () => {
+      events.push('restore');
+    });
+    const onAwaitingConfirmation = vi.fn(() => events.push('pending'));
     const dependencies: PurchaseFlowDependencies = {
-      ensureIdentity: vi.fn().mockResolvedValue(undefined),
+      ensureIdentity: vi.fn(async () => {
+        events.push('identity');
+      }),
       issueIntent,
       setAttributes,
       purchase: vi.fn().mockResolvedValue(undefined),
       restore,
-      hasConfirmedBenefit: vi.fn().mockResolvedValue(true),
+      hasConfirmedBenefit: vi.fn(async () => {
+        events.push('benefit');
+        return true;
+      }),
       wait: vi.fn().mockResolvedValue(undefined),
       now: () => 0,
     };
@@ -187,12 +204,19 @@ describe('purchase confirmation sequence', () => {
         },
       ),
     ).resolves.toBe('confirmed');
-    expect(issueIntent).toHaveBeenCalledWith('campaign_30d_1999', CAMPAIGN_ID);
-    expect(setAttributes).toHaveBeenCalledWith({
-      purchase_intent_id: 'restore-intent-id',
-      pitch_draft_id: null,
-      campaign_id: CAMPAIGN_ID,
-    });
+
+    // Identity is still guaranteed, but no intent is issued and no
+    // purchase_intent_id attribute is set; scoped context may still be sent.
+    expect(events).toEqual([
+      'identity',
+      `attributes:${JSON.stringify({ pitch_draft_id: null, campaign_id: CAMPAIGN_ID })}`,
+      'restore',
+      'pending',
+      'benefit',
+    ]);
+    expect(issueIntent).not.toHaveBeenCalled();
+    expect(setAttributes).toHaveBeenCalledOnce();
+    expect(setAttributes.mock.calls[0]?.[0]).not.toHaveProperty('purchase_intent_id');
     expect(restore).toHaveBeenCalledOnce();
     expect(onAwaitingConfirmation).toHaveBeenCalledOnce();
   });

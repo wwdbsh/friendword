@@ -134,6 +134,21 @@ node scripts/cleanup-orphan-media.mjs --apply
 실패하면 삭제 단계에 진입하지 않습니다. 초기에는 매일 1회 실행하고, 후보 수와 실패율이
 안정된 뒤 주기를 조정합니다.
 
+## RevenueCat review resolve (0038 이후)
+
+TRANSFER 등 자동 귀속 불가 이벤트는 `purchase_event_reviews`에 open으로 남습니다. 운영 종결은 service-role 전용 RPC로만 합니다:
+
+```sql
+-- 벤핏(user-scoped creator credit)을 대상 사용자로 재귀속
+SELECT resolve_purchase_event_review('<review_id>', 'reassign', '<target_user_id>');
+-- 조치 없이 종결(사유는 resolution_note에 남음)
+SELECT resolve_purchase_event_review('<review_id>', 'dismiss');
+```
+
+- 이미 resolved인 review는 재실행이 거부됩니다(idempotent 가드). `resolved_at`/`resolved_by='service'` 기록.
+- Campaign Pass(campaign-scoped entitlement)는 사용자 이동 대상이 아니라 refresh만 수행됩니다 — 소유권 분쟁은 수동 판단 후 reassign은 credit에만.
+- resolved 후 90일이 지난 payload는 정기 ops의 PII scrub 대상입니다(위 scheduled-ops 참조).
+
 ## RevenueCat review 큐 (0027 이후)
 
 자동 귀속되지 못한 결제 이벤트는 버려지지 않고 `purchase_event_reviews`에 남습니다.

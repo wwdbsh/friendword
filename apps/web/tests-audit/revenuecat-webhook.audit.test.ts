@@ -203,6 +203,45 @@ describe('RevenueCat webhook audit contract', () => {
     });
   });
 
+  // Audit P0-3 alias attribution: aliases must reach the DB inside the single
+  // jsonb payload (the record RPC takes only `payload`; owner resolution is
+  // derived DB-side from payload.aliases — 0038), never as a divergent set.
+  it('[P0-3] carries event aliases inside the record payload for owner resolution', async () => {
+    // Given
+    const fake = createAuditSupabaseFake();
+    mocks.getSupabaseServiceClient.mockReturnValue(fake.client);
+
+    // When
+    await POST(
+      requestFor(eventFixture({ aliases: ['anon-device-user', '$RCAnonymousID:abc123'] })),
+    );
+
+    // Then — exactly one single-parameter RPC call whose payload holds the aliases.
+    expect(fake.calls).toHaveLength(1);
+    const params = fake.calls[0]?.params as {
+      readonly payload?: { readonly aliases?: unknown };
+      readonly event_aliases?: unknown;
+    };
+    expect(params.payload?.aliases).toEqual(['anon-device-user', '$RCAnonymousID:abc123']);
+    // The route must not smuggle a second, divergable alias parameter.
+    expect(params.event_aliases).toBeUndefined();
+  });
+
+  // An event without aliases still carries an explicit empty array in the
+  // payload so the DB never has to distinguish "missing" from "none".
+  it('[P0-3] carries an empty alias array in the payload when RevenueCat sends none', async () => {
+    // Given
+    const fake = createAuditSupabaseFake();
+    mocks.getSupabaseServiceClient.mockReturnValue(fake.client);
+
+    // When
+    await POST(requestFor(eventFixture()));
+
+    // Then
+    const params = fake.calls[0]?.params as { readonly payload?: { readonly aliases?: unknown } };
+    expect(params.payload?.aliases).toEqual([]);
+  });
+
   // Audit P0-4e: cancelling a Creator purchase revokes an available credit.
   it('[P0-4e] refunds an available Creator credit on cancellation', async () => {
     // Given

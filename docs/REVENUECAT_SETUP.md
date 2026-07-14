@@ -52,7 +52,7 @@ npx expo run:ios   # 또는 EAS: eas build --profile development --platform ios
 ## 현재 상태 경고 (2026-07-13, 2차 감사)
 
 - **실결제는 launch gate(0023)로 서버에서 차단되어 있습니다.** `real_payments_enabled=off`인 동안 purchase intent 발급 자체가 거부되고 PRODUCTION 이벤트는 효익을 만들지 않습니다. 해제는 2차 감사 §7 Slice 10 release gate 통과 후입니다.
-- 2차 감사가 확인한 **미해소 코드 결함**(키 입력만으로 해결되지 않음): 웹훅이 실제 RevenueCat 이벤트 계약(TRANSFER/lifecycle의 선택 필드)과 불일치(P0-3), 모바일 SDK가 auth 전환 시 `logIn`/`logOut`을 호출하지 않음(P0-4), Creator Launch 재구매 trap(P0-5), Campaign Pass 정상 구매 진입 부재(P0-6). Slice 3~4에서 수정 예정이며, 그 전까지 "RevenueCat complete"/"real payments ready" 표현을 어떤 문서에도 쓰지 않습니다.
+- 3차 감사 Slice 4(2026-07-14, migration 0038)에서 확정된 계약: (a) purchase intent는 (user, product, scope)당 issued 1개 — 동시 double-tap은 기존 intent 재사용, (b) Campaign Pass "30일"은 `GREATEST(now, ends_at) + 30일`(active면 잔여 뒤 적층, lapse면 지금부터) — scheduler 지연과 무관, (c) expired 캠페인은 Pass 구매로만 부활(public beta gate off 동안은 entitlement 기록 + `revival_blocked_by_beta_gate` review 보류), (d) **restore는 새 purchase intent를 발급하지 않음**, (e) alias 귀속은 payload.aliases로 서버가 파생, TRANSFER는 `resolve_purchase_event_review`로 운영 종결(OPS 참조), (f) refund는 available/reserved credit만 회수 — 이미 생성된 kit은 회수하지 않음.
 - sandbox 실검증(구매→restore→refund→transfer)은 Slice 3 코드 수정 + 사용자 대시보드 셋업 + dev build 이후에만 수행 가능합니다.
 
 ## Slice 3 갱신 (2026-07-13)

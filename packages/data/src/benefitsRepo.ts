@@ -6,12 +6,17 @@ export type CampaignPassState = {
   readonly expiresAt: string | null;
 };
 
+// `expired` is surfaced so the owner can revive a lapsed campaign with a paid
+// Campaign Pass — the only revival path (DECISIONS 2026-07-14 point 2).
+// `archived` is intentionally absent: the DB refuses to grant a pass to it.
+export type OwnedCampaignPassStatus = 'published' | 'paused' | 'expired';
+
 export type OwnedCampaignBenefit = {
   readonly id: string;
   readonly pitchDraftId: string;
   readonly slug: string | null;
   readonly headline: string | null;
-  readonly status: 'published' | 'paused';
+  readonly status: OwnedCampaignPassStatus;
   readonly pass: CampaignPassState;
 };
 
@@ -72,7 +77,7 @@ export class BenefitsRepo {
       .from('campaigns')
       .select('id, pitch_draft_id, slug, status')
       .eq('owner_user_id', authData.session.user.id)
-      .in('status', ['published', 'paused'])
+      .in('status', ['published', 'paused', 'expired'])
       .order('updated_at', { ascending: false });
     if (campaignsError !== null) {
       throw new DataLayerError('benefits.ownedCampaigns', campaignsError);
@@ -157,6 +162,8 @@ export class BenefitsRepo {
 
 function isPassSurfaceCampaign<T extends { readonly status: string }>(
   campaign: T,
-): campaign is T & { readonly status: 'published' | 'paused' } {
-  return campaign.status === 'published' || campaign.status === 'paused';
+): campaign is T & { readonly status: OwnedCampaignPassStatus } {
+  return (
+    campaign.status === 'published' || campaign.status === 'paused' || campaign.status === 'expired'
+  );
 }

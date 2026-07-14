@@ -13,10 +13,30 @@ import type { PitchDraft } from '../../src/services/types';
 
 type OwnedCampaignLoadState = 'loading' | 'ready' | 'signed_out' | 'error';
 
-export function canGetCampaignPass(
-  campaign: Pick<OwnedCampaignBenefit, 'status' | 'pass'>,
-): boolean {
-  return campaign.status === 'published' && !campaign.pass.active;
+// The owned-campaign feed may surface statuses the Pass CTA reasons about even
+// before the data layer's row type is widened, so eligibility is checked
+// against the full status space rather than only the currently-fetched subset.
+type CampaignPassStatus = OwnedCampaignBenefit['status'] | 'expired' | 'archived';
+
+export function canGetCampaignPass(campaign: {
+  readonly status: CampaignPassStatus;
+  readonly pass: OwnedCampaignBenefit['pass'];
+}): boolean {
+  if (campaign.pass.active) {
+    return false;
+  }
+  // A live campaign extends its window; an expired campaign is revived — a paid
+  // Campaign Pass is the only revival path (DECISIONS 2026-07-14 point 2).
+  // `archived` is excluded (the DB refuses to grant to it) and `paused` keeps
+  // its voluntary hold and is handled with its own message below.
+  return campaign.status === 'published' || campaign.status === 'expired';
+}
+
+// An expired campaign purchase is a revival, so the paywall must speak honestly
+// about the campaign coming back (and, during the private beta, possibly
+// pending) rather than promising live analytics.
+export function isCampaignRevival(status: CampaignPassStatus): boolean {
+  return status === 'expired';
 }
 
 export function getCampaignName(campaign: Pick<OwnedCampaignBenefit, 'headline' | 'slug'>): string {
@@ -152,6 +172,11 @@ export default function CampaignsScreen() {
               <Text style={styles.message}>
                 Resume this campaign before getting a Campaign Pass.
               </Text>
+            ) : campaign.status === 'expired' ? (
+              <Text style={styles.message}>
+                This campaign has ended. A Campaign Pass revives it with 30 days from purchase and
+                reopens its funnel analytics.
+              </Text>
             ) : (
               <Text style={styles.message}>
                 Get 30 more days and access to campaign funnel analytics.
@@ -159,11 +184,21 @@ export default function CampaignsScreen() {
             )}
             {canGetCampaignPass(campaign) ? (
               <HypeButton
-                label="Get Campaign Pass"
+                label={
+                  isCampaignRevival(campaign.status)
+                    ? 'Revive with Campaign Pass'
+                    : 'Get Campaign Pass'
+                }
                 onPress={() =>
                   router.push({
                     pathname: '/paywall',
-                    params: { intent: 'campaign_pass', campaignId: campaign.id },
+                    params: {
+                      intent: 'campaign_pass',
+                      campaignId: campaign.id,
+                      // Only the expired→revive path flags the paywall so its
+                      // confirmation copy stays honest about the pending revival.
+                      ...(isCampaignRevival(campaign.status) ? { revive: 'true' } : {}),
+                    },
                   })
                 }
                 variant="trust"
@@ -300,7 +335,16 @@ function formatStatus(status: PitchDraft['status']): string {
 }
 
 function formatCampaignStatus(status: OwnedCampaignBenefit['status']): string {
-  return status === 'published' ? 'Live' : 'Paused';
+  switch (status) {
+    case 'published':
+      return 'Live';
+    case 'paused':
+      return 'Paused';
+    case 'expired':
+      return 'Ended';
+    default:
+      return assertNever(status);
+  }
 }
 
 function formatActivePass(expiresAt: string | null): string {

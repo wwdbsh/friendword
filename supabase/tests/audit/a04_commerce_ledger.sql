@@ -69,13 +69,17 @@ VALUES
     'issued',
     now() + INTERVAL '1 hour'
   ),
+  -- 0038 permits one issued intent per scope; 102/103 are only attribution
+  -- targets for the webhook lineages below (the record RPC binds a purchase to
+  -- a consumed intent just as well), so they are seeded 'consumed' to leave
+  -- 101 as the single issued row for this draft scope.
   (
     'a0400000-0000-0000-0000-000000000102',
     '00000000-0000-0000-0000-000000000004',
     'creator_launch_credit_499',
     'PITCH_DRAFT',
     '10000000-0000-0000-0000-000000000002',
-    'issued',
+    'consumed',
     now() + INTERVAL '1 hour'
   ),
   (
@@ -84,7 +88,7 @@ VALUES
     'creator_launch_credit_499',
     'PITCH_DRAFT',
     '10000000-0000-0000-0000-000000000002',
-    'issued',
+    'consumed',
     now() + INTERVAL '1 hour'
   );
 
@@ -549,11 +553,13 @@ BEGIN
     'transaction_id', 'audit-p04-pass-transaction',
     'original_transaction_id', 'audit-p04-pass-original'
   )));
+  -- 0038 (third audit P0-6): the pass STACKS 30 days on top of the remaining
+  -- 14-day published window (14 + 30 = 44) instead of flattening it to 30.
   SELECT extract(epoch FROM (ends_at - published_at)) / 86400 INTO extended_days
     FROM campaigns
    WHERE pitch_draft_id = 'a0400000-0000-0000-0000-000000000001';
-  IF extended_days < 29.99 OR extended_days > 30.01 THEN
-    RAISE EXCEPTION 'AUDIT-P04: Campaign Pass did not extend the published campaign to 30 days';
+  IF extended_days < 43.99 OR extended_days > 44.01 THEN
+    RAISE EXCEPTION 'AUDIT-P04: Campaign Pass did not stack 30d onto the published window';
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM campaign_entitlements ce

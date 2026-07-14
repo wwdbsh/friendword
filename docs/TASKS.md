@@ -125,3 +125,13 @@
 | Advisor | 11: `0009`, `analytics.ts`, 전 표면 이벤트                                                           | —          | track_event 화이트리스트 ingest + 퍼널 이벤트, E2E 35         | 완료 (`7667cad`)                                          | 2026-07-13 |
 | Advisor | 12: `openAi.ts` 어댑터, `/api/transcribe`, `0010`(사진 제외·공개 기간), `scripts/e2e-production.mjs` | 6~9        | 실전사 파이프라인(키 게이트 501), 동의 심화, DB 10/10, E2E 39 | 완료 (`5000951`)                                          | 2026-07-13 |
 | Advisor | 10: `purchases.ts`, `/paywall`, `/api/revenuecat`, `docs/REVENUECAT_SETUP.md`                        | —          | SDK·페이월·멱등 웹훅·크레딧/엔타이틀먼트, mock 결제 경로 없음 | 코드 완료 (`2eb67e7`) — sandbox 활성화는 사용자 셋업 대기 | 2026-07-13 |
+
+## 2026-07-14 3차 감사 Slice 6·7 (goal: Slice 6~7 완주 — Advisor + Opus 워커 3명)
+
+운영 메모: 감사 §10 Slice 6·7이 범위. migration 번호 예약 — s6-demo=0040, s6-dater=0041+. `publishedPitchRepo.ts`·`ConsentFlow.tsx`·모바일 recap은 s6-dater 단독, landing·공개 피치·PitchPlayer·fixtures는 s6-demo 단독, 커머스 카피·kit·FRIENDWORD_HANDOFF/PRODUCT는 s6-truth 단독. DECISIONS/TASKS 기록은 Advisor 전담. Slice 7은 Slice 6 승인 후 착수.
+
+| Session  | Owned paths                                                                                                                                        | Dependency | Acceptance criteria                                                                                                                             | Status  | Updated    |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ---------- |
+| s6-demo  | `apps/web/src/{fixtures,pitch,components/PitchPlayer*}`, `apps/web/app/page.tsx`, `apps/web/app/p/**`, `supabase/migrations/0040`, seed 스크립트 | 없음       | GP-P0-3·CP-2: 데모 미구현 정보 0건, 실음성 seed 경로(음성 파일은 사용자 게이트), allowlist 한정 interest→inbox→room E2E, structure scene 테스트 | 진행 중 | 2026-07-14 |
+| s6-dater | `apps/web/app/consent/**`, `packages/data/src/publishedPitchRepo.ts`, `supabase/migrations/0041+`, 모바일 recap(RecordingStep 등)                 | 없음       | CP-1·CP-8: 실 output preview, Dater age/location/intent 확정, region canonical(red-first), AI path recap 제거·manual 유지, RPC 우회·RLS 회귀     | 진행 중 | 2026-07-14 |
+| s6-truth | `FRIENDWORD_HANDOFF.md`, `docs/PRODUCT.md`, `docs/COST_MODEL.md`, `apps/web/app/kit/**`·`api/kit-image`, `InboxView` Pass 카피, 모바일 커머스 카피 | 없음       | CP-5·CP-6: 계약 서술 diff 0 대조표, kit 가짜 waveform 0건, kit 승인 콘텐츠 경계 테스트, 미구현 가치 약속 0건                                     | 진행 중 | 2026-07-14 |

@@ -47,5 +47,5 @@
 
 ## LOG SUMMARY
 
-- 2026-07-13: 2차 감사 Slice 0~~10 전체 완주, audit2 14/14 CI 편입, launch gate off 유지 판정, 문서 truth reset. 커밋 `e9de0de`~~`0f9311f`.
+- 2026-07-13: 2차 감사 Slice 0–10 전체 완주, audit2 14/14 CI 편입, launch gate off 유지 판정, 문서 truth reset. 커밋 `e9de0de` → `0f9311f`.
 - 2026-07-14: 3차 감사 수령(`FRIENDWORD_THIRD_AUDIT_HANDOFF_2026-07-14.md`), 워커 체제를 Claude Opus 2~3명으로 전환, 본 핸드오프 갱신. 3차 대응은 다음 세션에서 시작.

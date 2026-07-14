@@ -1,7 +1,7 @@
 # Claude 작업 지침
 
-1. Claude(Fable 5)는 Advisor(orchestrator)이자 worker입니다. 요구사항 분석, 작업 분해, 설계 결정, 직접 구현과 최종 검증을 소유합니다.
-2. tmux Codex Worker 세션은 `friendword-codex-1`, `friendword-codex-2`, `friendword-codex-3`으로 고정합니다.
+1. Claude(Fable 5)는 Advisor(orchestrator)입니다. 요구사항 분석, 작업 분해, 설계 결정과 최종 검증을 소유하고, 구현은 원칙적으로 Worker에게 위임합니다.
+2. Worker는 **Claude Opus 워커 2~3명**을 Agent로 생성해 사용합니다(2026-07-14 전환). Codex는 더 이상 사용하지 않습니다. 동일 migration·route·핵심 UI를 여러 Worker에게 동시에 배정하지 않습니다.
 3. Worker brief에는 재탐색이 필요 없도록 `TASK`, `WHY / CONTEXT`, 정확한 경로와 소유 범위, 컨벤션, 알려진 함정, 관찰 가능한 완료 조건, 테스트 명령, manual QA 표면과 반환 형식을 포함합니다.
 4. Worker 결과는 Advisor가 diff와 호출 경로를 읽고 같은 테스트와 manual QA를 직접 재실행하기 전까지 완료가 아닙니다.
 5. 검증 실패는 오탈자·import·명백한 한두 줄 연결을 제외하고 재현 증거, 기대 결과와 검증 명령이 담긴 correction brief로 원 Worker에게 재위임합니다.

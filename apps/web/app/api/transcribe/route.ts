@@ -89,7 +89,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   const voiceVersion = voiceObjects?.[0]?.updated_at ?? 'unknown';
   const reservation = await reserveProviderUsage(
     serviceClient,
-    accessToken,
+    userData.user.id,
     'transcribe',
     `transcribe:${draftId}:${voiceVersion}`,
     3,
@@ -98,8 +98,15 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (!reservation.ok) {
     return NextResponse.json({ error: reservation.message }, { status: reservation.httpStatus });
   }
-  if (reservation.status === 'succeeded') {
-    return NextResponse.json({ error: 'this recording was already transcribed' }, { status: 409 });
+  if (!reservation.granted) {
+    if (reservation.priorStatus === 'succeeded') {
+      return NextResponse.json(
+        { error: 'this recording was already transcribed' },
+        { status: 409 },
+      );
+    }
+    // priorStatus === 'reserved': another attempt is mid-transcription.
+    return NextResponse.json({ error: 'transcription already in progress' }, { status: 409 });
   }
 
   try {
@@ -128,7 +135,13 @@ export async function POST(request: Request): Promise<NextResponse> {
       .maybeSingle();
     if (!voiceVerdict.allowed) {
       // The provider work still happened and still cost money.
-      await reconcileProviderUsage(serviceClient, reservation.reservationId, 3, 'succeeded');
+      await reconcileProviderUsage(
+        serviceClient,
+        reservation.reservationId,
+        reservation.leaseToken,
+        3,
+        'succeeded',
+      );
       return NextResponse.json(
         { error: 'the voice recording did not pass moderation' },
         { status: 422 },
@@ -182,13 +195,27 @@ export async function POST(request: Request): Promise<NextResponse> {
       },
     });
 
-    await reconcileProviderUsage(serviceClient, reservation.reservationId, 3, 'succeeded');
+    await reconcileProviderUsage(
+      serviceClient,
+      reservation.reservationId,
+      reservation.leaseToken,
+      3,
+      'succeeded',
+    );
     return NextResponse.json({
       headline: structure.hook,
       hardClaims: structure.hard_claims_requiring_confirmation,
     });
   } catch {
-    await reconcileProviderUsage(serviceClient, reservation.reservationId, 0, 'failed');
+    // Conservative accounting (P0-NEW-1): actual 0, but the DB keeps at least
+    // the estimate so a provider that already charged stays in the cap.
+    await reconcileProviderUsage(
+      serviceClient,
+      reservation.reservationId,
+      reservation.leaseToken,
+      0,
+      'failed',
+    );
     return NextResponse.json({ error: 'transcription failed' }, { status: 502 });
   }
 }

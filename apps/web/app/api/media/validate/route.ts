@@ -8,7 +8,7 @@ import {
   MEDIA_MAX_BYTES,
   type MediaKind,
 } from '@friendword/domain';
-import { createBrowserClient } from '@friendword/data';
+import { createBrowserClient, type ServiceSupabaseClient } from '@friendword/data';
 
 import { isActiveAccount } from '@/lib/accountStatus';
 import { reconcileProviderUsage, reserveProviderUsage } from '@/lib/providerBudget';
@@ -39,6 +39,45 @@ function expectedKinds(bucket: string, objectName: string): readonly MediaKind[]
   }
 
   return objectName.endsWith('.m4a') ? ['audio/mp4'] : ALLOWED_IMAGE_KINDS;
+}
+
+/**
+ * Bind the reservation request_ref to the exact stored object version so that
+ * re-uploading different content under the same name mints a fresh ref (and a
+ * fresh moderation), while a genuine replay of the same bytes reuses the
+ * prior verdict. Mirrors transcribe's voiceVersion pattern.
+ */
+async function objectVersion(
+  serviceClient: ServiceSupabaseClient,
+  bucket: string,
+  objectName: string,
+): Promise<string> {
+  const lastSlash = objectName.lastIndexOf('/');
+  const folder = lastSlash >= 0 ? objectName.slice(0, lastSlash) : '';
+  const name = lastSlash >= 0 ? objectName.slice(lastSlash + 1) : objectName;
+  const { data } = await serviceClient.storage.from(bucket).list(folder, { search: name });
+  const match = data?.find((entry) => entry.name === name);
+  return match?.updated_at ?? match?.id ?? 'unknown';
+}
+
+async function readStoredModeration(
+  serviceClient: ServiceSupabaseClient,
+  bucket: string,
+  objectName: string,
+): Promise<Pick<ValidationRow, 'moderation_status' | 'moderation_ref'> | null> {
+  const { data } = await serviceClient
+    .from('media_validations')
+    .select('moderation_status, moderation_ref')
+    .eq('bucket_id', bucket)
+    .eq('object_name', objectName)
+    .maybeSingle();
+  if (data === null) {
+    return null;
+  }
+  return {
+    moderation_status: data.moderation_status,
+    moderation_ref: data.moderation_ref ?? null,
+  };
 }
 
 /**
@@ -121,45 +160,116 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   let moderationStatus: ValidationRow['moderation_status'] = 'skipped';
   let moderationRef: string | null = null;
-  if (decodeOk && sizeOk && signature.kind !== null && signature.kind !== 'audio/mp4') {
-    try {
-      const providers = createProviders({
-        FRIENDWORD_PROVIDER_MODE: 'real',
-        OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-      });
-      const { data: signed, error: signError } = await serviceClient.storage
-        .from(bucket)
-        .createSignedUrl(objectName, 300);
-      if (signError !== null || signed === null) {
-        return NextResponse.json({ error: 'object not found' }, { status: 404 });
-      }
-      // Cost gate (P0-9): reserve per object before the moderation call.
-      const reservation = await reserveProviderUsage(
-        serviceClient,
-        accessToken,
-        'media_validate',
-        `media-validate:${bucket}:${objectName}`,
-        1,
-      );
-      if (!reservation.ok) {
+  const isModeratableImage =
+    decodeOk && sizeOk && signature.kind !== null && signature.kind !== 'audio/mp4';
+  if (isModeratableImage) {
+    // Cost + consent gate (P0-NEW-1/P0-NEW-2): reserve BEFORE a single byte
+    // reaches OpenAI. The authoritative user is the caller; the scope is the
+    // owning draft for pitch-media, own_content otherwise. request_ref is
+    // bound to the stored object version so a re-upload re-moderates.
+    const version = await objectVersion(serviceClient, bucket, objectName);
+    const scopeDraftId = bucket === 'pitch-media' ? ownerPrefix : undefined;
+    const reservation = await reserveProviderUsage(
+      serviceClient,
+      callerId,
+      'media_validate',
+      `media-validate:${bucket}:${objectName}:${version}`,
+      1,
+      scopeDraftId,
+    );
+
+    if (!reservation.ok) {
+      if (reservation.httpStatus === 409) {
+        // Consent absent → no-AI / manual path: never call OpenAI, record the
+        // structural verdict with moderation 'skipped'. Upload only ever
+        // reached Supabase. Enforcement treats only 'passed' as publishable,
+        // so 'skipped' still fails closed downstream.
+        moderationStatus = 'skipped';
+      } else {
         return NextResponse.json(
           { error: reservation.message },
           { status: reservation.httpStatus },
         );
       }
-      try {
-        const verdict = await providers.moderation.checkImage(signed.signedUrl);
-        moderationStatus = verdict.allowed ? 'passed' : 'flagged';
-        moderationRef = verdict.allowed ? null : verdict.categories.join(',').slice(0, 200);
-        await reconcileProviderUsage(serviceClient, reservation.reservationId, 1, 'succeeded');
-      } catch (moderationError: unknown) {
-        await reconcileProviderUsage(serviceClient, reservation.reservationId, 0, 'failed');
-        throw moderationError;
+    } else if (!reservation.granted) {
+      if (reservation.priorStatus === 'succeeded') {
+        // Replay of an already-moderated object version: reuse the stored
+        // verdict, never re-call the provider (the pre-audit defect re-called
+        // OpenAI on every POST). Structural fields are still re-recorded below
+        // without reverting these moderation fields back to 'skipped'.
+        const stored = await readStoredModeration(serviceClient, bucket, objectName);
+        if (stored !== null) {
+          moderationStatus = stored.moderation_status;
+          moderationRef = stored.moderation_ref;
+        }
+      } else {
+        // priorStatus === 'reserved': another attempt holds the live lease.
+        return NextResponse.json({ error: 'validation already in progress' }, { status: 409 });
       }
-    } catch (error: unknown) {
-      if (!(error instanceof ProviderNotImplementedError)) {
-        console.warn('media validation: moderation call failed');
-        return NextResponse.json({ error: 'moderation unavailable' }, { status: 502 });
+    } else {
+      // granted: this attempt owns the lease and is the only one that calls
+      // the provider.
+      let providers;
+      try {
+        providers = createProviders({
+          FRIENDWORD_PROVIDER_MODE: 'real',
+          OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+        });
+      } catch (error: unknown) {
+        if (!(error instanceof ProviderNotImplementedError)) {
+          throw error;
+        }
+        // Providers unconfigured: release the reservation (no cost) and leave
+        // moderation 'skipped'. Nothing external was ever contacted.
+        await reconcileProviderUsage(
+          serviceClient,
+          reservation.reservationId,
+          reservation.leaseToken,
+          0,
+          'released',
+        );
+        providers = null;
+      }
+
+      if (providers !== null) {
+        const { data: signed, error: signError } = await serviceClient.storage
+          .from(bucket)
+          .createSignedUrl(objectName, 300);
+        if (signError !== null || signed === null) {
+          await reconcileProviderUsage(
+            serviceClient,
+            reservation.reservationId,
+            reservation.leaseToken,
+            0,
+            'released',
+          );
+          return NextResponse.json({ error: 'object not found' }, { status: 404 });
+        }
+        try {
+          const verdict = await providers.moderation.checkImage(signed.signedUrl);
+          moderationStatus = verdict.allowed ? 'passed' : 'flagged';
+          moderationRef = verdict.allowed ? null : verdict.categories.join(',').slice(0, 200);
+          await reconcileProviderUsage(
+            serviceClient,
+            reservation.reservationId,
+            reservation.leaseToken,
+            1,
+            'succeeded',
+          );
+        } catch {
+          // Provider failed/timed out: reconcile 'failed' with actual 0 — the
+          // DB keeps GREATEST(actual, estimated) so real spend stays in the
+          // cap (P0-NEW-1). Then surface 502.
+          await reconcileProviderUsage(
+            serviceClient,
+            reservation.reservationId,
+            reservation.leaseToken,
+            0,
+            'failed',
+          );
+          console.warn('media validation: moderation call failed');
+          return NextResponse.json({ error: 'moderation unavailable' }, { status: 502 });
+        }
       }
     }
   }

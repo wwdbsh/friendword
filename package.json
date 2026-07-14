@@ -16,7 +16,7 @@
     "test:db": "bash scripts/test-db.sh",
     "test:audit": "bash scripts/test-db-audit.sh && pnpm --filter @friendword/web test:audit",
     "test:audit2": "bash scripts/test-db-audit2.sh && pnpm --filter @friendword/web test:audit2",
-    "test:audit3": "bash scripts/test-db-audit3.sh"
+    "test:audit3": "bash scripts/test-db-audit3.sh && pnpm --filter @friendword/web test:audit3"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",

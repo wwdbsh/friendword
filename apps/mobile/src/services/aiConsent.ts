@@ -1,5 +1,3 @@
-import { AI_PROCESSING_CONSENT_REVISION } from '@friendword/config';
-
 import { getSupabaseClient } from './supabaseClient';
 
 export class AiConsentRequiredError extends Error {
@@ -13,42 +11,65 @@ export class AiConsentRequiredError extends Error {
 export class AiConsentPersistenceError extends Error {
   override readonly name = 'AiConsentPersistenceError';
 
-  constructor(action: 'check' | 'record') {
+  constructor(action: 'check' | 'record' | 'revision') {
     super(
       action === 'check'
         ? 'AI processing consent could not be checked. Please try again.'
-        : 'AI processing consent could not be recorded. No AI request was started.',
+        : action === 'record'
+          ? 'AI processing consent could not be recorded. No AI request was started.'
+          : 'The AI disclosure revision could not be read. No AI request was started.',
     );
   }
 }
 
 export type AiConsentPersistence = {
+  /** Server-authoritative disclosure revision the introducer must affirm. */
+  currentRevision(): Promise<string>;
   hasConsent(draftId: string, revision: string): Promise<boolean>;
   recordConsent(draftId: string, revision: string): Promise<void>;
 };
 
 export type AiConsentService = {
+  disclosureRevision(): Promise<string>;
+  hasConsent(draftId: string, revision: string): Promise<boolean>;
+  recordConsent(draftId: string, revision: string): Promise<void>;
   hasCurrentConsent(draftId: string): Promise<boolean>;
-  recordCurrentConsent(draftId: string): Promise<void>;
-  requireCurrentConsent(draftId: string): Promise<void>;
 };
 
-export function createAiConsentService(
-  persistence: AiConsentPersistence,
-  revision = AI_PROCESSING_CONSENT_REVISION,
-): AiConsentService {
+export function createAiConsentService(persistence: AiConsentPersistence): AiConsentService {
   return {
-    hasCurrentConsent: (draftId) => persistence.hasConsent(draftId, revision),
-    recordCurrentConsent: (draftId) => persistence.recordConsent(draftId, revision),
-    requireCurrentConsent: async (draftId) => {
-      if (!(await persistence.hasConsent(draftId, revision))) {
-        throw new AiConsentRequiredError();
-      }
-    },
+    disclosureRevision: () => persistence.currentRevision(),
+    hasConsent: (draftId, revision) => persistence.hasConsent(draftId, revision),
+    recordConsent: (draftId, revision) => persistence.recordConsent(draftId, revision),
+    hasCurrentConsent: async (draftId) =>
+      persistence.hasConsent(draftId, await persistence.currentRevision()),
   };
 }
 
+/**
+ * `get_ai_disclosure_revision` and any future consent RPCs that the generated
+ * database types do not yet describe are called through this narrow, untyped
+ * shim. The revision is server-authoritative (second/third audit): the client
+ * must never assume a compiled-in constant, so a missing RPC fails closed.
+ */
+type UntypedRpc = (
+  name: string,
+  args?: Record<string, unknown>,
+) => Promise<{ data: unknown; error: { message?: string } | null }>;
+
 const supabasePersistence: AiConsentPersistence = {
+  currentRevision: async () => {
+    const client = getSupabaseClient();
+    if (client === null) {
+      throw new AiConsentPersistenceError('revision');
+    }
+    const rpc = client.rpc as unknown as UntypedRpc;
+    const { data, error } = await rpc('get_ai_disclosure_revision');
+    if (error !== null || typeof data !== 'string' || data.trim() === '') {
+      throw new AiConsentPersistenceError('revision');
+    }
+    return data;
+  },
   hasConsent: async (draftId, revision) => {
     const client = getSupabaseClient();
     if (client === null) {
@@ -80,8 +101,9 @@ const supabasePersistence: AiConsentPersistence = {
   },
 };
 
-const currentAiConsent = createAiConsentService(supabasePersistence);
+const aiConsent = createAiConsentService(supabasePersistence);
 
-export const hasCurrentAiProcessingConsent = currentAiConsent.hasCurrentConsent;
-export const recordCurrentAiProcessingConsent = currentAiConsent.recordCurrentConsent;
-export const requireCurrentAiProcessingConsent = currentAiConsent.requireCurrentConsent;
+export const getAiDisclosureRevision = aiConsent.disclosureRevision;
+export const hasAiProcessingConsent = aiConsent.hasConsent;
+export const recordAiProcessingConsent = aiConsent.recordConsent;
+export const hasCurrentAiProcessingConsent = aiConsent.hasCurrentConsent;

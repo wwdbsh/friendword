@@ -71,8 +71,13 @@ export function AiConsentDisclosure({
     <TrustCard>
       <Text style={styles.title}>Before AI drafts this pitch</Text>
       <Text style={styles.body}>
-        This recording and any photos you add will be sent to an external AI provider, currently
-        OpenAI, to transcribe, structure, and moderate the pitch.
+        Your recording and photos are always saved to Friendword’s private storage first — that step
+        alone never sends anything to an outside company.
+      </Text>
+      <Text style={styles.body}>
+        Only if you agree here will this recording and any photos then be sent to an external AI
+        provider, currently OpenAI, to transcribe, structure, and moderate the pitch. If you choose
+        “Write it myself” instead, nothing goes to that provider.
       </Text>
       <Text style={styles.body}>
         The content is used only to build this draft. Your friend reviews it and can delete

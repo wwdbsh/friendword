@@ -5,15 +5,16 @@ import {
 } from '../../services/draftGeneration';
 import {
   AiConsentRequiredError,
-  hasCurrentAiProcessingConsent,
-  recordCurrentAiProcessingConsent,
+  getAiDisclosureRevision,
+  hasAiProcessingConsent,
+  recordAiProcessingConsent,
 } from '../../services/aiConsent';
 import type { PitchDraftService } from '../../services/pitchDrafts';
 import type { PitchDraft, PitchDraftId } from '../../services/types';
 
 type ReviewPreparationService = Pick<
   PitchDraftService,
-  'prepareForReview' | 'loadGeneratedReview' | 'saveReview'
+  'prepareForReview' | 'uploadDraftMedia' | 'loadGeneratedReview' | 'saveReview'
 >;
 
 type GenerateDraft = (serverDraftId: string) => Promise<DraftGenerationResult>;
@@ -23,14 +24,16 @@ export type PitchReviewPreparationChoice =
 
 export type PitchReviewPreparationDependencies = {
   readonly generateDraft: GenerateDraft;
-  readonly hasAiConsent: (serverDraftId: string) => Promise<boolean>;
-  readonly recordAiConsent: (serverDraftId: string) => Promise<void>;
+  readonly getDisclosureRevision: () => Promise<string>;
+  readonly hasAiConsent: (serverDraftId: string, revision: string) => Promise<boolean>;
+  readonly recordAiConsent: (serverDraftId: string, revision: string) => Promise<void>;
 };
 
 const productionDependencies: PitchReviewPreparationDependencies = {
   generateDraft: requestDraftGeneration,
-  hasAiConsent: hasCurrentAiProcessingConsent,
-  recordAiConsent: recordCurrentAiProcessingConsent,
+  getDisclosureRevision: getAiDisclosureRevision,
+  hasAiConsent: hasAiProcessingConsent,
+  recordAiConsent: recordAiProcessingConsent,
 };
 
 export function isAiConsentRequiredFailure(error: unknown): boolean {
@@ -58,16 +61,33 @@ export async function preparePitchReview(
   choice: PitchReviewPreparationChoice,
   dependencies: PitchReviewPreparationDependencies = productionDependencies,
 ): Promise<PitchDraft> {
+  // Step 1: create the server draft only. No bytes are uploaded and nothing is
+  // sent to the external validator yet (third audit P0-NEW-2).
   const prepared = await service.prepareForReview(draftId);
+
+  // Manual writing and local-only drafts never touch external AI. Manual still
+  // needs its media on the server for the friend to review, so it uploads —
+  // the server does a structure-only check when no AI consent is on record.
   if (prepared.server === null || choice === 'write_manually') {
+    if (prepared.server !== null) {
+      await service.uploadDraftMedia(draftId);
+    }
     return service.saveReview(draftId, { ...prepared.review, generationMode: 'manual' });
   }
 
+  // Step 2: consent for the CURRENT server revision must be on record before a
+  // single byte leaves for the provider. Reading the revision from the server
+  // also fails the AI path closed if it is unavailable; the manual path above
+  // has already returned, so it stays usable.
+  const revision = await dependencies.getDisclosureRevision();
   if (choice === 'affirm_ai_consent') {
-    await dependencies.recordAiConsent(prepared.server.draftId);
-  } else if (!(await dependencies.hasAiConsent(prepared.server.draftId))) {
+    await dependencies.recordAiConsent(prepared.server.draftId, revision);
+  } else if (!(await dependencies.hasAiConsent(prepared.server.draftId, revision))) {
     throw new AiConsentRequiredError();
   }
+
+  // Step 3: only now upload + validate, then transcribe/structure.
+  await service.uploadDraftMedia(draftId);
 
   const generated = await dependencies.generateDraft(prepared.server.draftId);
   if (generated.kind === 'generated') {

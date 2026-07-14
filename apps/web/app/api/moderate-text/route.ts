@@ -119,17 +119,29 @@ export async function POST(request: Request): Promise<NextResponse> {
     throw error;
   }
 
-  // Cost gate (P0-9): the verdict ledger above already deduplicated, so
-  // every reservation here maps to a genuine provider call.
+  // Cost + consent gate (P0-NEW-1/P0-NEW-2): the verdict ledger above already
+  // deduplicated (a cache hit needs no external call and no consent), so every
+  // reservation here maps to a genuine provider call. pitch_content is scoped
+  // to its draft; profile_bio / interest_note are own_content. Consent absent
+  // fails honestly (409) — a verdict is a submit precondition, so there is no
+  // 'skipped' substitute here.
   const reservation = await reserveProviderUsage(
     serviceClient,
-    accessToken,
+    callerId,
     'moderate_text',
     `moderate-text:${input.kind}:${contentHash}`,
     1,
+    draftId ?? undefined,
   );
   if (!reservation.ok) {
     return NextResponse.json({ error: reservation.message }, { status: reservation.httpStatus });
+  }
+  if (!reservation.granted) {
+    // The content-addressed ledger above answers genuine replays before we
+    // ever reserve, so a non-granted reservation here means a concurrent
+    // attempt already holds the lease (or just closed it). Fail honestly
+    // rather than re-calling the provider.
+    return NextResponse.json({ error: 'moderation already in progress' }, { status: 409 });
   }
 
   let verdictAllowed: boolean;
@@ -138,13 +150,32 @@ export async function POST(request: Request): Promise<NextResponse> {
     const verdict = await providers.moderation.checkText(content);
     verdictAllowed = verdict.allowed;
     moderationRef = verdict.allowed ? null : verdict.categories.join(',').slice(0, 200);
-    await reconcileProviderUsage(serviceClient, reservation.reservationId, 1, 'succeeded');
+    await reconcileProviderUsage(
+      serviceClient,
+      reservation.reservationId,
+      reservation.leaseToken,
+      1,
+      'succeeded',
+    );
   } catch (error: unknown) {
     if (error instanceof ProviderNotImplementedError) {
-      await reconcileProviderUsage(serviceClient, reservation.reservationId, 0, 'released');
+      await reconcileProviderUsage(
+        serviceClient,
+        reservation.reservationId,
+        reservation.leaseToken,
+        0,
+        'released',
+      );
       return NextResponse.json({ error: 'moderation not configured' }, { status: 501 });
     }
-    await reconcileProviderUsage(serviceClient, reservation.reservationId, 0, 'failed');
+    // Conservative accounting (P0-NEW-1): actual 0, DB keeps at least estimate.
+    await reconcileProviderUsage(
+      serviceClient,
+      reservation.reservationId,
+      reservation.leaseToken,
+      0,
+      'failed',
+    );
     console.warn('text moderation: provider call failed');
     return NextResponse.json({ error: 'moderation unavailable' }, { status: 502 });
   }

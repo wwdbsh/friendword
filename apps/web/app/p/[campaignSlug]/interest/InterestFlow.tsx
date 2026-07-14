@@ -13,6 +13,14 @@ import {
   type BrowserSupabaseClient,
 } from '@friendword/data';
 
+import {
+  AI_CONSENT_REQUIRED_COPY,
+  AI_DISCLOSURE_COPY,
+  canProcessOwnContentMedia,
+  getAiDisclosureRevision,
+  recordOwnContentAiConsent,
+  type OwnContentConsentState,
+} from '@/lib/aiConsent';
 import { EmailSignIn } from '@/components/EmailSignIn';
 import { requestTextModeration } from '@/lib/moderateText';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
@@ -116,6 +124,13 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
   const [prefillDone, setPrefillDone] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // own_content AI consent gate (P0-NEW-2): affirmative, current-revision
+  // consent must precede the first upload/moderation (external AI) request.
+  const [aiConsentState, setAiConsentState] = useState<OwnContentConsentState>('pending');
+  const [aiDisclosureRevision, setAiDisclosureRevision] = useState<string | null>(null);
+  const [aiConsentChecked, setAiConsentChecked] = useState(false);
+  const [aiConsentBusy, setAiConsentBusy] = useState(false);
+  const aiConsentGranted = canProcessOwnContentMedia(aiConsentState);
 
   useEffect(() => {
     if (client === null || session === null || prefillDone) {
@@ -137,6 +152,12 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
       }
       setDisplayName(nameStatus.displayName);
       setDisplayNameConfirmed(nameStatus.confirmed);
+
+      const revision = await getAiDisclosureRevision(client);
+      if (cancelled) {
+        return;
+      }
+      setAiDisclosureRevision(revision);
 
       const profile = await repo.getMyDatingProfile();
       if (cancelled) {
@@ -181,8 +202,32 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
     };
   }, [client, session, prefillDone]);
 
+  async function handleAiConsent() {
+    if (client === null || aiDisclosureRevision === null || !aiConsentChecked) {
+      return;
+    }
+    setAiConsentBusy(true);
+    setError(null);
+    try {
+      // Recorded BEFORE any photo upload or text moderation — the first
+      // external-AI request cannot happen until this resolves.
+      await recordOwnContentAiConsent(client, aiDisclosureRevision);
+      setAiConsentState('granted');
+    } catch {
+      setError('We could not save your agreement. Refresh and try again before continuing.');
+    } finally {
+      setAiConsentBusy(false);
+    }
+  }
+
   async function handlePhotoUpload(event: ChangeEvent<HTMLInputElement>) {
     if (client === null || event.target.files === null) {
+      return;
+    }
+    // Guard: no external-AI processing (validate call) before consent.
+    if (!aiConsentGranted) {
+      event.target.value = '';
+      setError(AI_CONSENT_REQUIRED_COPY);
       return;
     }
     const files = Array.from(event.target.files);
@@ -263,6 +308,11 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (client === null) {
+      return;
+    }
+    // Guard: bio/note moderation is external AI — never before consent.
+    if (!aiConsentGranted) {
+      setError(AI_CONSENT_REQUIRED_COPY);
       return;
     }
     setSubmitting(true);
@@ -379,7 +429,53 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
           session !== null &&
           !submitted &&
           prefillDone &&
-          displayNameLoaded && (
+          displayNameLoaded &&
+          !aiConsentGranted && (
+            <section className={styles.card}>
+              <span className={styles.badge}>Before you continue</span>
+              <h1 className={styles.title}>A quick safety review</h1>
+              <p className={styles.muted}>{AI_DISCLOSURE_COPY.replace('{daterName}', daterName)}</p>
+              {aiDisclosureRevision !== null && (
+                <p className={styles.finePrint}>Disclosure version {aiDisclosureRevision}</p>
+              )}
+              <label className={styles.label} style={{ display: 'flex', gap: '0.6rem' }}>
+                <input
+                  type="checkbox"
+                  checked={aiConsentChecked}
+                  disabled={aiConsentBusy || aiDisclosureRevision === null}
+                  onChange={(event) => setAiConsentChecked(event.target.checked)}
+                />
+                <span>
+                  I agree that my photos and note are sent to an external AI provider for a safety
+                  review.
+                </span>
+              </label>
+              {aiDisclosureRevision === null && (
+                <p className={styles.finePrint}>
+                  The safety review is unavailable right now. Refresh the page to try again.
+                </p>
+              )}
+              <button
+                className={styles.primary}
+                type="button"
+                disabled={!aiConsentChecked || aiConsentBusy || aiDisclosureRevision === null}
+                onClick={() => {
+                  void handleAiConsent();
+                }}
+              >
+                {aiConsentBusy ? 'Saving…' : 'Agree and continue'}
+              </button>
+              {error !== null && <p className={styles.error}>{error}</p>}
+            </section>
+          )}
+
+        {client !== null &&
+          !loading &&
+          session !== null &&
+          !submitted &&
+          prefillDone &&
+          displayNameLoaded &&
+          aiConsentGranted && (
             <section className={styles.card}>
               <span className={styles.badge}>Profile-backed interest</span>
               <h1 className={styles.title}>Introduce yourself to {daterName}.</h1>

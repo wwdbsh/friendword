@@ -103,7 +103,7 @@ Creator Launch만으로 100개 무료 캠페인을 보전하려면 약 19% 구�
 
 - **매일**: provider별 spend, failed OTP/render, fraud anomaly
 - **매주**: campaign cohort revenue, variable cost, gross contribution, refund 및 이 문서의 공식 가격 재검증
-- **월간 hard cap**: 초기 전체 cloud/API 비용 **$200**. **(주의 — 3차 감사 P0-NEW-1: 현재 원장·cap 골격은 있으나 reserve/reconcile RPC가 일반 인증 사용자에게 열려 있어 cap 소진·해제 조작과 동시 요청 중복 과금이 가능합니다. Slice 1이 끝나기 전에는 "hard cap 완료"라고 표현하지 않습니다.)**
+- **월간 cap**: 초기 전체 cloud/API 비용 **$200**. 3차 감사 Slice 1(migration 0035)부터 reserve/reconcile RPC는 service-role 전용이고(클라이언트가 cents·status·user를 고를 수 없음), request_ref별 lease로 동시 요청 중 정확히 하나만 provider를 호출하며, 실패/timeout 비용은 최소 estimate로 cap에 보수적으로 남습니다. audit3 c02가 이 계약을 회귀로 고정합니다. 잔여 한계: 실제 OpenAI 키에서의 enforcement-on 검증은 사용자 키 게이트 뒤에 있습니다.
 - **75% 도달**: 신규 무료 슬롯 축소
 - **90% 도달**: 유료·기존 안전 경로를 제외한 고비용 작업 중지
 - **가격 유지 조건**: Creator Launch ≥ 10%, Campaign Pass ≥ 3% 또는 동일 contribution의 독립 상품 조합

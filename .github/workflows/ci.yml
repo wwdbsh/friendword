@@ -23,6 +23,7 @@ jobs:
       - run: pnpm --filter @friendword/web build
       - run: pnpm --filter @friendword/web test:audit
       - run: pnpm --filter @friendword/web test:audit2
+      - run: pnpm --filter @friendword/web test:audit3
 
   web-e2e:
     runs-on: ubuntu-latest

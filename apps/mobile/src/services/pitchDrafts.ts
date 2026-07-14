@@ -25,6 +25,7 @@ export interface PitchDraftService {
   savePhotos(id: PitchDraftId, photos: readonly PitchPhoto[]): Promise<PitchDraft>;
   saveRecording(id: PitchDraftId, recording: PitchRecording): Promise<PitchDraft>;
   prepareForReview(id: PitchDraftId): Promise<PitchDraft>;
+  uploadDraftMedia(id: PitchDraftId): Promise<PitchDraft>;
   loadGeneratedReview(id: PitchDraftId): Promise<PitchDraft>;
   saveReview(id: PitchDraftId, review: PitchReview): Promise<PitchDraft>;
   finalizeConsent(id: PitchDraftId): Promise<PitchDraft>;
@@ -113,6 +114,17 @@ export class MockPitchDraftService implements PitchDraftService {
     return this.prepareForReview(id);
   }
 
+  async uploadDraftMedia(id: PitchDraftId): Promise<PitchDraft> {
+    // Local-only drafts keep their media on the device; there is nothing to
+    // upload. The hybrid service overrides this for server-backed drafts.
+    const drafts = await this.getMyDrafts();
+    const draft = drafts.find((candidate) => candidate.id === id);
+    if (draft === undefined) {
+      throw new PitchDraftNotFoundError(id);
+    }
+    return draft;
+  }
+
   async finalizeConsent(id: PitchDraftId): Promise<PitchDraft> {
     return this.updateDraft(id, (draft) => {
       this.requireCompleteDraft(draft);
@@ -133,8 +145,17 @@ export class MockPitchDraftService implements PitchDraftService {
   async attachServerDraft(id: PitchDraftId, draftId: string): Promise<PitchDraft> {
     return this.updateDraft(id, (draft) => ({
       ...draft,
-      server: { draftId, consentRequestId: null, consentToken: null },
+      server: { draftId, consentRequestId: null, consentToken: null, mediaUploaded: false },
     }));
+  }
+
+  async markDraftMediaUploaded(id: PitchDraftId): Promise<PitchDraft> {
+    return this.updateDraft(id, (draft) => {
+      if (draft.server === null) {
+        throw new PitchDraftSubmissionError('Prepare this pitch before uploading media.');
+      }
+      return { ...draft, server: { ...draft.server, mediaUploaded: true } };
+    });
   }
 
   async attachFinalizedConsent(

@@ -54,6 +54,13 @@ const PitchServerSyncSchema = z.object({
   draftId: z.uuid(),
   consentRequestId: z.uuid().nullable().default(null),
   consentToken: z.string().min(24).nullable().default(null),
+  // True once the voice/photo objects have been uploaded to Supabase storage
+  // for this server draft. The upload step (`uploadDraftMedia`) is split off
+  // from server-draft creation so AI-processing consent can be recorded in
+  // between; this flag keeps that step idempotent because the signed upload
+  // URL is created with upsert:false and re-registering assets would duplicate
+  // rows. Defaults false so drafts persisted before this field parse cleanly.
+  mediaUploaded: z.boolean().default(false),
 });
 
 export const EMPTY_PITCH_STRUCTURE = {

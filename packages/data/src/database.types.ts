@@ -641,16 +641,23 @@ export type Database = {
     Functions: {
       reserve_provider_usage: {
         Args: {
+          readonly target_user_id: string;
           readonly usage_kind: 'transcribe' | 'structure' | 'moderate_text' | 'media_validate';
           readonly request_ref: string;
           readonly estimated_cents: number;
           readonly scope_draft_id?: string | null;
         };
-        Returns: string;
+        Returns: readonly {
+          readonly reservation_id: string;
+          readonly prior_status: string | null;
+          readonly granted: boolean;
+          readonly lease_token: string | null;
+        }[];
       };
       reconcile_provider_usage: {
         Args: {
-          readonly reservation_id: string;
+          readonly target_reservation_id: string;
+          readonly target_lease_token: string;
           readonly actual_cents: number;
           readonly final_status: 'succeeded' | 'failed' | 'timeout' | 'released';
         };
@@ -661,6 +668,16 @@ export type Database = {
           readonly target_draft_id: string;
           readonly target_consent_revision: string;
         };
+        Returns: string;
+      };
+      record_own_content_ai_consent: {
+        Args: {
+          readonly target_consent_revision: string;
+        };
+        Returns: string;
+      };
+      get_ai_disclosure_revision: {
+        Args: Record<string, never>;
         Returns: string;
       };
       report_content: {

@@ -61,6 +61,10 @@ describe('AI processing disclosure', () => {
     );
 
     expect(markup).toContain('Before AI drafts this pitch');
+    // Audit decision 2: the copy must separate "saved to private storage"
+    // (no third party) from "sent to the external AI provider" (needs consent).
+    expect(markup).toContain('saved to Friendword’s private storage first');
+    expect(markup).toContain('never sends anything to an outside company');
     expect(markup).toContain('external AI provider, currently OpenAI');
     expect(markup).toContain('can delete everything before anything goes public');
     expect(markup).toContain('permission to share their photos and story');

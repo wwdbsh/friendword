@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ConsentRequestRow, PitchDraftRow } from '@friendword/data';
 
 import { hasFinalizedConsent, MockPitchDraftService, type PitchDraftStorage } from './pitchDrafts';
@@ -273,6 +273,74 @@ describe('pitch draft AI review flow', () => {
     expect(merged.recording?.uri).toBe('file:///voice.m4a');
     expect(merged.status).toBe('changes_requested');
     expect(isRecoveredServerDraft(merged)).toBe(false);
+  });
+
+  it('separates server-draft creation from media upload so consent can run in between', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async () => new Response('', { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    try {
+      const local = createService();
+      const id = await createCompleteDraft(local);
+      const assetUploads: string[] = [];
+      const registeredAssets: Array<{ kind: string; fileName: string }> = [];
+      const unexpected = async (): Promise<never> => {
+        throw new Error('Unexpected repository method');
+      };
+      const service = new HybridPitchDraftService(null, local, {
+        createDraft: async () => SERVER_ROW,
+        getDraft: unexpected,
+        listMyConsentRequests: unexpected,
+        listMyDrafts: unexpected,
+        registerAsset: async (draftId, kind, fileName, sortOrder) => {
+          registeredAssets.push({ kind, fileName });
+          return {
+            id: `asset-${fileName}`,
+            pitch_draft_id: draftId,
+            uploaded_by_user_id: '00000000-0000-4000-8000-000000000001',
+            asset_type: kind,
+            storage_path: `pitch-media/${draftId}/${fileName}`,
+            sort_order: sortOrder ?? 0,
+            created_at: '2026-07-13T00:00:00.000Z',
+            updated_at: '2026-07-13T00:00:00.000Z',
+          };
+        },
+        requestAssetUpload: async (draftId, fileName) => {
+          assetUploads.push(fileName);
+          return {
+            storagePath: `pitch-media/${draftId}/${fileName}`,
+            signedUrl: 'https://storage.test/upload',
+            token: 'signed-token',
+          };
+        },
+        submitForConsent: unexpected,
+        updateDraft: unexpected,
+      });
+
+      // Creating the server draft must NOT upload or validate any media —
+      // that is what lets consent be recorded before anything is sent out.
+      const prepared = await service.prepareForReview(id);
+      expect(prepared.server?.draftId).toBe(SERVER_ROW.id);
+      expect(assetUploads).toEqual([]);
+      expect(registeredAssets).toEqual([]);
+
+      // The explicit second step performs the uploads and registrations.
+      await service.uploadDraftMedia(id);
+      expect(assetUploads).toEqual(['voice.m4a', 'photo-1.jpg']);
+      expect(registeredAssets).toEqual([
+        { kind: 'voice', fileName: 'voice.m4a' },
+        { kind: 'photo', fileName: 'photo-1.jpg' },
+      ]);
+
+      // Idempotent: retrying (e.g. after a transient transcribe failure) must
+      // not re-upload — the signed URL is upsert:false and registerAsset would
+      // duplicate rows.
+      await service.uploadDraftMedia(id);
+      expect(assetUploads).toEqual(['voice.m4a', 'photo-1.jpg']);
+      expect(registeredAssets).toHaveLength(2);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('sorts recovered server drafts by their latest update', async () => {

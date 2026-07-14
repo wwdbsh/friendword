@@ -155,6 +155,13 @@ export class HybridPitchDraftService implements PitchDraftService {
     }
   }
 
+  /**
+   * Creates the server draft record ONLY — no voice or photo bytes are
+   * uploaded and nothing is sent to `/api/media/validate` here. Third audit
+   * P0-NEW-2: media upload and external-AI validation must run *after* the
+   * AI-processing consent is on record, so that work is deferred to
+   * {@link uploadDraftMedia}. The local completeness/status guards still run.
+   */
   async prepareForReview(id: PitchDraftId): Promise<PitchDraft> {
     const draft = await this.local.prepareForReview(id);
     if (this.repo === null || draft.server !== null) {
@@ -163,25 +170,57 @@ export class HybridPitchDraftService implements PitchDraftService {
     if (draft.relationship?.contact.kind !== 'email') {
       throw new PitchDraftSubmissionError('Enter a valid email before continuing.');
     }
+    if (draft.recording === null) {
+      throw new PitchDraftSubmissionError('Record a voice track before continuing.');
+    }
     try {
       const serverDraft = await this.repo.createDraft(toDraftInputs(draft.relationship));
-      if (draft.recording === null) {
-        throw new PitchDraftSubmissionError('Record a voice track before continuing.');
+      return this.local.attachServerDraft(id, serverDraft.id);
+    } catch (error: unknown) {
+      if (error instanceof UnauthenticatedError) {
+        throw new NeedsSignInError();
       }
+      throw error;
+    }
+  }
+
+  /**
+   * Uploads the voice track and photos for an already-created server draft and
+   * asks the server to validate each object. Callers must only reach this after
+   * recording AI-processing consent (or deliberately choosing the manual path,
+   * where the server does a structure-only check). Local-only drafts keep their
+   * media on the device and no-op here.
+   */
+  async uploadDraftMedia(id: PitchDraftId): Promise<PitchDraft> {
+    const draft = await findDraft(this.local, id);
+    if (this.repo === null || draft.server === null) {
+      return draft;
+    }
+    // Idempotent: the signed upload URL is created with upsert:false and
+    // registerAsset inserts a row, so a second pass (e.g. retrying after a
+    // transient transcribe failure) must not re-upload.
+    if (draft.server.mediaUploaded) {
+      return draft;
+    }
+    if (draft.recording === null) {
+      throw new PitchDraftSubmissionError('Record a voice track before continuing.');
+    }
+    const serverDraftId = draft.server.draftId;
+    try {
       await this.uploadFile(
         this.repo,
-        serverDraft.id,
+        serverDraftId,
         'voice.m4a',
         draft.recording.uri,
         'audio/mp4',
       );
-      await this.repo.registerAsset(serverDraft.id, 'voice', 'voice.m4a');
+      await this.repo.registerAsset(serverDraftId, 'voice', 'voice.m4a');
       for (const [index, photo] of draft.photos.entries()) {
         const fileName = `photo-${index + 1}.jpg`;
-        await this.uploadFile(this.repo, serverDraft.id, fileName, photo.uri, 'image/jpeg');
-        await this.repo.registerAsset(serverDraft.id, 'photo', fileName, index);
+        await this.uploadFile(this.repo, serverDraftId, fileName, photo.uri, 'image/jpeg');
+        await this.repo.registerAsset(serverDraftId, 'photo', fileName, index);
       }
-      return this.local.attachServerDraft(id, serverDraft.id);
+      return this.local.markDraftMediaUploaded(id);
     } catch (error: unknown) {
       if (error instanceof UnauthenticatedError) {
         throw new NeedsSignInError();
@@ -362,6 +401,9 @@ function recoverServerDraft(
       draftId: row.id,
       consentRequestId: request?.id ?? null,
       consentToken: null,
+      // Server-recovered drafts were already submitted, so their media lives on
+      // the server; never re-upload it.
+      mediaUploaded: true,
     },
     createdAt: row.created_at,
     updatedAt: row.updated_at,

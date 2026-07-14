@@ -68,3 +68,6 @@ jobs:
       # Second audit release gate (Slice 10): the audit2 acceptance suite
       # is all-green (14/14) and stays in CI from here on.
       - run: bash scripts/test-db-audit2.sh
+      # Third audit Slice 0 (P0-NEW-4): the public beta gate is now
+      # authoritative over publishing; this regression stays in CI.
+      - run: bash scripts/test-db-audit3.sh

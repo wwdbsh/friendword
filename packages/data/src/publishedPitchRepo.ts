@@ -14,6 +14,41 @@ const slugSchema = z
 const PITCH_MEDIA_BUCKET = 'pitch-media';
 const VOICE_FILE_NAME = 'voice.m4a';
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
+const PUBLIC_BETA_CONFIG_KEY = 'public_beta_enabled';
+
+/**
+ * Server-authoritative public-read gate (third audit P0-NEW-4). A published
+ * campaign is only visible to the open internet when the `public_beta_enabled`
+ * app_config flag is 'on', OR when its pitch draft is on the QA preview
+ * allowlist. Fails closed: a missing/non-'on' flag denies unless allowlisted,
+ * so an already-published campaign never leaks while the gate is off.
+ */
+export async function isCampaignPubliclyVisible(
+  client: ServiceSupabaseClient,
+  pitchDraftId: string,
+): Promise<boolean> {
+  const { data: config, error: configError } = await client
+    .from('app_config')
+    .select('value')
+    .eq('key', PUBLIC_BETA_CONFIG_KEY)
+    .maybeSingle();
+  if (configError !== null) {
+    throw new DataLayerError('publishedPitch.publicBetaConfig', configError);
+  }
+  if (config?.value === 'on') {
+    return true;
+  }
+
+  const { data: allowlisted, error: allowlistError } = await client
+    .from('qa_preview_allowlist')
+    .select('pitch_draft_id')
+    .eq('pitch_draft_id', pitchDraftId)
+    .maybeSingle();
+  if (allowlistError !== null) {
+    throw new DataLayerError('publishedPitch.qaAllowlist', allowlistError);
+  }
+  return allowlisted !== null;
+}
 
 export type PublishedPitchPhoto = {
   readonly url: string;
@@ -73,6 +108,12 @@ export async function getPublishedPitchBySlug(
     throw new DataLayerError('publishedPitch.campaign', campaignError);
   }
   if (campaign === null) {
+    return null;
+  }
+
+  // Gate the public read before touching drafts, assets, or signed URLs so a
+  // gated campaign yields a clean 404 and mints no media URLs.
+  if (!(await isCampaignPubliclyVisible(client, campaign.pitch_draft_id))) {
     return null;
   }
 

@@ -1012,8 +1012,38 @@ describe('getPublishedPitchBySlug', () => {
 
   const tableMock = vi.fn();
 
-  function configurePublishedPitchClient(campaign: unknown): void {
+  function configurePublishedPitchClient(
+    campaign: unknown,
+    options: { readonly betaValue?: string | null; readonly allowlisted?: boolean } = {},
+  ): void {
+    const { betaValue = 'on', allowlisted = false } = options;
     tableMock.mockImplementation((table: string) => {
+      if (table === 'app_config') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: betaValue === null ? null : { value: betaValue },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === 'qa_preview_allowlist') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: allowlisted
+                  ? { pitch_draft_id: '10000000-0000-0000-0000-000000000001' }
+                  : null,
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
       if (table === 'campaigns') {
         return {
           select: () => ({
@@ -1088,8 +1118,32 @@ describe('getPublishedPitchBySlug', () => {
     await expect(getPublishedPitchBySlug(client, 'blair-abc123')).resolves.toBeNull();
   });
 
-  it('maps the campaign, draft, profiles, and signed voice URL', async () => {
-    configurePublishedPitchClient(campaignRow);
+  it('returns null when the public beta gate is off and the campaign is not allowlisted', async () => {
+    configurePublishedPitchClient(campaignRow, { betaValue: 'off', allowlisted: false });
+    const client = createServiceClient('https://project.example', 'service-key');
+
+    await expect(getPublishedPitchBySlug(client, 'blair-abc123')).resolves.toBeNull();
+  });
+
+  it('returns the pitch when the gate is off but the campaign is QA-allowlisted', async () => {
+    configurePublishedPitchClient(campaignRow, { betaValue: 'off', allowlisted: true });
+    const client = createServiceClient('https://project.example', 'service-key');
+
+    const pitch = await getPublishedPitchBySlug(client, 'blair-abc123');
+
+    expect(pitch?.campaignId).toBe(campaignRow.id);
+    expect(pitch?.daterDisplayName).toBe('Blair');
+  });
+
+  it('fails closed and returns null when the public beta config row is absent', async () => {
+    configurePublishedPitchClient(campaignRow, { betaValue: null, allowlisted: false });
+    const client = createServiceClient('https://project.example', 'service-key');
+
+    await expect(getPublishedPitchBySlug(client, 'blair-abc123')).resolves.toBeNull();
+  });
+
+  it('maps the campaign, draft, profiles, and signed voice URL when the gate is on', async () => {
+    configurePublishedPitchClient(campaignRow, { betaValue: 'on' });
     const client = createServiceClient('https://project.example', 'service-key');
 
     const pitch = await getPublishedPitchBySlug(client, 'blair-abc123');

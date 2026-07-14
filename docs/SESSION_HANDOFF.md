@@ -5,12 +5,14 @@
 ## CURRENT STATE
 
 - 판정(3차 감사): **기능성 내부 베타** — 외부 공개·실결제·Grand Prize 제출 준비 아님. green test는 완료 증거가 아니다(감사 §0-1).
-- 게이트 실상: `real_payments_enabled=off`는 결제를 막지만, **`public_beta_enabled=off`는 관심 제출만 막고 publish·public read는 허용한다**(감사 §0-2 교정 — "외부 공개 차단"으로 오인 금지).
-- 파이프라인: pnpm 모노레포(`apps/mobile`·`apps/web`·`packages/*`·`supabase`), migrations **0001~0033 hosted 배포**, 모든 전이는 SECURITY DEFINER RPC+트리거. audit2 14/14 그린·CI 편입, CI 그린(마지막 커밋 `0f9311f`).
+- 게이트 실상(Slice 0 이후): `real_payments_enabled=off`는 결제를 막고, **`public_beta_enabled=off`는 이제 interest 제출 + campaign publish 전이 + 공개 read(공개 페이지·OG)를 모두 차단한다**(migration 0034 + repo/OG 게이트). 내부 QA 예외는 service-role 전용 `qa_preview_allowlist`(pitch_draft 단위)뿐이며, 프로덕션 E2E도 gate 전역 토글 대신 이 allowlist를 쓴다.
+- 파이프라인: pnpm 모노레포(`apps/mobile`·`apps/web`·`packages/*`·`supabase`), migrations **0001~0034 hosted 배포**, 모든 전이는 SECURITY DEFINER RPC+트리거. audit2 14/14 + audit3 c01 그린·CI 편입.
 - 분석: outcome 이벤트는 0033 트리거가 기록(`recorded_by:"server"`), client는 검증된 interaction 9종만. 만료는 `expire_due_campaigns()`+`run-scheduled-ops.mjs`.
-- 작업 체제(변경됨): **Advisor(오케스트레이터) + Claude Opus 워커 2~3명(Agent로 생성). Codex는 더 이상 사용하지 않는다.**
+- 작업 체제: **Advisor(오케스트레이터) + Claude Opus 워커 2~3명(Agent로 생성). Codex는 더 이상 사용하지 않는다.**
 
 ## DONE
+
+- 3차 감사 Slice 0(2026-07-14): P0-NEW-4 해소 — `qa_preview_allowlist` + campaigns publish 전이 트리거 + interests 트리거 allowlist 인지(0034), 공개 read 게이트(`isCampaignPubliclyVisible` → `/p`·interest·OG 공통), e2e allowlist 전환. audit3 스위트 신설(c01 red→green 증거 확보, CI 편입). 문서 truth reset(README·PRODUCT·COST_MODEL·ANALYTICS_PLAN·TASKS·DECISIONS·본 문서).
 
 - 2차 감사 Slice 7~10 완주: Slice 7 Dater 통제+snapshot 발행+b13(`dddaf2d`) · Slice 8 정직한 데모+영어 기본 locale+Creator kit e2e(`9b29cbd`) · Slice 9 서버 권위 분석+만료 상태기계+CP-7 모바일 컨텍스트+접근성(`ad3a38b`) · Slice 10 release gate+audit2 CI 편입+hosted 드릴(`52d3bf2`).
 - README·PRODUCT·DATA_MODEL·PRIVACY_DATA_MAP·THREAT_MODEL·ARCHITECTURE truth reset(`0f9311f`).
@@ -18,16 +20,16 @@
 
 ## IN PROGRESS
 
-- 없음. 3차 감사 대응은 미착수 상태로 인계.
+- 3차 감사 대응 Slice 0~5 진행 중(사용자 goal 지시, 2026-07-14). Slice 0 완료, Slice 1(비용 원장 service-only + AI 사전 동의) 착수 예정.
 
 ## TODO
 
-1. (P0) 3차 감사 문서 정독 후 **현재 상태·다음 단계 요약을 사용자에게 보고하고 대기** — 지시 전 작업 착수 금지(사용자 확정).
-2. (P0) 착수 지시가 오면 Claude Opus 워커 2~3명 생성, `docs/TASKS.md`에 Slice·owned path 기록 후 감사 문서의 실행 순서대로 진행.
-3. (P0) 감사 §0이 예고한 코드 결함군 해소: 일반 인증 사용자의 비용 cap 조작, AI 사전 동의 순서 위반, Dater moderation 우회, public gate 무력화.
-4. (P0) provider RPC 권한·read RPC account guard·storage DELETE policy·Campaign Pass 상태기계 결함 — 전부 코드·schema 결함이며 사용자 키 게이트로 분류 금지(감사 §0-3).
-5. (P1) 수정과 같은 turn에 README·PRODUCT·COST_MODEL·ANALYTICS_PLAN·OPS·REVENUECAT_SETUP·TASKS·DECISIONS·SESSION_HANDOFF truth reset(감사 §0-6).
-6. (P1) 새 DB 변경마다 direct RPC 우회·RLS·concurrency·retry·failure accounting·실 UI 소비자 회귀 테스트(감사 §0-5).
+1. (P0) Slice 1: reserve/reconcile service-role 전용화, lease/idempotency/concurrency/failure accounting, consent-before-validation, disclosure revision binding, manual no-AI 무호출(P0-NEW-1·2).
+2. (P0) Slice 2: Dater media auth 403 수정, photo/text publish gate, hard claim 재추출, approved snapshot end-to-end, chat moderation 정책, manual voice enforcement(P0-NEW-3, H-3).
+3. (P0) Slice 3: SECURITY DEFINER read RPC active guard(H-1), token/media purge(H-4), storage DELETE/rollback(H-5), deletion retention·scheduled ops(H-2·H-6).
+4. (P0) Slice 4: Creator intent concurrency(P0-5), Campaign Pass 상태기계(P0-6), RevenueCat alias/transfer resolution(P0-3).
+5. (P0) Slice 5: Introducer 무료 live share(GP-P0-1), acquisition surface·referral chain(GP-P0-2), exporter metric truth(H-8·9), 무료 활성 1캠페인 guard(H-7).
+6. (P1) 각 Slice와 같은 turn에 문서 truth reset(감사 §0-6), 새 DB 변경마다 우회·concurrency·retry 회귀 테스트(감사 §0-5).
 7. (P2) 사용자 키 게이트: RevenueCat sandbox 실왕복, identity 벤더, OPENAI 키, 실기기 iOS QA, Resend/`EXPO_PUBLIC_WEB_ORIGIN`.
 
 ## IMPORTANT DECISIONS

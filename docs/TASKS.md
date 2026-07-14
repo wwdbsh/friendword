@@ -8,9 +8,19 @@
 
 상태는 Worker의 자체 보고와 Advisor 승인을 구분합니다. Worker 완료는 Advisor가 diff, 동일 테스트와 matching-surface manual QA를 재실행하기 전까지 통합 승인이 아닙니다. 범위가 바뀌면 작업 전에 이 표를 갱신합니다.
 
+## 2026-07-14 3차 감사 대응 (source of truth: docs/FRIENDWORD_THIRD_AUDIT_HANDOFF_2026-07-14.md §10, 순서 Slice 0→8 고정; 이번 목표는 Slice 0~5)
+
+운영 메모: Advisor(Fable 5, 오케스트레이터) + Claude Opus 워커 2~3명(Agent 생성) 체제. Codex 사용 중단. 회귀 스위트는 audit3(`supabase/tests/audit3/`, c-prefix)로 신설하고 red-first로 작성한다. 동일 migration·route·핵심 UI는 워커 간 동시 배정 금지.
+
+| Session | Owned paths                                                                                                                                                                                 | Dependency                           | Acceptance criteria                                                                                  | Status                                                                                 | Updated    |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ---------- |
+| opus-w1 | Slice 0-DB: `supabase/migrations/0034_public_beta_authoritative.sql`, `supabase/tests/audit3/**`, `scripts/test-db-audit3.sh`, root `package.json`(test:audit3), `.github/workflows/ci.yml` | 없음                                 | c01 red→green 증거, publish/resume/interest가 gate off에서 차단·allowlist로만 예외, 기존 스위트 그린 | 승인 (Advisor 재실행: audit3 1/1, RED 직접 재현, DB 01~18·audit 7/7·audit2 14/14 그린) | 2026-07-14 |
+| opus-w2 | Slice 0-Web: `packages/data/src/publishedPitchRepo.ts`(+테스트), `apps/web/app/api/og/route.tsx`, `scripts/e2e-production.mjs`                                                              | W1과 계약 공유(qa_preview_allowlist) | gate off 시 public read null/404, allowlist만 예외, e2e가 public_beta 전역 토글 대신 allowlist 사용  | 승인 (Advisor 재실행: data 50 테스트·Playwright 39/39·web build 그린)                  | 2026-07-14 |
+| Advisor | Slice 0: 문서 truth reset(README·PRODUCT·COST_MODEL·ANALYTICS_PLAN·SESSION_HANDOFF·TASKS·DECISIONS), 통합 검증, hosted 배포                                                                 | W1·W2                                | 감사 §9 금지 표현 제거, 전체 게이트 그린 재실행, hosted 드릴(gate off 404)                           | 진행 중 (검증 완료, hosted 배포·E2E 남음)                                              | 2026-07-14 |
+
 ## 2026-07-13 2차 감사 대응 (source of truth: docs/FRIENDWORD_SECOND_AUDIT_HANDOFF_2026-07-13.md §7, 순서 Slice 0→10 고정)
 
-운영 메모: Advisor(직접 구현 병행) + `friendword-codex-1` 2인 체제 유지. 제품 상태 판정은 "기능성 베타 — 실결제·외부 공개 차단"이며 launch gate(0023)가 서버에서 강제한다. audit2 스위트는 초기 FAIL이 정상(기대 동작 인코딩), Slice 10에서 CI 편입.
+운영 메모: Advisor(직접 구현 병행) + `friendword-codex-1` 2인 체제 유지. ~~제품 상태 판정은 "기능성 베타 — 실결제·외부 공개 차단"이며 launch gate(0023)가 서버에서 강제한다.~~ **(2026-07-14 교정 — 3차 감사 P0-NEW-4: 0023의 public beta gate는 interest 제출만 막았고 publish·public read는 막지 않았다. "외부 공개 서버 차단" 표현은 0034 배포 전까지 사실이 아니었다.)** audit2 스위트는 초기 FAIL이 정상(기대 동작 인코딩), Slice 10에서 CI 편입.
 
 | Session              | 작업                                                                                                                                      | Acceptance criteria                                                         | Status                                                                              | Updated    |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ---------- |

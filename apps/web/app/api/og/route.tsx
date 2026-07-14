@@ -1,7 +1,11 @@
 import { ImageResponse } from 'next/og';
 import { z } from 'zod';
 
-import { DataLayerError, type ServiceSupabaseClient } from '@friendword/data';
+import {
+  DataLayerError,
+  isCampaignPubliclyVisible,
+  type ServiceSupabaseClient,
+} from '@friendword/data';
 
 import { getPitchFixture } from '@/fixtures/pitch';
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
@@ -75,6 +79,10 @@ async function loadCampaignOg(
     .maybeSingle();
   if (campaignError !== null) throw new DataLayerError('campaignOg.campaign', campaignError);
   if (campaign === null) return null;
+
+  // Same server-authoritative public-read gate as the pitch page: a gated
+  // campaign renders no OG card and no signed photo URL.
+  if (!(await isCampaignPubliclyVisible(client, campaign.pitch_draft_id))) return null;
 
   const { data: draft, error: draftError } = await client
     .from('pitch_drafts')

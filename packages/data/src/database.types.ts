@@ -153,6 +153,12 @@ export type AppConfigRow = {
   readonly updated_at: string;
 };
 
+export type QaPreviewAllowlistRow = {
+  readonly pitch_draft_id: string;
+  readonly note: string;
+  readonly created_at: string;
+};
+
 export type MediaValidationRow = {
   readonly id: string;
   readonly bucket_id: string;
@@ -291,6 +297,18 @@ export type Database = {
         };
         Update: {
           readonly value?: string;
+        };
+        Relationships: [];
+      };
+      qa_preview_allowlist: {
+        Row: QaPreviewAllowlistRow;
+        Insert: {
+          readonly pitch_draft_id: string;
+          readonly note: string;
+          readonly created_at?: string;
+        };
+        Update: {
+          readonly note?: string;
         };
         Relationships: [];
       };

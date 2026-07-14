@@ -1,6 +1,6 @@
 # 제품 정의
 
-> 이 문서는 목표 제품 계약입니다. 구현 현황(2026-07-13, 2차 감사 Slice 0~~10 완주): Flow A~~C와 공개 피치·인박스·Intro Room·Creator kit은 구현·검증됐고, Dater는 문구·사진·audience·위치 정밀도·기간(7/14일)을 실제로 통제합니다. Flow D(추가 vouch)와 MP4 export는 P1 미구현입니다. 신원·얼굴 검증은 스키마·게이트만 존재하며 벤더 연동 전까지 enforcement off — 완료 상태는 `docs/SESSION_HANDOFF.md`·`docs/TASKS.md`를 따릅니다.
+> 이 문서는 목표 제품 계약입니다. 구현 현황(2026-07-14, 3차 감사 기준 `0f9311f`): 판정은 **기능성 내부 베타**입니다. Flow A~~C의 happy path와 공개 피치·인박스·Intro Room·Creator kit 화면은 존재하지만, 3차 감사가 확인한 대로 Dater 통제는 부분 구현입니다 — 문구·audience·위치 정밀도·기간(7/14일) 통제는 동작하나 **Dater 사진 교체는 정상 UI에서 validation 403으로 실패하고, direct 경로는 미검수 사진·문구를 publish할 수 있습니다**(감사 P0-NEW-3, Slice 2에서 수정 예정). Flow D(추가 vouch)와 MP4 export는 P1 미구현입니다. 신원·얼굴 검증은 스키마·게이트만 존재하며 벤더 연동 전까지 enforcement off — 완료 상태는 `docs/FRIENDWORD_THIRD_AUDIT_HANDOFF_2026-07-14.md`·`docs/SESSION_HANDOFF.md`·`docs/TASKS.md`를 따릅니다.
 
 ## Overview
 

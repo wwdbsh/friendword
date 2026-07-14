@@ -90,7 +90,7 @@ Creator Launch만으로 100개 무료 캠페인을 보전하려면 약 19% 구�
 
 1. **Render late**: preview는 client-side motion, 서버 MP4는 Dater 최종 승인 후 1회만 생성합니다.
 2. **Verify late**: Dater는 승인 직전, Interested Person은 프로필 제출 직전에 liveness를 실행합니다.
-3. **One free campaign**: verified Dater당 무료 활성 캠페인 1개, 기본 theme, server re-cut 없음으로 제한합니다.
+3. **One free campaign**: verified Dater당 무료 활성 캠페인 1개, 기본 theme, server re-cut 없음으로 제한합니다. **(미구현 — 3차 감사 H-7: 이 수량을 강제하는 DB guard/constraint가 없어 현재는 문서상 정책일 뿐입니다. Slice 5에서 서버 강제 예정.)**
 4. **Finite free cohort**: 초기 무료 캠페인은 월 100개처럼 예산 슬롯을 두고 소진 후 waitlist/다음 달 발급으로 전환합니다. 기존 캠페인과 안전 기능은 유지합니다.
 5. **Lifecycle deletion**: 원본 음성·실패 render는 승인 후 7일, 만료 캠페인의 대형 export는 grace period 후 삭제합니다.
 6. **Rate limit**: 전화번호·device·IP·campaign 기준 OTP, AI generation, liveness와 render 횟수를 제한합니다.
@@ -103,7 +103,7 @@ Creator Launch만으로 100개 무료 캠페인을 보전하려면 약 19% 구�
 
 - **매일**: provider별 spend, failed OTP/render, fraud anomaly
 - **매주**: campaign cohort revenue, variable cost, gross contribution, refund 및 이 문서의 공식 가격 재검증
-- **월간 hard cap**: 초기 전체 cloud/API 비용 **$200**
+- **월간 hard cap**: 초기 전체 cloud/API 비용 **$200**. **(주의 — 3차 감사 P0-NEW-1: 현재 원장·cap 골격은 있으나 reserve/reconcile RPC가 일반 인증 사용자에게 열려 있어 cap 소진·해제 조작과 동시 요청 중복 과금이 가능합니다. Slice 1이 끝나기 전에는 "hard cap 완료"라고 표현하지 않습니다.)**
 - **75% 도달**: 신규 무료 슬롯 축소
 - **90% 도달**: 유료·기존 안전 경로를 제외한 고비용 작업 중지
 - **가격 유지 조건**: Creator Launch ≥ 10%, Campaign Pass ≥ 3% 또는 동일 contribution의 독립 상품 조합

@@ -56,9 +56,12 @@ const created = {
 let failures = 0;
 
 // Launch gates (0023): this advisor-run E2E is internal QA, so it opens the
-// gates for the run window and restores the previous values afterwards.
+// commerce gate for the run window and restores the previous value afterwards.
 // Hosted defaults stay 'off' until the second-audit Slice 10 release gate.
-const LAUNCH_GATE_KEYS = ['real_payments_enabled', 'public_beta_enabled'];
+// Third audit P0-NEW-4: public visibility is NO LONGER opened globally here.
+// Instead the created draft is added to qa_preview_allowlist below, so the
+// public-read gate stays 'off' for the rest of the internet during the run.
+const LAUNCH_GATE_KEYS = ['real_payments_enabled'];
 let previousGateValues = null;
 
 async function openLaunchGates() {
@@ -183,6 +186,15 @@ try {
     .single();
   if (draftError) throw new Error(`draft insert: ${draftError.message}`);
   created.draftId = draft.id;
+
+  // Third audit P0-NEW-4: opt this run's draft into public visibility via the
+  // QA preview allowlist instead of flipping public_beta_enabled globally.
+  // Placed before publish (step 8) and interest (step 12) so the allowlist-
+  // aware publish/interest triggers and the public-read gate all see the row.
+  const { error: allowlistError } = await admin
+    .from('qa_preview_allowlist')
+    .insert({ pitch_draft_id: draft.id, note: `e2e-${stamp}` });
+  if (allowlistError) throw new Error(`qa allowlist insert: ${allowlistError.message}`);
 
   async function uploadObject(objectPath, contentType, bytes) {
     const { data: ticket, error: ticketError } = await introducer.client.storage
@@ -1243,6 +1255,10 @@ try {
     );
   }
   if (created.draftId) {
+    await cleanup(
+      'qa preview allowlist',
+      admin.from('qa_preview_allowlist').delete().eq('pitch_draft_id', created.draftId),
+    );
     await cleanup(
       'draft analytics',
       admin

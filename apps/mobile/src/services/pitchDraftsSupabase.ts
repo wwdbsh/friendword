@@ -50,6 +50,62 @@ export class NeedsSignInError extends Error {
   }
 }
 
+/**
+ * Stable substring of the SQLERRM raised by 0016 `submit_for_consent` when
+ * `media_validation_enforcement` is on and a pitch asset has no `passed`
+ * media_validations row. A manual ("Write it myself") pitch never transcribes
+ * or voice-moderates, so its voice validation stays 'skipped' and this gate
+ * fails the submission closed. Match on a stable substring — the message text
+ * is owned by the migration. Distinct from the profile gate ('profile photos
+ * require completed validation').
+ */
+const MEDIA_VALIDATION_GATE_MESSAGE = 'pitch media requires completed validation';
+
+/**
+ * Copy for the honest manual→AI trade-off: while safety review is on, a pitch
+ * the introducer wrote without AI review cannot be published, because its voice
+ * was never transcribed or moderated. They can switch to AI review (which runs
+ * that moderation, with consent) or keep the pitch saved as a draft.
+ */
+export const MANUAL_PITCH_NEEDS_AI_REVIEW_MESSAGE =
+  'You wrote this pitch yourself, so its recording never went through AI safety review. ' +
+  'While safety review is on, only AI-reviewed pitches can be published. ' +
+  'Use AI review to submit it, or keep it saved as a draft for now.';
+
+/**
+ * Thrown when {@link HybridPitchDraftService.finalizeConsent} hits the 0016
+ * media-validation gate on a manual (no-AI) draft. The review screen surfaces
+ * this as a product decision — offer the AI review path — rather than a generic
+ * "submission failed".
+ */
+export class ManualPitchNeedsAiReviewError extends PitchDraftSubmissionError {
+  constructor() {
+    super(MANUAL_PITCH_NEEDS_AI_REVIEW_MESSAGE);
+    this.name = 'ManualPitchNeedsAiReviewError';
+  }
+}
+
+/** Walks the error → cause chain for a Postgres SQLERRM substring. */
+function includesServerMessage(error: unknown, needle: string, depth = 0): boolean {
+  if (depth > 5 || error === null || typeof error !== 'object') {
+    return false;
+  }
+  const record = error as { message?: unknown; cause?: unknown };
+  if (typeof record.message === 'string' && record.message.includes(needle)) {
+    return true;
+  }
+  return includesServerMessage(record.cause, needle, depth + 1);
+}
+
+/**
+ * True when a caught submit_for_consent failure is the media-validation gate
+ * rejection (fail-closed under enforcement), as opposed to network, auth, text
+ * moderation, or ownership errors.
+ */
+export function isPitchMediaValidationGateRejection(error: unknown): boolean {
+  return includesServerMessage(error, MEDIA_VALIDATION_GATE_MESSAGE);
+}
+
 const RELATIONSHIP_TYPE_MAP: Record<RelationshipKind, ServerRelationshipType> = {
   Friend: 'friend',
   Coworker: 'coworker',
@@ -287,6 +343,13 @@ export class HybridPitchDraftService implements PitchDraftService {
     } catch (error: unknown) {
       if (error instanceof UnauthenticatedError) {
         throw new NeedsSignInError();
+      }
+      // A manual (no-AI) draft's voice is never transcribed/moderated, so the
+      // 0016 gate fails its submission closed while enforcement is on. Map that
+      // one server rejection to an honest product prompt; other failures keep
+      // their existing generic surfacing.
+      if (isPitchMediaValidationGateRejection(error)) {
+        throw new ManualPitchNeedsAiReviewError();
       }
       throw error;
     }

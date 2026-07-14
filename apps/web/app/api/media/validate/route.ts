@@ -126,12 +126,20 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: 'object is not yours to validate' }, { status: 403 });
     }
   } else {
+    // pitch-media: the Introducer who created the draft may validate at any
+    // time; the Dater (subject) may validate only while the draft awaits their
+    // consent (P0-NEW-3). Any other caller — including a stranger — stays 403.
+    // The Dater's moderation is still consent-first: reserve runs with the
+    // Dater as target_user against their own draft-scoped AI consent below.
     const { data: draft } = await serviceClient
       .from('pitch_drafts')
-      .select('created_by_user_id')
+      .select('created_by_user_id, subject_user_id, status')
       .eq('id', ownerPrefix)
       .maybeSingle();
-    if (draft === null || draft.created_by_user_id !== callerId) {
+    const isCreator = draft !== null && draft.created_by_user_id === callerId;
+    const isConsentSubject =
+      draft !== null && draft.subject_user_id === callerId && draft.status === 'consent_pending';
+    if (draft === null || (!isCreator && !isConsentSubject)) {
       return NextResponse.json({ error: 'object is not yours to validate' }, { status: 403 });
     }
   }

@@ -180,3 +180,17 @@
 - **이유**: 3차 감사 P0-NEW-1(비용 cap 조작·중복 과금·실패 비용 소실)·P0-NEW-2(동의 전 사진 전송, revision 무결성 부재).
 - **검토 대안**: 라우트에서만 권한 검사(DB direct RPC 우회 가능 — 기각), 실패 시 실비용 조회 후 기록(provider가 실패 과금을 조회로 안 주는 경우 다수 — 보수적 estimate 유지 채택), 동의를 draft 스코프로만 유지(Interested/프로필 경로 커버 불가 — own_content 신설).
 - **영향**: audit3 c02·c03이 계약을 회귀로 고정(red→green 증거 확보). b07/b08은 새 계약으로 갱신. 모바일 67 테스트(+8), 웹 audit3 10 테스트 신설·CI 편입. README·COST_MODEL의 cap 표현을 acceptance 근거와 함께 상향. 잔여: 실키 enforcement-on 검증·실기기 QA는 사용자 게이트(§12), Dater upload의 draft-scoped 동의 확장은 Slice 2.
+
+## 2026-07-14: 채팅 moderation 출시 정책 — reactive-only 명시 (Slice 2, H-3)
+
+- **결정**: Intro Room 채팅의 출시 정책을 **reactive-only**로 명시한다. 서버가 강제하는 것: 참가자 판정(비참가자 read/write 불가), 메시지 길이(2000)·rate limit(20건/60초/room), 신고(운영 큐 적재)·차단(즉시 양방향 중단)·나가기(방 종료), 차단·정지·삭제 계정의 접근 차단. 서버가 하지 않는 것: **pre-send 외부 AI moderation과 async quarantine은 하지 않으며, 이를 "moderation complete"라고 표현하지 않는다.** 운영 SLA: 내부 베타 동안 신고 큐를 매일 1회 이상 확인(OPS 기존 SLA 준용), 외부 베타 전 재평가.
+- **이유**: 3차 감사 H-3. pre-send 외부 AI는 대화 양쪽의 AI 처리 동의와 메시지당 비용(사용자당 quota 소진)을 요구하고, 사적 대화 전문을 외부 provider로 상시 전송하는 프라이버시 트레이드오프가 있다 — 관심 표현까지 양측이 신원·프로필 검증을 거친 1:1 대화라는 점에서 내부 베타 위험 수준과 불균형하다.
+- **검토 대안**: pre-send OpenAI moderation(양측 동의+비용+사생활 전송 — 외부 베타 규모에서 재평가), keyword 기반 high-risk 감지(우회가 쉬워 안전 착시를 만들 위험 — 기각), async quarantine(전송 후 회수는 이미 노출된 뒤라 효과 제한 — 기각).
+- **영향**: COMMUNITY_GUIDELINES·OPS에 정책·한계를 명시. 외부 베타 해제 조건 재평가 목록에 "채팅 moderation 정책 재검토"를 유지. 이 정책은 `public_beta_enabled=off`(0034 authoritative) 상태의 내부 베타 기준이다.
+
+## 2026-07-14: Dater revision·publish의 authoritative validation과 승인 snapshot 완결 (Slice 2, P0-NEW-3·P0-2)
+
+- **결정**: (1) `/api/media/validate`의 pitch-media 인가를 확장 — draft creator(Introducer) 상시, **subject(Dater)는 status='consent_pending' 동안** 허용(그 외 403 유지). Dater의 moderation 예약은 Dater 본인의 draft-scoped AI 동의로 게이트(0036이 reserve/record 동의 RPC의 draft 인가를 subject로 확장). (2) `create_dater_revision`은 enforcement on에서 포함 photo 전부의 validation full-pass와 텍스트의 content-addressed passed verdict(공식은 0026/라우트와 byte-identical, raw `headline\n\nbody` — 입력은 양쪽 다 zod trim을 거쳐 동일)를 요구. `/api/moderate-text`에 `dater_pitch_content` kind 신설(subject+consent_pending 인가, scope는 'pitch_content'로 기록). (3) **dater_edited 확인 항목**: Dater가 문구를 바꾼 revision은 `dater_edited=true`로 기록되고 approve에 `hard_claims_confirmed=true`를 요구(플래그 무관) — AI 재추출 없이 "직접 바꾼 문구의 사실성 확인"을 보수적 상위집합으로 강제. (4) `approve_and_publish_pitch`가 included photo를 승인 시 재검(enforcement on)하고 **approved revision transcript를 pitch_drafts.transcript로 무조건 복사** — public reader가 읽는 행이 승인 snapshot과 일치. (5) manual(no-AI) 경로 정책: enforcement on 동안 manual 초안 '제출'은 의도적으로 차단하고 모바일이 전용 카피("AI 검수 없이 쓴 초안은 safety review가 켜진 동안 게시 불가")와 AI 경로 전환을 제공 — 미검수 음성이 공개되는 것보다 정직한 제한을 택함(사람 검수 운영 도입 시 재평가).
+- **이유**: 3차 감사 P0-NEW-3(정상 UI 403 + direct 우회 publish), P0-2(manual 경로 회귀의 정책 부재), CP-1.
+- **검토 대안**: Dater upload를 Introducer 위임 검증으로 우회(주체 불일치·감사 명시 기각), Dater edit 시 AI 재추출(Dater 경로에 비용·동의 추가 — 확인 강제로 대체), transcript를 read 시점 revision 조인으로 해결(reader 전면 개편 — atomic copy 채택).
+- **영향**: audit3 c04 + 웹 audit3 8테스트(dater 인가 매트릭스) red→green. b13은 dater_edited 계약으로 갱신. consent Playwright에 동의 스텝 반영(40 passed). e2e-production에 mock 없는 Dater upload→validate→moderate→revision→publish 단계(6k) 추가. Dater "사진 교체" 대표 기능이 정상 UI 경로에서 실제로 동작.

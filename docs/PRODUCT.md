@@ -1,6 +1,6 @@
 # 제품 정의
 
-> 이 문서는 목표 제품 계약입니다. 구현 현황(2026-07-14, 3차 감사 기준 `0f9311f`): 판정은 **기능성 내부 베타**입니다. Flow A~~C의 happy path와 공개 피치·인박스·Intro Room·Creator kit 화면은 존재하지만, 3차 감사가 확인한 대로 Dater 통제는 부분 구현입니다 — 문구·audience·위치 정밀도·기간(7/14일) 통제는 동작하나 **Dater 사진 교체는 정상 UI에서 validation 403으로 실패하고, direct 경로는 미검수 사진·문구를 publish할 수 있습니다**(감사 P0-NEW-3, Slice 2에서 수정 예정). Flow D(추가 vouch)와 MP4 export는 P1 미구현입니다. 신원·얼굴 검증은 스키마·게이트만 존재하며 벤더 연동 전까지 enforcement off — 완료 상태는 `docs/FRIENDWORD_THIRD_AUDIT_HANDOFF_2026-07-14.md`·`docs/SESSION_HANDOFF.md`·`docs/TASKS.md`를 따릅니다.
+> 이 문서는 목표 제품 계약입니다. 구현 현황(2026-07-14, 3차 감사 기준 `0f9311f`): 판정은 **기능성 내부 베타**입니다. Flow A~~C의 happy path와 공개 피치·인박스·Intro Room·Creator kit 화면은 존재합니다. Dater 통제(문구·사진·audience·위치 정밀도·기간)는 Slice 2(2026-07-14)에서 서버 authoritative로 수정됐습니다 — Dater 사진 validation 403 해소, revision·publish의 사진 validation/텍스트 moderation 게이트(enforcement on 시 fail-closed), dater edit 확인 강제, 승인 transcript snapshot copy. 단 enforcement 스위치는 OPENAI 키 전까지 off이며, 실제 output preview·cover 순서 통제(CP-1 잔여)는 미구현입니다. Flow D(추가 vouch)와 MP4 export는 P1 미구현입니다. 신원·얼굴 검증은 스키마·게이트만 존재하며 벤더 연동 전까지 enforcement off — 완료 상태는 `docs/FRIENDWORD_THIRD_AUDIT_HANDOFF_2026-07-14.md`·`docs/SESSION_HANDOFF.md`·`docs/TASKS.md`를 따릅니다.
 
 ## Overview
 

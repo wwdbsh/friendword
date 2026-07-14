@@ -6,12 +6,13 @@
 
 - 판정(3차 감사): **기능성 내부 베타** — 외부 공개·실결제·Grand Prize 제출 준비 아님. green test는 완료 증거가 아니다(감사 §0-1).
 - 게이트 실상(Slice 0 이후): `real_payments_enabled=off`는 결제를 막고, **`public_beta_enabled=off`는 이제 interest 제출 + campaign publish 전이 + 공개 read(공개 페이지·OG)를 모두 차단한다**(migration 0034 + repo/OG 게이트). 내부 QA 예외는 service-role 전용 `qa_preview_allowlist`(pitch_draft 단위)뿐이며, 프로덕션 E2E도 gate 전역 토글 대신 이 allowlist를 쓴다.
-- 파이프라인: pnpm 모노레포(`apps/mobile`·`apps/web`·`packages/*`·`supabase`), migrations **0001~0034 hosted 배포**, 모든 전이는 SECURITY DEFINER RPC+트리거. audit2 14/14 + audit3 c01 그린·CI 편입.
+- 파이프라인: pnpm 모노레포(`apps/mobile`·`apps/web`·`packages/*`·`supabase`), migrations **0001~0036 hosted 배포**, 모든 전이는 SECURITY DEFINER RPC+트리거. audit2 14/14 + audit3 c01~c04(+웹 18) 그린·CI 편입.
 - 분석: outcome 이벤트는 0033 트리거가 기록(`recorded_by:"server"`), client는 검증된 interaction 9종만. 만료는 `expire_due_campaigns()`+`run-scheduled-ops.mjs`.
 - 작업 체제: **Advisor(오케스트레이터) + Claude Opus 워커 2~3명(Agent로 생성). Codex는 더 이상 사용하지 않는다.**
 
 ## DONE
 
+- 3차 감사 Slice 2(2026-07-14): P0-NEW-3·P0-2 해소 — 0036으로 Dater revision·publish에 사진 validation·텍스트 moderation 게이트(enforcement fail-closed), dater_edited 확인 강제(플래그 무관), 승인 transcript snapshot copy(무조건), reserve/consent의 dater(subject) 인가 확장. 웹은 media/validate Dater 403 해소 + moderate-text `dater_pitch_content` + ConsentFlow 동의·moderation 선행. 모바일 manual 제출 차단 정직 카피. 채팅 moderation reactive-only 정책 문서화(H-3). audit3 c04 + 웹 8테스트, e2e-production에 mock 없는 Dater 단계(6k).
 - 3차 감사 Slice 1(2026-07-14): P0-NEW-1·2 해소 — 0035로 reserve/reconcile service-role 전용화(+lease/idempotency/보수적 실패 회계/cap 동시성), AI 동의를 모든 kind로 확장하고 `ai_disclosure_current_revision`에 bind(`own_content` scope 신설). 모바일 draft 생성→동의→업로드 순서 분리, `write_manually` 무 AI(구조 검사만), 웹 interest own_content 동의 UI. audit3 c02·c03 + 웹 audit3 10테스트(red→green 증거, CI 편입).
 - 3차 감사 Slice 0(2026-07-14): P0-NEW-4 해소 — `qa_preview_allowlist` + campaigns publish 전이 트리거 + interests 트리거 allowlist 인지(0034), 공개 read 게이트(`isCampaignPubliclyVisible` → `/p`·interest·OG 공통), e2e allowlist 전환. audit3 스위트 신설(c01 red→green 증거 확보, CI 편입). 문서 truth reset(README·PRODUCT·COST_MODEL·ANALYTICS_PLAN·TASKS·DECISIONS·본 문서).
 
@@ -21,16 +22,15 @@
 
 ## IN PROGRESS
 
-- 3차 감사 대응 Slice 0~5 진행 중(사용자 goal 지시, 2026-07-14). Slice 0·1 완료, Slice 2(Dater validation/UGC) 착수 예정.
+- 3차 감사 대응 Slice 0~5 진행 중(사용자 goal 지시, 2026-07-14). Slice 0·1·2 완료, Slice 3(Account/privacy/storage) 착수 예정.
 
 ## TODO
 
-1. (P0) Slice 2: Dater media auth 403 수정, photo/text publish gate, hard claim 재추출, approved snapshot end-to-end, chat moderation 정책, manual voice enforcement(P0-NEW-3, H-3).
-2. (P0) Slice 3: SECURITY DEFINER read RPC active guard(H-1), token/media purge(H-4), storage DELETE/rollback(H-5), deletion retention·scheduled ops(H-2·H-6).
-3. (P0) Slice 4: Creator intent concurrency(P0-5), Campaign Pass 상태기계(P0-6), RevenueCat alias/transfer resolution(P0-3).
-4. (P0) Slice 5: Introducer 무료 live share(GP-P0-1), acquisition surface·referral chain(GP-P0-2), exporter metric truth(H-8·9), 무료 활성 1캠페인 guard(H-7).
-5. (P1) 각 Slice와 같은 turn에 문서 truth reset(감사 §0-6), 새 DB 변경마다 우회·concurrency·retry 회귀 테스트(감사 §0-5).
-6. (P2) 사용자 키 게이트: RevenueCat sandbox 실왕복, identity 벤더, OPENAI 키, 실기기 iOS QA, Resend/`EXPO_PUBLIC_WEB_ORIGIN`.
+1. (P0) Slice 3: SECURITY DEFINER read RPC active guard(H-1), token/media purge(H-4), storage DELETE/rollback(H-5), deletion retention·scheduled ops(H-2·H-6).
+2. (P0) Slice 4: Creator intent concurrency(P0-5), Campaign Pass 상태기계(P0-6), RevenueCat alias/transfer resolution(P0-3).
+3. (P0) Slice 5: Introducer 무료 live share(GP-P0-1), acquisition surface·referral chain(GP-P0-2), exporter metric truth(H-8·9), 무료 활성 1캠페인 guard(H-7).
+4. (P1) 각 Slice와 같은 turn에 문서 truth reset(감사 §0-6), 새 DB 변경마다 우회·concurrency·retry 회귀 테스트(감사 §0-5).
+5. (P2) 사용자 키 게이트: RevenueCat sandbox 실왕복, identity 벤더, OPENAI 키, 실기기 iOS QA, Resend/`EXPO_PUBLIC_WEB_ORIGIN`.
 
 ## IMPORTANT DECISIONS
 

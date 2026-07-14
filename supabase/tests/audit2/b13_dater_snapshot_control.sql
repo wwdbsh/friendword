@@ -266,10 +266,11 @@ BEGIN
     failures := array_append(failures, 'stale revision was publishable after the dater edit');
   END IF;
 
-  -- Exactly the dater snapshot publishes.
+  -- Exactly the dater snapshot publishes. The dater rewrote the copy, so
+  -- 0036 requires hard-claim confirmation (dater_edited is flag-independent).
   SELECT campaign_slug INTO published_slug
     FROM public.approve_and_publish_pitch(
-      draft, 7, dater_revision, ARRAY[kept_photo], false
+      draft, 7, dater_revision, ARRAY[kept_photo], true
     );
   IF published_slug IS NULL THEN
     failures := array_append(failures, 'approve_and_publish_pitch returned no slug');

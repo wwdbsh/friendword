@@ -16,8 +16,21 @@ import {
 } from '@friendword/data';
 
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
+import { requestDaterPitchModeration } from '@/lib/moderateText';
 
 import styles from './page.module.css';
+
+// Dater AI-processing disclosure (third audit P0-NEW-3). Adding a new photo or
+// editing the copy sends it to an external AI safety review before the page is
+// public; that transfer needs an affirmative, draft-scoped consent first.
+const DATER_AI_DISCLOSURE_COPY =
+  'Adding a new photo or rewriting this text runs it through an external AI safety review (OpenAI) before your page goes public. Uploading only reaches Friendword’s storage — nothing is sent to the AI until you agree here.';
+const DATER_AI_CONSENT_REQUIRED_COPY =
+  'Agree to the AI safety review above before adding a photo or rewriting the text. Choosing from the current photos and approving stay open either way.';
+const DATER_AI_UNAVAILABLE_COPY =
+  'The AI safety review needed for new photos and text edits is unavailable right now. You can still choose from the current photos, approve, or request changes.';
+const DATER_TEXT_FLAGGED_COPY =
+  'That wording didn’t pass our safety review. Edit it and try saving again.';
 
 const RELATIONSHIP_LABELS: Record<string, string> = {
   friend: 'Friend',
@@ -198,6 +211,9 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   const [editBody, setEditBody] = useState('');
   const [savingEdits, setSavingEdits] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [daterAiConsent, setDaterAiConsent] = useState<'pending' | 'granted'>('pending');
+  const [aiDisclosureRevision, setAiDisclosureRevision] = useState<string | null>(null);
+  const [consentingAi, setConsentingAi] = useState(false);
   const [editStatus, setEditStatus] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const [publishDays, setPublishDays] = useState<PublishDays>(14);
@@ -229,6 +245,9 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         const { pitchDraftId } = await repo.claim(token);
         const review = await repo.getConsentReview(pitchDraftId);
         const context = await loadReviewContext(repo, preview, review);
+        const disclosureRevision = await repo.getAiDisclosureRevision().catch(() => null);
+        setAiDisclosureRevision(disclosureRevision);
+        setDaterAiConsent('pending');
         setIncludedAssetIds(context.photos.map((photo) => photo.assetId));
         setEditHeadline(review.revision.headline);
         setEditBody(review.revision.body);
@@ -379,6 +398,26 @@ export function ConsentFlow({ token }: { readonly token: string }) {
     }
   }
 
+  async function handleDaterAiConsent() {
+    if (client === null || state.step !== 'review' || aiDisclosureRevision === null) {
+      return;
+    }
+    setConsentingAi(true);
+    setEditError(null);
+    try {
+      const repo = new ConsentRepo(client);
+      await repo.recordDaterAiConsent(state.review.revision.pitch_draft_id, aiDisclosureRevision);
+      setDaterAiConsent('granted');
+    } catch (error: unknown) {
+      if (!(error instanceof Error)) {
+        throw error;
+      }
+      setEditError('We could not record your agreement to the AI review. Please try again.');
+    } finally {
+      setConsentingAi(false);
+    }
+  }
+
   async function handleSaveEdits() {
     if (client === null || state.step !== 'review') {
       return;
@@ -394,11 +433,45 @@ export function ConsentFlow({ token }: { readonly token: string }) {
       return;
     }
 
+    // Text edits run an external AI safety review before the revision is cut, so
+    // the moderation verdict exists for the DB gate and flagged copy never gets
+    // frozen. Photo-only changes carry no new text and skip this.
+    const textChanged =
+      headline !== state.review.revision.headline || body !== state.review.revision.body;
+    if (textChanged && daterAiConsent !== 'granted') {
+      setEditError(DATER_AI_CONSENT_REQUIRED_COPY);
+      return;
+    }
+
     setSavingEdits(true);
     setEditError(null);
     setEditStatus(null);
     try {
       const repo = new ConsentRepo(client);
+      if (textChanged) {
+        const { data: sessionData, error: sessionError } = await client.auth.getSession();
+        const accessToken = sessionData.session?.access_token;
+        if (sessionError !== null || accessToken === undefined) {
+          throw new Error('text moderation requires a session');
+        }
+        const outcome = await requestDaterPitchModeration(
+          state.review.revision.pitch_draft_id,
+          headline,
+          body,
+          accessToken,
+        );
+        if (outcome === 'flagged') {
+          setEditError(DATER_TEXT_FLAGGED_COPY);
+          return;
+        }
+        if (outcome === 'consent-required') {
+          setDaterAiConsent('pending');
+          setEditError(DATER_AI_CONSENT_REQUIRED_COPY);
+          return;
+        }
+        // 'passed' or 'unavailable' (501/502/429): proceed. The DB revision gate
+        // fails closed on a missing verdict while enforcement is on.
+      }
       await repo.createDaterRevision({
         draftId: state.review.revision.pitch_draft_id,
         headline,
@@ -432,6 +505,13 @@ export function ConsentFlow({ token }: { readonly token: string }) {
     const file = event.target.files?.item(0) ?? null;
     event.target.value = '';
     if (client === null || state.step !== 'review' || file === null) {
+      return;
+    }
+    // Consent precedes processing: never send a new photo to validation (and on
+    // to the AI provider) until the Dater has affirmed the AI disclosure.
+    if (daterAiConsent !== 'granted') {
+      setEditStatus(null);
+      setEditError(DATER_AI_CONSENT_REQUIRED_COPY);
       return;
     }
 
@@ -800,6 +880,30 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                 Edit every word and choose every photo before you approve.
               </p>
 
+              {daterAiConsent !== 'granted' && (
+                <div className={styles.aiConsentBlock}>
+                  {aiDisclosureRevision !== null ? (
+                    <>
+                      <p className={styles.muted}>{DATER_AI_DISCLOSURE_COPY}</p>
+                      <button
+                        className={styles.secondary}
+                        type="button"
+                        disabled={consentingAi}
+                        onClick={() => {
+                          void handleDaterAiConsent();
+                        }}
+                      >
+                        {consentingAi ? 'Saving…' : 'Agree to the AI safety review'}
+                      </button>
+                    </>
+                  ) : (
+                    <p className={styles.muted} role="status">
+                      {DATER_AI_UNAVAILABLE_COPY}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className={styles.editFields}>
                 <label className={styles.label} htmlFor="dater-headline">
                   Headline
@@ -886,7 +990,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                 className={styles.fileInput}
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
-                disabled={uploadingPhoto || savingEdits}
+                disabled={uploadingPhoto || savingEdits || daterAiConsent !== 'granted'}
                 onChange={(event) => {
                   void handlePhotoUpload(event);
                 }}
@@ -1029,21 +1133,37 @@ export function ConsentFlow({ token }: { readonly token: string }) {
               )}
             </fieldset>
 
-            {state.review.hardClaims.length > 0 && (
+            {(state.review.hardClaims.length > 0 || state.review.daterEdited) && (
               <div className={styles.claimBlock}>
-                <h2 className={styles.photoHeading}>Claims that need your confirmation</h2>
-                <ul className={styles.claimList}>
-                  {state.review.hardClaims.map((claim) => (
-                    <li key={claim}>{claim}</li>
-                  ))}
-                </ul>
+                <h2 className={styles.photoHeading}>
+                  {state.review.daterEdited && state.review.hardClaims.length === 0
+                    ? 'Confirm your edits are accurate'
+                    : 'Claims that need your confirmation'}
+                </h2>
+                {state.review.daterEdited && (
+                  <p className={styles.muted}>
+                    You rewrote part of this introduction — confirm the wording is truthful before
+                    it goes live.
+                  </p>
+                )}
+                {state.review.hardClaims.length > 0 && (
+                  <ul className={styles.claimList}>
+                    {state.review.hardClaims.map((claim) => (
+                      <li key={claim}>{claim}</li>
+                    ))}
+                  </ul>
+                )}
                 <label className={styles.confirmationRow}>
                   <input
                     type="checkbox"
                     checked={hardClaimsConfirmed}
                     onChange={(event) => setHardClaimsConfirmed(event.target.checked)}
                   />
-                  <span>I confirm all of these claims are true.</span>
+                  <span>
+                    {state.review.daterEdited && state.review.hardClaims.length === 0
+                      ? 'I confirm the introduction I edited is truthful and accurate.'
+                      : 'I confirm all of these claims are true.'}
+                  </span>
                 </label>
               </div>
             )}
@@ -1094,7 +1214,8 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                 editsDirty ||
                 currentAudienceError !== null ||
                 includedAssetIds.length === 0 ||
-                (state.review.hardClaims.length > 0 && !hardClaimsConfirmed)
+                ((state.review.hardClaims.length > 0 || state.review.daterEdited) &&
+                  !hardClaimsConfirmed)
               }
               onClick={handleApprove}
             >

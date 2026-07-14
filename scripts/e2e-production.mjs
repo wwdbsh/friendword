@@ -165,6 +165,17 @@ async function makeUser(email, displayName) {
   return { id: data.user.id, client };
 }
 
+// A structurally valid PNG (signature + IHDR) so the web media/validate route's
+// content sniffing passes and the Dater path exercises the real moderation gate
+// (not just the structural short-circuit) — no image decoder needed.
+function validPngBytes() {
+  const bytes = new Uint8Array(40);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+  bytes.set([0x00, 0x00, 0x00, 0x0d], 8);
+  bytes.set([0x49, 0x48, 0x44, 0x52], 12);
+  return Buffer.from(bytes);
+}
+
 try {
   await openLaunchGates();
 
@@ -457,6 +468,100 @@ try {
     latestRequestError?.message ?? latestRevisionError?.message,
   );
 
+  // 6k. Third audit P0-NEW-3: the Dater takes the authoritative UGC path with
+  // NO route mocks — draft-scoped AI consent, a real photo upload validated
+  // through the web route (which used to 403 the subject), and real text
+  // moderation — before the revision is cut. The point is to prove the normal
+  // UI path runs without a 403; hosted enforcement is off, so the verdicts flow
+  // through even keyless (recorded 'skipped'/501).
+  const { data: daterAiRevisionData, error: daterAiRevisionError } = await dater.client.rpc(
+    'get_ai_disclosure_revision',
+  );
+  const daterAiRevision = typeof daterAiRevisionData === 'string' ? daterAiRevisionData : null;
+  const { error: daterConsentError } = await dater.client.rpc('record_ai_processing_consent', {
+    target_draft_id: draft.id,
+    target_consent_revision: daterAiRevision,
+  });
+  check(
+    '6k. dater records draft-scoped AI-processing consent before any upload',
+    !daterAiRevisionError && !daterConsentError && typeof daterAiRevision === 'string',
+    daterAiRevisionError?.message ?? daterConsentError?.message ?? `revision=${daterAiRevision}`,
+  );
+
+  const daterPhotoName = `dater-${randomBytes(6).toString('hex')}.png`;
+  const daterPhotoObject = `${draft.id}/${daterPhotoName}`;
+  created.photoPaths.push(daterPhotoObject);
+  created.daterPhotoObject = daterPhotoObject;
+  const { data: daterUploadTicket, error: daterUploadTicketError } = await dater.client.storage
+    .from('pitch-media')
+    .createSignedUploadUrl(daterPhotoObject, { upsert: false });
+  if (daterUploadTicketError) {
+    throw new Error(`dater upload ticket: ${daterUploadTicketError.message}`);
+  }
+  const daterPutResponse = await fetch(daterUploadTicket.signedUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'image/png', 'x-upsert': 'false' },
+    body: validPngBytes(),
+  });
+  if (!daterPutResponse.ok) {
+    throw new Error(`dater PUT ${daterPhotoObject} ${daterPutResponse.status}`);
+  }
+  const { data: daterPhotoAsset, error: daterPhotoAssetError } = await dater.client
+    .from('pitch_assets')
+    .insert({
+      pitch_draft_id: draft.id,
+      uploaded_by_user_id: dater.id,
+      asset_type: 'photo',
+      storage_path: `pitch-media/${daterPhotoObject}`,
+      sort_order: 2,
+    })
+    .select('id, asset_type, storage_path')
+    .single();
+  check(
+    '6k1. dater uploads and registers their own photo under RLS',
+    !daterPhotoAssetError && typeof daterPhotoAsset?.id === 'string',
+    daterPhotoAssetError?.message,
+  );
+
+  const daterAccessToken = (await dater.client.auth.getSession()).data.session?.access_token;
+  const daterValidate = await fetch('http://localhost:3000/api/media/validate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${daterAccessToken}` },
+    body: JSON.stringify({ bucket: 'pitch-media', objectName: daterPhotoObject }),
+  });
+  const daterValidateBody = await daterValidate.json().catch(() => null);
+  // Authorized subject → 200 with a recorded verdict (keyless hosts record
+  // 'skipped'); a keyed host may 502 because the 40-byte synthetic PNG isn't a
+  // decodable image at the provider — still past the 403 gate, still authorized.
+  // A 401/403/404 here is the P0-NEW-3 regression.
+  const daterValidateAuthorized =
+    (daterValidate.status === 200 &&
+      ['passed', 'flagged', 'skipped'].includes(daterValidateBody?.moderationStatus)) ||
+    daterValidate.status === 502;
+  check(
+    '6k2. dater validates their photo via the web route with no 403 (P0-NEW-3)',
+    daterValidateAuthorized,
+    `status=${daterValidate.status} moderation=${daterValidateBody?.moderationStatus}`,
+  );
+
+  const daterModerate = await fetch('http://localhost:3000/api/moderate-text', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${daterAccessToken}` },
+    body: JSON.stringify({
+      kind: 'dater_pitch_content',
+      draftId: draft.id,
+      headline: daterHeadline,
+      body: daterBody,
+    }),
+  });
+  // Keyed host → 200 with a verdict; keyless host → 501 (moderation skipped and
+  // deferred to the DB gate). A 401/403/404 here would be the P0-NEW-3 regression.
+  check(
+    '6k3. dater moderates their revision text via the web route (subject authorized)',
+    daterModerate.status === 200 || daterModerate.status === 501,
+    `status=${daterModerate.status}`,
+  );
+
   // 6h. Slice 7 (CP-1): the dater rewrites the copy as a new immutable
   // revision that freezes the draft transcript, and sets publish preferences.
   const { error: transcriptSeedError } = await admin
@@ -471,7 +576,7 @@ try {
       draft_id: draft.id,
       new_headline: daterHeadline,
       new_body: daterBody,
-      included_asset_ids: [voiceAsset.id, photo1Asset.id, photo2Asset.id],
+      included_asset_ids: [voiceAsset.id, photo1Asset.id, photo2Asset.id, daterPhotoAsset.id],
     },
   );
   const daterRevisionId = daterRevisionRows?.[0]?.revision_id;
@@ -482,11 +587,11 @@ try {
     .single();
   const { data: daterRevisionRow } = await dater.client
     .from('consent_revisions')
-    .select('id, revision_number, headline, body, transcript, voice_asset_path')
+    .select('id, revision_number, headline, body, transcript, voice_asset_path, dater_edited')
     .eq('id', daterRevisionId)
     .single();
   check(
-    '6h. dater cuts an immutable revision with frozen transcript and voice path',
+    '6h. dater cuts an immutable, dater-edited revision with frozen transcript and voice path',
     !daterRevisionError &&
       typeof daterRevisionId === 'string' &&
       daterRequestRow?.revision_id === daterRevisionId &&
@@ -494,6 +599,7 @@ try {
       daterRevisionRow?.headline === daterHeadline &&
       daterRevisionRow?.body === daterBody &&
       daterRevisionRow?.transcript?.text === daterTranscript.text &&
+      daterRevisionRow?.dater_edited === true &&
       typeof daterRevisionRow?.voice_asset_path === 'string',
     daterRevisionError?.message,
   );
@@ -659,7 +765,7 @@ try {
     draft_id: draft.id,
     campaign_days: 7,
     revision_id: daterRevisionId,
-    included_asset_ids: [photo1Asset.id],
+    included_asset_ids: [photo1Asset.id, daterPhotoAsset.id],
     hard_claims_confirmed: false,
   };
   const { error: unconfirmedClaimsError } = await dater.client.rpc(
@@ -754,6 +860,11 @@ try {
         html.includes('Read the full voice transcript') &&
         html.includes('E2E transcript: Blair is the friend who shows up.'),
       `status=${pageResponse.status}`,
+    );
+    check(
+      '10d2. /p/[slug] shows the dater-uploaded, dater-validated photo (P0-NEW-3)',
+      html.includes(daterPhotoName),
+      `photo=${daterPhotoName}`,
     );
     const { data: windowRow } = await admin
       .from('campaigns')
@@ -1305,6 +1416,16 @@ try {
     await cleanup(
       'purchase intents',
       admin.from('purchase_intents').delete().eq('scope_id', created.draftId),
+    );
+    if (created.daterPhotoObject) {
+      await cleanup(
+        'dater media validation verdict',
+        admin.from('media_validations').delete().eq('object_name', created.daterPhotoObject),
+      );
+    }
+    await cleanup(
+      'dater text moderation verdict',
+      admin.from('text_moderations').delete().eq('pitch_draft_id', created.draftId),
     );
     await cleanup(
       'pitch draft erasure (requests + revisions cascade)',

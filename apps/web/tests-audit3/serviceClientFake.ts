@@ -7,6 +7,8 @@ export type RpcCall = { readonly fn: string; readonly params: Record<string, unk
 export type ServiceFakeConfig = {
   readonly accountStatus?: 'active' | 'suspended';
   readonly draftOwnerId?: string;
+  readonly draftSubjectId?: string;
+  readonly draftStatus?: string;
   // reserve_provider_usage result: either a returned row or an error.
   readonly reserveRow?: Record<string, unknown> | null;
   readonly reserveError?: { readonly message: string } | null;
@@ -35,7 +37,14 @@ export function createServiceFake(config: ServiceFakeConfig = {}): ServiceFake {
         return { data: { account_status: config.accountStatus ?? 'active' }, error: null };
       }
       if (table === 'pitch_drafts') {
-        return { data: { created_by_user_id: config.draftOwnerId ?? null }, error: null };
+        return {
+          data: {
+            created_by_user_id: config.draftOwnerId ?? null,
+            subject_user_id: config.draftSubjectId ?? null,
+            status: config.draftStatus ?? 'draft',
+          },
+          error: null,
+        };
       }
       if (table === 'media_validations') {
         return { data: config.storedModeration ?? null, error: null };

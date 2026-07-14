@@ -35,3 +35,7 @@ Friendword는 18세 이상만 사용할 수 있으며 마케팅 타깃은 21~34�
 ## Moderation
 
 업로드 전후 objectionable content를 필터링하되 자동 필터가 운영자 검토를 대체하지 않습니다. false positive/negative 샘플은 비식별화하여 검토하고, 반복 신고 사용자·캠페인·device risk signal을 함께 평가합니다. 공개 support contact와 child safety contact는 출시 전에 확정해야 합니다.
+
+### Intro Room 채팅의 한계 (정직한 범위 — 2026-07-14 결정, DECISIONS 참조)
+
+Intro Room 메시지는 **전송 전 자동 검열(pre-send AI moderation)을 거치지 않습니다.** 서버가 강제하는 것은 참가자 판정, 길이·rate 제한, 신고·차단·나가기, 차단/정지 계정 접근 차단이며, 나머지는 신고 기반(reactive) 운영 검토입니다 — 내부 베타 동안 신고 큐를 매일 1회 이상 확인합니다. 사적 1:1 대화 전문을 외부 AI로 상시 전송하지 않는 프라이버시 트레이드오프에 따른 의도적 정책이며, 외부 베타 전 재평가합니다. 이 상태를 "moderation complete"라고 표현하지 않습니다.

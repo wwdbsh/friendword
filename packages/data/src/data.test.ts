@@ -669,9 +669,76 @@ describe('ConsentRepo', () => {
       revision,
       assets,
       hardClaims: ['Owns a home'],
+      daterEdited: false,
     });
     expect(filterByDraftId).toHaveBeenCalledWith('pitch_draft_id', draftId);
     expect(filterByAssetIds).toHaveBeenCalledWith('id', [firstPhotoId, secondPhotoId]);
+  });
+
+  it('flags a dater-edited revision so approval demands a confirmation', async () => {
+    signedInSession();
+    mocks.consentRequestSelect.mockReturnValue({
+      eq: () => ({ single: async () => ({ data: { revision_id: revisionId }, error: null }) }),
+    });
+    mocks.consentRevisionSelect.mockReturnValue({
+      eq: () => ({
+        eq: () => ({
+          single: async () => ({
+            data: {
+              id: revisionId,
+              pitch_draft_id: draftId,
+              revision_number: 3,
+              headline: 'Edited headline',
+              body: 'Edited body',
+              structure: null,
+              asset_ids: [],
+              voice_asset_path: null,
+              content_hash: 'hash',
+              created_at: '2026-07-13T00:00:00Z',
+              dater_edited: true,
+            },
+            error: null,
+          }),
+        }),
+      }),
+    });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    const review = await repo.getConsentReview(draftId);
+    expect(review.daterEdited).toBe(true);
+    expect(review.hardClaims).toEqual([]);
+  });
+
+  it('reads the AI disclosure revision through the C1 RPC', async () => {
+    signedInSession();
+    mocks.rpc.mockResolvedValue({ data: 'ai-2026-07', error: null });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await expect(repo.getAiDisclosureRevision()).resolves.toBe('ai-2026-07');
+    expect(mocks.rpc).toHaveBeenCalledWith('get_ai_disclosure_revision');
+  });
+
+  it('records draft-scoped dater AI consent for the given revision', async () => {
+    signedInSession();
+    mocks.rpc.mockResolvedValue({ data: 'consent-id', error: null });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await repo.recordDaterAiConsent(draftId, 'ai-2026-07');
+
+    expect(mocks.rpc).toHaveBeenCalledWith('record_ai_processing_consent', {
+      target_draft_id: draftId,
+      target_consent_revision: 'ai-2026-07',
+    });
+  });
+
+  it('throws when dater AI consent cannot be recorded so the gate stays closed', async () => {
+    signedInSession();
+    mocks.rpc.mockResolvedValue({ data: null, error: { message: 'permission denied' } });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await expect(repo.recordDaterAiConsent(draftId, 'ai-2026-07')).rejects.toBeInstanceOf(
+      DataLayerError,
+    );
   });
 
   it('fails closed when a revision structure is malformed', async () => {

@@ -86,6 +86,12 @@ export type ConsentReview = {
   readonly revision: ConsentRevision;
   readonly assets: readonly PitchAssetRow[];
   readonly hardClaims: readonly string[];
+  /**
+   * True when the current revision was cut by the Dater editing the copy
+   * (third audit P0-NEW-3). The approve gate then requires an explicit
+   * hard-claims confirmation, so the UI always surfaces the confirmation.
+   */
+  readonly daterEdited: boolean;
 };
 
 export type ConsentApproval = {
@@ -259,11 +265,48 @@ export class ConsentRepo {
       throw new DataLayerError('consent.getConsentReview.structure', parsedStructure.error);
     }
 
+    // `dater_edited` lands with migration 0036; the generated Row type is
+    // regenerated at integration time, so read it structurally until then.
+    const daterEdited =
+      (revision as { readonly dater_edited?: boolean | null }).dater_edited === true;
+
     return {
       revision,
       assets,
       hardClaims: parsedStructure.data?.hard_claims_requiring_confirmation ?? [],
+      daterEdited,
     };
+  }
+
+  /**
+   * Current AI-processing disclosure revision (third audit C1 RPC). The Dater
+   * must see and affirm this before any new photo or edited text is sent to the
+   * external moderation provider. Returns null when the RPC is unavailable so
+   * the caller can keep the AI actions closed.
+   */
+  async getAiDisclosureRevision(): Promise<string | null> {
+    await this.getRequiredSession();
+    const { data, error } = await this.client.rpc('get_ai_disclosure_revision');
+    if (error !== null) {
+      throw new DataLayerError('consent.getAiDisclosureRevision', error);
+    }
+    return typeof data === 'string' && data !== '' ? data : null;
+  }
+
+  /**
+   * Records the Dater's affirmative, draft-scoped AI-processing consent for the
+   * given disclosure revision (third audit C2). Idempotent server-side; throws
+   * on failure so the caller keeps the gate closed and never starts processing.
+   */
+  async recordDaterAiConsent(draftId: string, revision: string): Promise<void> {
+    await this.getRequiredSession();
+    const { error } = await this.client.rpc('record_ai_processing_consent', {
+      target_draft_id: uuidSchema.parse(draftId),
+      target_consent_revision: revision,
+    });
+    if (error !== null) {
+      throw new DataLayerError('consent.recordDaterAiConsent', error);
+    }
   }
 
   /** Signed view URL for a registered asset ('pitch-media/<draft>/<file>'). */

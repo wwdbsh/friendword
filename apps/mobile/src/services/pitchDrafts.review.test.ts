@@ -1,8 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
+import { DataLayerError } from '@friendword/data';
 import type { ConsentRequestRow, PitchDraftRow } from '@friendword/data';
 
 import { hasFinalizedConsent, MockPitchDraftService, type PitchDraftStorage } from './pitchDrafts';
-import { HybridPitchDraftService, isRecoveredServerDraft } from './pitchDraftsSupabase';
+import {
+  HybridPitchDraftService,
+  isRecoveredServerDraft,
+  ManualPitchNeedsAiReviewError,
+} from './pitchDraftsSupabase';
 import { EMPTY_PITCH_STRUCTURE, type PitchDraftId, type PitchReview } from './types';
 
 const REVIEW: PitchReview = {
@@ -370,5 +375,67 @@ describe('pitch draft AI review flow', () => {
 
     expect(drafts.map((draft) => draft.id)).toEqual([SERVER_ROW.id, olderServerRow.id]);
     expect(draftsAfterSync.map((draft) => draft.id)).toEqual([SERVER_ROW.id, olderServerRow.id]);
+  });
+
+  it('surfaces the media-validation gate rejection as a manual→AI review prompt', async () => {
+    const local = createService();
+    const id = await createCompleteDraft(local);
+    await local.saveReview(id, { ...REVIEW, generationMode: 'manual' });
+    await local.attachServerDraft(id, SERVER_ROW.id);
+    const unexpected = async (): Promise<never> => {
+      throw new Error('Unexpected repository method');
+    };
+    // 0016 submit_for_consent raises this SQLERRM when enforcement is on and a
+    // manual (no-AI) voice track never left 'skipped'. It reaches us wrapped in
+    // a DataLayerError whose cause carries the Postgres message.
+    const gateError = new DataLayerError('pitchDraft.submitForConsent', {
+      message: 'pitch media requires completed validation',
+      code: 'P0001',
+    });
+    const service = new HybridPitchDraftService(null, local, {
+      createDraft: unexpected,
+      getDraft: unexpected,
+      listMyConsentRequests: unexpected,
+      listMyDrafts: unexpected,
+      registerAsset: unexpected,
+      requestAssetUpload: unexpected,
+      updateDraft: async () => ({ ...SERVER_ROW, status: 'draft' }),
+      submitForConsent: async () => {
+        throw gateError;
+      },
+    });
+
+    await expect(service.finalizeConsent(id)).rejects.toBeInstanceOf(ManualPitchNeedsAiReviewError);
+  });
+
+  it('rethrows unrelated submit failures without the manual→AI mapping', async () => {
+    const local = createService();
+    const id = await createCompleteDraft(local);
+    await local.saveReview(id, { ...REVIEW, generationMode: 'manual' });
+    await local.attachServerDraft(id, SERVER_ROW.id);
+    const unexpected = async (): Promise<never> => {
+      throw new Error('Unexpected repository method');
+    };
+    const unrelatedError = new DataLayerError('pitchDraft.submitForConsent', {
+      message: 'draft not found, not owned by caller, or not submittable',
+      code: 'P0001',
+    });
+    const service = new HybridPitchDraftService(null, local, {
+      createDraft: unexpected,
+      getDraft: unexpected,
+      listMyConsentRequests: unexpected,
+      listMyDrafts: unexpected,
+      registerAsset: unexpected,
+      requestAssetUpload: unexpected,
+      updateDraft: async () => ({ ...SERVER_ROW, status: 'draft' }),
+      submitForConsent: async () => {
+        throw unrelatedError;
+      },
+    });
+
+    await expect(service.finalizeConsent(id)).rejects.toBe(unrelatedError);
+    await expect(service.finalizeConsent(id)).rejects.not.toBeInstanceOf(
+      ManualPitchNeedsAiReviewError,
+    );
   });
 });

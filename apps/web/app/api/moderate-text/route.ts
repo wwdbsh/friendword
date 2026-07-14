@@ -14,6 +14,16 @@ export const dynamic = 'force-dynamic';
 
 const requestSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('pitch_content'), draftId: z.string().uuid() }),
+  // Dater revision text (P0-NEW-3): the subject moderates the copy they are
+  // about to freeze into a new revision. headline/body are trimmed to match
+  // exactly what create_dater_revision stores, so the content-addressed hash
+  // recorded here (under scope 'pitch_content') is the one the DB gate checks.
+  z.object({
+    kind: z.literal('dater_pitch_content'),
+    draftId: z.string().uuid(),
+    headline: z.string().trim().min(1).max(120),
+    body: z.string().trim().min(1).max(2000),
+  }),
   z.object({ kind: z.literal('profile_bio'), text: z.string().min(1).max(500) }),
   z.object({ kind: z.literal('interest_note'), text: z.string().min(1).max(500) }),
 ]);
@@ -57,6 +67,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'account is not active' }, { status: 403 });
   }
 
+  // dater_pitch_content records under the same scope as pitch_content so the
+  // Dater's edited copy and the Introducer's original share one content-
+  // addressed verdict ledger (identical text dedupes for free) and the DB
+  // approve/revision gates read a single scope='pitch_content' row.
+  const scope = input.kind === 'dater_pitch_content' ? 'pitch_content' : input.kind;
+
   let content: string;
   let draftId: string | null = null;
   if (input.kind === 'pitch_content') {
@@ -75,6 +91,26 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
     content = `${draft.headline ?? ''}\n\n${draft.body ?? ''}`;
     draftId = input.draftId;
+  } else if (input.kind === 'dater_pitch_content') {
+    // Authorization: only the claimed subject may moderate their revision copy,
+    // and only while the draft still awaits their consent. Anyone else — the
+    // Introducer or a stranger — gets the same not-found answer.
+    const { data: draft } = await serviceClient
+      .from('pitch_drafts')
+      .select('subject_user_id, status')
+      .eq('id', input.draftId)
+      .maybeSingle();
+    if (
+      draft === null ||
+      draft.subject_user_id !== callerId ||
+      draft.status !== 'consent_pending'
+    ) {
+      return NextResponse.json({ error: 'draft not found or not yours' }, { status: 404 });
+    }
+    // zod already trimmed headline/body, so this is byte-identical to the copy
+    // create_dater_revision stores (ConsentRepo trims with the same schema).
+    content = `${input.headline}\n\n${input.body}`;
+    draftId = input.draftId;
   } else {
     content = input.text;
   }
@@ -86,7 +122,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   const { data: existing } = await serviceClient
     .from('text_moderations')
     .select('moderation_status')
-    .eq('scope', input.kind)
+    .eq('scope', scope)
     .eq('content_hash', contentHash)
     .maybeSingle();
   if (existing !== null) {
@@ -129,7 +165,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     serviceClient,
     callerId,
     'moderate_text',
-    `moderate-text:${input.kind}:${contentHash}`,
+    `moderate-text:${scope}:${contentHash}`,
     1,
     draftId ?? undefined,
   );
@@ -182,7 +218,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const { error: upsertError } = await serviceClient.from('text_moderations').upsert(
     {
-      scope: input.kind,
+      scope,
       content_hash: contentHash,
       moderation_status: verdictAllowed ? 'passed' : 'flagged',
       moderation_ref: moderationRef,

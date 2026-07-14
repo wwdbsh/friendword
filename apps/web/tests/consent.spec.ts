@@ -167,6 +167,15 @@ async function mockClaimedReview(
   await page.route('**/rest/v1/rpc/set_publish_preferences*', (route) =>
     route.fulfill({ json: null }),
   );
+  // Dater AI-processing disclosure + consent (third audit P0-NEW-3): every
+  // claimed review fetches the current disclosure revision, and agreeing records
+  // draft-scoped consent before any photo/text reaches the AI review.
+  await page.route('**/rest/v1/rpc/get_ai_disclosure_revision*', (route) =>
+    route.fulfill({ json: 'ai-2026-07' }),
+  );
+  await page.route('**/rest/v1/rpc/record_ai_processing_consent*', (route) =>
+    route.fulfill({ json: 'consent-id' }),
+  );
   await mockConsentReview(page);
 }
 
@@ -334,8 +343,14 @@ test('saves dater edits with voice retained, reloads the revision, and publishes
       ],
     });
   });
+  let moderateBody: unknown;
+  await page.route('**/api/moderate-text', (route) => {
+    moderateBody = route.request().postDataJSON();
+    return route.fulfill({ json: { ok: true, moderationStatus: 'passed' } });
+  });
 
   await page.goto(`/consent/${CONSENT_TOKEN}`);
+  await page.getByRole('button', { name: 'Agree to the AI safety review' }).click();
   await page.getByLabel('Headline').fill('The headline I chose myself.');
   await page.getByLabel('Introduction').fill('The introduction I reviewed and rewrote myself.');
   await page.getByRole('button', { name: 'Exclude suggested photo 1' }).click();
@@ -343,6 +358,12 @@ test('saves dater edits with voice retained, reloads the revision, and publishes
 
   await expect(page.getByText('Your edits are saved in a new review version.')).toBeVisible();
   await expect(page.getByLabel('Headline')).toHaveValue('The headline I chose myself.');
+  expect(moderateBody).toEqual({
+    kind: 'dater_pitch_content',
+    draftId: DRAFT_ID,
+    headline: 'The headline I chose myself.',
+    body: 'The introduction I reviewed and rewrote myself.',
+  });
   expect(revisionBody).toEqual({
     draft_id: DRAFT_ID,
     new_headline: 'The headline I chose myself.',
@@ -455,6 +476,8 @@ test('uploads and validates a dater photo before saving it in the full revision 
   });
 
   await page.goto(`/consent/${CONSENT_TOKEN}`);
+  await page.getByRole('button', { name: 'Agree to the AI safety review' }).click();
+  await expect(page.getByLabel('Upload my photo')).toBeEnabled();
   await page.getByLabel('Upload my photo').setInputFiles({
     name: 'my-photo.png',
     mimeType: 'image/png',
@@ -478,6 +501,33 @@ test('uploads and validates a dater photo before saving it in the full revision 
     new_headline: revisionRow.headline,
     new_body: revisionRow.body,
     included_asset_ids: [FIRST_PHOTO_ID, SECOND_PHOTO_ID, VOICE_ASSET_ID, DATER_PHOTO_ID],
+  });
+});
+
+test('gates photo upload behind the dater AI-processing consent', async ({ page }) => {
+  await mockClaimedReview(page);
+  let validateCalls = 0;
+  await page.route('**/api/media/validate', (route) => {
+    validateCalls += 1;
+    return route.fulfill({ json: { ok: true, moderationStatus: 'passed' } });
+  });
+
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+
+  await test.step('Before agreeing, the disclosure shows and upload is disabled', async () => {
+    await expect(
+      page.getByText('runs it through an external AI safety review', { exact: false }),
+    ).toBeVisible();
+    await expect(page.getByLabel('Upload my photo')).toBeDisabled();
+  });
+
+  await test.step('After agreeing, upload is enabled and the disclosure is gone', async () => {
+    await page.getByRole('button', { name: 'Agree to the AI safety review' }).click();
+    await expect(page.getByLabel('Upload my photo')).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Agree to the AI safety review' })).toHaveCount(
+      0,
+    );
+    expect(validateCalls).toBe(0);
   });
 });
 

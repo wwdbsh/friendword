@@ -19,7 +19,10 @@ import {
 } from '../../src/features/pitch/preparePitchReview';
 import { HypeButton } from '../../src/components';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
-import { NeedsSignInError } from '../../src/services/pitchDraftsSupabase';
+import {
+  ManualPitchNeedsAiReviewError,
+  NeedsSignInError,
+} from '../../src/services/pitchDraftsSupabase';
 import type { PitchDraft, PitchReview } from '../../src/services/types';
 
 export default function PitchReviewScreen() {
@@ -33,6 +36,7 @@ export default function PitchReviewScreen() {
   const [signInVisible, setSignInVisible] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [aiConsentState, setAiConsentState] = useState<AiConsentUiState>('checking');
+  const [needsAiReview, setNeedsAiReview] = useState(false);
   const finalizeInFlight = useRef(false);
   const pendingPreparation = useRef<PitchReviewPreparationChoice | null>(null);
 
@@ -135,6 +139,15 @@ export default function PitchReviewScreen() {
         setSignInVisible(true);
         return;
       }
+      // Honest manual→AI trade-off: the server refused a no-AI draft while
+      // safety review is on. Surface the reason and offer the AI review path
+      // instead of a generic "submission failed".
+      if (error instanceof ManualPitchNeedsAiReviewError) {
+        setAiConsentState('required');
+        setNeedsAiReview(true);
+        setErrorMessage(error.message);
+        return;
+      }
       if (error instanceof Error) {
         setErrorMessage(error.message);
         return;
@@ -144,6 +157,14 @@ export default function PitchReviewScreen() {
       finalizeInFlight.current = false;
       setBusy(false);
     }
+  };
+
+  // Reuses the existing AI-consent disclosure flow: recording consent for the
+  // current revision regenerates the draft through AI, which runs the voice
+  // moderation the manual path skipped, so the media-validation gate can pass.
+  const switchToAiReview = async (): Promise<void> => {
+    setNeedsAiReview(false);
+    await preparePendingReview('affirm_ai_consent');
   };
 
   if (
@@ -201,6 +222,42 @@ export default function PitchReviewScreen() {
     );
   }
 
+  if (needsAiReview) {
+    return (
+      <>
+        <SafeAreaView style={styles.safeArea}>
+          <Stack.Screen options={{ title: 'Review your draft' }} />
+          <ScrollView contentContainerStyle={styles.disclosureContent}>
+            <Text style={styles.blockedNotice}>{errorMessage}</Text>
+            <AiConsentDisclosure
+              busy={preparing}
+              errorMessage={null}
+              onCreateAiDraft={() => {
+                void switchToAiReview();
+              }}
+              onRetry={() => {
+                void loadReview();
+              }}
+              onWriteManually={() => {
+                setNeedsAiReview(false);
+                setErrorMessage(null);
+              }}
+              state="required"
+            />
+          </ScrollView>
+        </SafeAreaView>
+        <SignInSheet
+          visible={signInVisible}
+          onClose={() => setSignInVisible(false)}
+          onSignedIn={() => {
+            setSignInVisible(false);
+            void switchToAiReview();
+          }}
+        />
+      </>
+    );
+  }
+
   return (
     <>
       <Stack.Screen options={{ title: 'Review your draft' }} />
@@ -230,4 +287,11 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background, padding: spacing.lg },
   disclosureContent: { flexGrow: 1, justifyContent: 'center' },
   message: { color: colors.textSecondary, fontFamily: fonts.body, fontSize: fontSizes.md },
+  blockedNotice: {
+    color: colors.textSecondary,
+    fontFamily: fonts.body,
+    fontSize: fontSizes.md,
+    lineHeight: fontSizes.md * 1.45,
+    marginBottom: spacing.md,
+  },
 });

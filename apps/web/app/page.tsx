@@ -20,7 +20,7 @@ const steps = [
   {
     number: '02',
     title: 'You approve it',
-    body: 'You edit the words, pick the photos, and decide who can see it before anything goes live.',
+    body: 'You edit the words, pick the photos, and set who can reach out before anything goes live.',
   },
   {
     number: '03',

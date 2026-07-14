@@ -42,7 +42,10 @@ const PitchPhotoSchema = z.object({
 const PitchRecordingSchema = z.object({
   uri: z.string().min(1),
   durationMillis: z.number().int().positive().max(60_000),
-  caption: z.string().min(1),
+  // CP-8: the text recap is optional at recording time — the AI path derives
+  // captions from the transcript. The manual (no-AI) path re-requires a recap
+  // at submission (preparePitchReview) since it is the only caption source.
+  caption: z.string().max(500),
 });
 
 /**

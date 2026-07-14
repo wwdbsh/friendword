@@ -768,6 +768,71 @@ try {
     included_asset_ids: [photo1Asset.id, daterPhotoAsset.id],
     hard_claims_confirmed: false,
   };
+
+  // CP-1 (migration 0041): publishing is adults-only and gated on the dater's
+  // own confirmed profile. Before set_dater_profile runs, approval is rejected
+  // regardless of any other check.
+  const { error: missingProfileApproveError } = await dater.client.rpc(
+    'approve_and_publish_pitch',
+    { ...approvalArgs, hard_claims_confirmed: true },
+  );
+  check(
+    '7z. approve is rejected until the dater confirms an adult (18+) profile',
+    Boolean(missingProfileApproveError) &&
+      missingProfileApproveError.message.includes('adult (18+)'),
+    missingProfileApproveError?.message,
+  );
+
+  // CP-1: the dater confirms their own age (18+), structured approximate
+  // location (region required, city optional), and dating intent. This is the
+  // new production consent path; the birth date is stored, never published.
+  const { error: daterProfileSetError } = await dater.client.rpc('set_dater_profile', {
+    target_birth_date: '1994-05-20',
+    target_region: 'Puget Sound',
+    target_city: 'Seattle',
+    target_intent: 'long-term',
+  });
+  check(
+    '7y. dater confirms an adult profile via set_dater_profile',
+    !daterProfileSetError,
+    daterProfileSetError?.message,
+  );
+
+  // Verify the production write: adult birth date on the profile, structured
+  // region/city + intent, and the canonical "City, Region" approximate string.
+  const { data: daterProfileRow } = await admin
+    .from('profiles')
+    .select('birth_date')
+    .eq('user_id', dater.id)
+    .single();
+  const { data: daterDatingRow } = await admin
+    .from('dating_profiles')
+    .select('location_region, location_city, dating_intent, approximate_location')
+    .eq('user_id', dater.id)
+    .single();
+  check(
+    '7x. set_dater_profile stored birth date, structured location, canonical string, and intent',
+    daterProfileRow?.birth_date === '1994-05-20' &&
+      daterDatingRow?.location_region === 'Puget Sound' &&
+      daterDatingRow?.location_city === 'Seattle' &&
+      daterDatingRow?.dating_intent === 'long-term' &&
+      daterDatingRow?.approximate_location === 'Seattle, Puget Sound',
+    JSON.stringify(daterDatingRow),
+  );
+
+  // A blank region is rejected server-side (structured location invariant).
+  const { error: blankRegionError } = await dater.client.rpc('set_dater_profile', {
+    target_birth_date: '1994-05-20',
+    target_region: '   ',
+    target_city: 'Seattle',
+    target_intent: 'long-term',
+  });
+  check(
+    '7w. set_dater_profile rejects a blank region',
+    Boolean(blankRegionError) && blankRegionError.message.includes('region is required'),
+    blankRegionError?.message,
+  );
+
   const { error: unconfirmedClaimsError } = await dater.client.rpc(
     'approve_and_publish_pitch',
     approvalArgs,

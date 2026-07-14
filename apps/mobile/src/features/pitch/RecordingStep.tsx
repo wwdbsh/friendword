@@ -71,7 +71,6 @@ export function RecordingStep({
     ? recorderState.durationMillis
     : (recording?.durationMillis ?? 0);
   const isLongEnough = durationMillis >= 30_000;
-  const hasCaption = caption.trim().length > 0;
 
   return (
     <PitchStepFrame
@@ -85,9 +84,7 @@ export function RecordingStep({
             <Text style={styles.minimum}>Record at least 30 seconds to continue.</Text>
           ) : null}
           <HypeButton
-            disabled={
-              !recording || !isLongEnough || !hasCaption || recorderState.isRecording || busy
-            }
+            disabled={!recording || !isLongEnough || recorderState.isRecording || busy}
             label={busy ? 'Saving…' : 'Review the mix'}
             onPress={onContinue}
           />
@@ -126,9 +123,13 @@ export function RecordingStep({
           <Text style={styles.limit}>Auto-stops at 1:00</Text>
         </View>
         <View style={styles.captionField}>
-          <Text style={styles.captionLabel}>Text recap for captions</Text>
+          <Text style={styles.captionLabel}>Text recap (optional)</Text>
+          <Text style={styles.captionHint}>
+            Say it once — AI writes your captions from the recording. Add a recap only if you plan to
+            publish without AI captions.
+          </Text>
           <TextInput
-            accessibilityLabel="Text recap for the voice recording"
+            accessibilityLabel="Optional text recap for the voice recording"
             multiline
             onChangeText={(value) => {
               setCaption(value);
@@ -136,7 +137,7 @@ export function RecordingStep({
                 onRecordingChange({ ...recording, caption: value.trim() });
               }
             }}
-            placeholder="Write the key story from your recording so everyone can follow along."
+            placeholder="Optional: the key story, used only if you publish without AI captions."
             placeholderTextColor={colors.textFaint}
             style={styles.captionInput}
             value={caption}
@@ -203,6 +204,11 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontFamily: 'BricolageGrotesqueBold',
     fontSize: fontSizes.md,
+  },
+  captionHint: {
+    color: colors.textFaint,
+    fontFamily: 'BricolageGrotesque',
+    fontSize: fontSizes.sm,
   },
   captionInput: {
     minHeight: 112,

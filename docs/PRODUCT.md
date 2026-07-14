@@ -4,7 +4,7 @@
 
 ## Overview
 
-Friendword는 친구의 30~60초 음성 추천을 당사자가 승인한 사진·문구와 결합해 공유 가능한 세로형 모션 피치로 만들고, 이를 본 사람이 검증된 프로필로 관심을 표현한 뒤 당사자가 수락하면 안전한 인앱 대화를 시작하는 18세 이상 대상의 friend-led dating campaign 앱입니다.
+Friendword는 친구의 30~60초 음성 추천을 당사자가 승인한 사진·문구와 결합해 외부 공유 가능한 세로형 피치로 만들고, 이를 본 사람이 검증된 프로필로 관심을 표현한 뒤 당사자가 수락하면 안전한 인앱 대화를 시작하는 18세 이상 대상의 friend-led dating campaign 앱입니다. (현행 구현: 공개 피치는 승인 콘텐츠 기반 원본 음성+사진 세로형 재생과 자막·오디오 파생 파형으로 렌더되며, 키네틱 타이포그래피 등 structured motion scene은 목표로 Slice 6에서 진행 중입니다.)
 
 > **Dating, in your friends' words.**
 
@@ -27,7 +27,7 @@ Friendword는 공개 프로필 피드나 무한 스와이프가 있는 또 하�
 - Dater의 동의 전에는 피치를 공개하지 않습니다.
 - Introducer가 올린 사진은 제안이며 Dater가 개별 승인·삭제·교체합니다.
 - Introducer의 실제 음성을 사용하고 얼굴 출연, AI 아바타, 음성 복제, 립싱크 딥페이크를 만들지 않습니다.
-- 피치는 승인된 사진, 원본 친구 음성, 자막, 키네틱 타이포그래피, 파형과 그래픽으로 구성합니다.
+- 피치는 승인된 사진, 원본 친구 음성, 자막, 오디오에서 파생한 파형으로 구성하며, 키네틱 타이포그래피 등 structured motion scene은 목표 구성 요소로 순차 도입합니다(Slice 6 진행 중).
 - 링크 열람에는 가입이 필요 없지만 관심 표현에는 검증된 사진과 프로필이 필요합니다.
 - 전화번호와 이메일을 즉시 공개하지 않고, 수락 후 인앱 Intro Room에서 먼저 대화합니다.
 - 신고, 차단, 동의 철회, 캠페인 중지, 데이터 삭제와 안전 기능은 결제 여부와 무관하게 제공합니다.
@@ -74,7 +74,7 @@ Friendword는 공개 프로필 피드나 무한 스와이프가 있는 또 하�
 1. 하나의 User와 컨텍스트 역할, 18+·전화 확인
 2. 비공개 사진 제안·원본 음성·AI 구조화 pitch draft
 3. Dater invitation claim, identity/face verification, 콘텐츠별 승인
-4. 9:16, 15~60초 원본 음성 모션 피치와 자막
+4. 9:16, 15~60초 원본 음성 세로형 피치(오디오+사진 재생)와 자막 — structured motion scene은 목표로 진행 중
 5. 무가입 HTTPS 링크, OG preview, noindex, pause/revoke/delete, attribution
 6. 성인·전화·사진·bio·intent를 갖춘 Verified Interest
 7. 수락된 두 사람의 text-only Intro Room, 신고·차단·나가기
@@ -85,8 +85,8 @@ Friendword는 공개 프로필 피드나 무한 스와이프가 있는 또 하�
 ### P1: 출시 직후 성장 실험
 
 - 최대 5개 Vouch Card, Introducer 가명 프로필·완료 배지
-- premium theme, social asset 재생성, MP4 export/share kit
-- 캠페인 analytics와 관심 표현 필터
+- premium theme, social asset 재생성, MP4 export (정적 share kit은 이미 MVP Creator Launch로 출시됨)
+- accepted-intro까지의 확장 analytics (view→interest 퍼널 분석은 이미 MVP Pass 가치, 관심 표현 필터는 무료 Dater 기능)
 - 승인·관심·수락·메시지 push notification
 - 익명화된 BuildInPublic 성장 snapshot
 

@@ -36,6 +36,20 @@ const daterRevisionInputSchema = z.object({
   includedAssetIds: z.array(z.string().uuid()),
 });
 
+const daterProfileSchema = z
+  .object({
+    birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    region: z.string().trim().min(1).max(80),
+    city: z
+      .string()
+      .trim()
+      .max(80)
+      .optional()
+      .transform((value) => (value === undefined || value.length === 0 ? undefined : value)),
+    intent: z.enum(['long-term', 'open-to-either', 'short-term']),
+  })
+  .strict();
+
 const publishPreferencesSchema = z
   .object({
     draftId: z.string().uuid(),
@@ -112,6 +126,14 @@ export type DaterRevisionInput = {
 export type DaterRevisionResult = {
   readonly revisionId: string;
   readonly revisionNumber: number;
+};
+
+export type DaterProfileInput = {
+  /** ISO calendar date 'YYYY-MM-DD'; the server validates 18+ and never publishes it. */
+  readonly birthDate: string;
+  readonly region: string;
+  readonly city?: string;
+  readonly intent: 'long-term' | 'open-to-either' | 'short-term';
 };
 
 export type PublishPreferencesInput = {
@@ -419,6 +441,25 @@ export class ConsentRepo {
     return { revisionId: row.revision_id, revisionNumber: row.revision_number };
   }
 
+  /**
+   * Confirms the dater's own age (18+), structured approximate location, and
+   * dating intent (CP-1). Server-validated SECURITY DEFINER RPC (migration
+   * 0041); the birth date is stored on the profile and never published.
+   */
+  async setDaterProfile(input: DaterProfileInput): Promise<void> {
+    await this.getRequiredSession();
+    const parsed = daterProfileSchema.parse(input);
+    const { error } = await callUntypedRpc(this.client, 'set_dater_profile', {
+      target_birth_date: parsed.birthDate,
+      target_region: parsed.region,
+      target_city: parsed.city ?? null,
+      target_intent: parsed.intent,
+    });
+    if (error !== null) {
+      throw new DataLayerError('consent.setDaterProfile', error);
+    }
+  }
+
   /** Persists audience, location, and duration immediately before approval. */
   async setPublishPreferences(input: PublishPreferencesInput): Promise<void> {
     await this.getRequiredSession();
@@ -499,7 +540,7 @@ type RpcEnvelope = {
 
 async function callUntypedRpc(
   client: BrowserSupabaseClient,
-  functionName: 'create_dater_revision' | 'set_publish_preferences',
+  functionName: 'create_dater_revision' | 'set_publish_preferences' | 'set_dater_profile',
   args: Readonly<Record<string, unknown>>,
 ): Promise<RpcEnvelope> {
   const rpc: unknown = Reflect.get(client, 'rpc');

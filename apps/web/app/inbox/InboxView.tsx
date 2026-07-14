@@ -400,7 +400,7 @@ export function InboxView() {
                         {campaign.pass.expiresAt !== null
                           ? ` until ${new Date(campaign.pass.expiresAt).toLocaleDateString()}`
                           : ''}
-                        . Your page runs 30 days and the funnel below is unlocked.
+                        . The Pass added 30 days to your live window and unlocked the funnel below.
                       </p>
                       {(() => {
                         const funnel = funnels[campaign.id];
@@ -435,7 +435,7 @@ export function InboxView() {
                     </>
                   ) : (
                     <p className={styles.muted}>
-                      Not active. The Pass extends your page to 30 days and unlocks the
+                      Not active. The Pass adds 30 days to your live window and unlocks the
                       view-and-interest funnel — purchase it in the Friendword app. Accepting
                       interest, chat, and safety tools are always free.
                     </p>

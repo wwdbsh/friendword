@@ -74,7 +74,11 @@ export function ReviewStep({
         <HypeButton label="Record it again" onPress={onRerecord} secondary />
         <View style={styles.caption}>
           <Text style={styles.captionLabel}>Caption</Text>
-          <Text style={styles.detail}>{recording.caption}</Text>
+          <Text style={styles.detail}>
+            {recording.caption.trim().length > 0
+              ? recording.caption
+              : 'AI will write captions from your recording. Choose “Write it myself” to use a typed recap instead.'}
+          </Text>
         </View>
         {!isLongEnough ? (
           <Text style={styles.error}>This take is under 30 seconds. Record it again to send.</Text>

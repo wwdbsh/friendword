@@ -10,6 +10,7 @@ import type { AiConsentUiState } from './AiConsentDisclosure';
 import {
   getAiDraftFailureMessage,
   isAiConsentRequiredFailure,
+  isManualRecapRequiredFailure,
   preparePitchReview,
   type PitchReviewPreparationChoice,
 } from './preparePitchReview';
@@ -86,6 +87,12 @@ export function usePitchSubmission(
         pendingChoice.current = null;
         setAiConsentState('required');
         setErrorMessage('External AI processing consent must be confirmed again.');
+        return;
+      }
+      if (isManualRecapRequiredFailure(error)) {
+        // CP-8: publishing without AI needs the typed recap as its captions.
+        pendingChoice.current = null;
+        setErrorMessage('Add a short text recap to publish without AI captions.');
         return;
       }
       pendingChoice.current = null;

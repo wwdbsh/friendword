@@ -326,7 +326,8 @@ function getPaywallCopy(intent: ProductIntent): {
     : {
         eyebrow: 'CAMPAIGN PASS',
         title: '30 more days for this campaign',
-        subtitle: 'Campaign Pass adds 30 days from purchase for this published campaign.',
+        subtitle:
+          'Campaign Pass adds 30 days to this campaign’s live window (after any time it already has left).',
         benefit: 'Access campaign funnel analytics during the active pass period.',
       };
 }

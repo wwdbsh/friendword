@@ -88,7 +88,7 @@ Creator Launch만으로 100개 무료 캠페인을 보전하려면 약 19% 구�
 
 ## 비용 폭주 방지
 
-1. **Render late**: preview는 client-side motion, 서버 MP4는 Dater 최종 승인 후 1회만 생성합니다.
+1. **Render late**: preview는 client-side motion, 서버 MP4는 Dater 최종 승인 후 1회만 생성합니다(post-launch MP4 export 파이프라인 원칙 — 현행 MVP의 정적 Creator kit은 승인 콘텐츠에서 이미지로 즉시 렌더하며 MP4를 만들지 않습니다).
 2. **Verify late**: Dater는 승인 직전, Interested Person은 프로필 제출 직전에 liveness를 실행합니다.
 3. **One free campaign**: owner당 활성(published/paused) 캠페인 1개를 DB 트리거+advisory lock으로 강제합니다(3차 감사 Slice 5, migration 0039 — Campaign Pass는 기간 상품이지 수량 상품이 아니므로 pass 유무와 무관). 기본 theme, server re-cut 없음 제한은 유지.
 4. **Finite free cohort**: 초기 무료 캠페인은 월 100개처럼 예산 슬롯을 두고 소진 후 waitlist/다음 달 발급으로 전환합니다. 기존 캠페인과 안전 기능은 유지합니다.
@@ -96,7 +96,7 @@ Creator Launch만으로 100개 무료 캠페인을 보전하려면 약 19% 구�
 6. **Rate limit**: 전화번호·device·IP·campaign 기준 OTP, AI generation, liveness와 render 횟수를 제한합니다.
 7. **Provider caps**: Cloud Run max instances, Twilio usage trigger, AWS Budget, OpenAI project budget, Supabase/Vercel spend alert를 설정합니다.
 8. **Kill switch**: 신규 campaign creation, render와 SMS를 각각 중지할 수 있게 하되 신고·차단·삭제·기존 채팅은 유지합니다.
-9. **No automatic re-render**: Vouch Card 추가 시 MP4를 자동 재생성하지 않습니다.
+9. **No automatic re-render**: Vouch Card 추가 시 MP4를 자동 재생성하지 않습니다(로드맵 MP4/Vouch 파이프라인 기준 — 둘 다 post-launch).
 10. **No paid acquisition before proof**: organic cohort의 activation, paid conversion과 cost per campaign을 확인하기 전 광고를 집행하지 않습니다.
 
 ## 재무 운영 게이트

@@ -30,11 +30,14 @@ export default async function InterestPage({ params }: InterestPageProps) {
         <div className={flowStyles.shell}>
           <p className={flowStyles.wordmark}>Friendword</p>
           <section className={flowStyles.card}>
-            <span className={flowStyles.badge}>Demo pitch</span>
-            <h1 className={flowStyles.title}>This one’s just a demo.</h1>
+            <span className={flowStyles.badge}>Demo data</span>
+            <h1 className={flowStyles.title}>This is a demo — Blair isn’t a real person.</h1>
             <p className={flowStyles.muted}>
-              Interest works on real campaigns. When a friend publishes a pitch about a real person,
-              this is where you’d introduce yourself.
+              On a real campaign, expressing interest here starts the actual flow: you sign in and
+              complete a dating profile (2 photos, a bio, and your dating intent), your interest
+              lands in the dater’s inbox, and if they accept, Friendword opens a private Intro Room
+              where the two of you can talk. Viewing a pitch never needs an account — only reaching
+              out does.
             </p>
             <Link className={flowStyles.secondary} href={`/p/${campaignSlug}`}>
               Back to the demo pitch

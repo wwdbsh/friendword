@@ -2,11 +2,12 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { trackEvent } from '@friendword/data';
 
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
+import { activeWindowIndex, distributePhotoScenes, type SceneWindow } from '@/pitch/scenes';
 import type { PitchView } from '@/pitch/view';
 
 import styles from './PitchPlayer.module.css';
@@ -14,6 +15,11 @@ import styles from './PitchPlayer.module.css';
 type PitchPlayerProps = {
   readonly pitch: PitchView;
 };
+
+// CP-2: the waveform is decoded from the real audio. It has three honest
+// states — never a fixed fake signal. 'loading' while decoding, 'error' when
+// the fetch/decode fails, or the real per-bar peaks once decoded.
+type WaveformState = readonly number[] | 'loading' | 'error';
 
 function formatTime(milliseconds: number): string {
   const seconds = Math.floor(milliseconds / 1000);
@@ -35,7 +41,9 @@ function PlayIcon({ paused }: { readonly paused: boolean }) {
 export function PitchPlayer({ pitch }: PitchPlayerProps) {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [durationMs, setDurationMs] = useState(pitch.durationMs);
-  const [waveform, setWaveform] = useState<readonly number[]>(pitch.waveform);
+  const [waveform, setWaveform] = useState<WaveformState>(
+    pitch.audioUrl === null ? 'error' : 'loading',
+  );
   const [isPlaying, setIsPlaying] = useState(false);
   const [isFooterVisible, setIsFooterVisible] = useState(false);
   const elapsedRef = useRef(0);
@@ -75,17 +83,19 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
     }
   }, [isPlaying, hasRealAudio]);
 
-  // CP-2: derive the waveform from the actual audio instead of a fixed
-  // placeholder. Falls back silently when decode is unavailable.
+  // CP-2: derive the waveform from the actual audio. On any failure we surface
+  // an accessible error state rather than silently keeping a fake placeholder.
   useEffect(() => {
     if (pitch.audioUrl === null) {
       return;
     }
     let cancelled = false;
+    setWaveform('loading');
     void (async () => {
       try {
         const response = await fetch(pitch.audioUrl as string);
         if (!response.ok) {
+          if (!cancelled) setWaveform('error');
           return;
         }
         const buffer = await response.arrayBuffer();
@@ -111,14 +121,18 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
             peaks.push(average);
             maxPeak = Math.max(maxPeak, average);
           }
-          if (!cancelled && maxPeak > 0) {
-            setWaveform(peaks.map((peak) => Math.max(12, Math.round((peak / maxPeak) * 100))));
+          if (!cancelled) {
+            if (maxPeak > 0) {
+              setWaveform(peaks.map((peak) => Math.max(12, Math.round((peak / maxPeak) * 100))));
+            } else {
+              setWaveform('error');
+            }
           }
         } finally {
           void context.close();
         }
       } catch {
-        // Keep the placeholder bars; progress display still works.
+        if (!cancelled) setWaveform('error');
       }
     })();
     return () => {
@@ -139,18 +153,25 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
     return () => observer.disconnect();
   }, []);
 
-  const progress = durationMs > 0 ? elapsedMs / durationMs : 0;
-  // Real audio has no per-photo timeline yet; spread the photos evenly.
-  const activePhotoIndex = hasRealAudio
-    ? Math.min(Math.floor(progress * pitch.photos.length), pitch.photos.length - 1)
-    : 0;
-  const activeCaption =
-    pitch.captions.find((caption) => elapsedMs >= caption.startMs && elapsedMs < caption.endMs) ??
-    pitch.captions[0];
-  const captionWords = activeCaption.text.split(' ');
-  const captionProgress =
-    (elapsedMs - activeCaption.startMs) / (activeCaption.endMs - activeCaption.startMs);
-  const activeWordIndex = Math.floor(captionProgress * captionWords.length);
+  const progress = durationMs > 0 ? Math.min(1, elapsedMs / durationMs) : 0;
+  const progressPercent = Math.round(progress * 100);
+
+  // CP-2: photo scenes follow the recording's real duration and segment
+  // timing. Recomputes when the <audio> metadata corrects the duration.
+  const segmentWindows: readonly SceneWindow[] = useMemo(
+    () => pitch.captions.map((caption) => ({ startMs: caption.startMs, endMs: caption.endMs })),
+    [pitch.captions],
+  );
+  const photoWindows = useMemo(
+    () => distributePhotoScenes(pitch.photos.length, durationMs, segmentWindows),
+    [pitch.photos.length, durationMs, segmentWindows],
+  );
+  const activePhotoIndex = hasRealAudio ? activeWindowIndex(photoWindows, elapsedMs) : 0;
+
+  // CP-2 honesty: captions are segment-level (real provider timestamps), not
+  // fabricated per-word highlights. The active segment is shown as a whole.
+  const activeCaptionIndex = hasRealAudio ? activeWindowIndex(pitch.captions, elapsedMs) : 0;
+  const activeCaption = pitch.captions[activeCaptionIndex];
 
   const togglePlayback = () => {
     if (!hasRealAudio) {
@@ -200,11 +221,11 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
         <div className={styles.photos}>
           {pitch.photos.map((photo, index) => (
             <Image
-              className={`${styles.photo} ${index === activePhotoIndex || (activePhotoIndex < 0 && index === 0) ? styles.photoActive : ''}`}
+              className={`${styles.photo} ${index === activePhotoIndex ? styles.photoActive : ''}`}
               key={photo.src}
               src={photo.src}
               alt={photo.alt}
-              aria-hidden={index !== activePhotoIndex && !(activePhotoIndex < 0 && index === 0)}
+              aria-hidden={index !== activePhotoIndex}
               fill
               priority={index === 0}
               sizes="(max-width: 700px) 100vw, 506px"
@@ -217,6 +238,9 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
           <p>
             <strong>{pitch.introducerPseudonym}</strong> introduces
           </p>
+          {/* GP-P0-3: age appears only when real, dater-confirmed data provides
+              it (pitch.age non-null). The demo carries no age, so it shows the
+              name alone — no fabricated "Blair, 29". */}
           <h1>{pitch.age === null ? pitch.daterName : `${pitch.daterName}, ${pitch.age}`}</h1>
           <span className={styles.relationshipSticker}>{pitch.relationship}</span>
         </header>
@@ -226,16 +250,16 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
         )}
 
         {hasRealAudio ? (
-          <div className={styles.caption} aria-live="off">
-            {captionWords.map((word, index) => (
-              <span
-                className={index <= activeWordIndex ? styles.wordActive : undefined}
-                key={`${word}-${index}`}
-              >
-                {word}{' '}
-              </span>
-            ))}
-          </div>
+          activeCaption === undefined ? (
+            // No transcript segments: don't fabricate a caption timeline.
+            <div className={styles.caption} data-testid="no-captions">
+              Captions aren’t available for this recording yet.
+            </div>
+          ) : (
+            <div className={styles.caption} aria-live="polite" data-testid="segment-caption">
+              {activeCaption.text}
+            </div>
+          )
         ) : (
           // CP-3 honesty: no recording here, so the whole written pitch is
           // shown at once instead of pretending to play.
@@ -262,29 +286,48 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
             </button>
 
             <div className={styles.timeline}>
-              <svg
-                className={`${styles.waveform} ${isPlaying ? styles.waveformPlaying : ''}`}
-                viewBox="0 0 100 100"
-                preserveAspectRatio="none"
-                role="img"
-                aria-label={`Pitch progress ${Math.round(progress * 100)} percent`}
-              >
-                {waveform.map((level, index) => {
-                  const barWidth = 100 / waveform.length;
-                  const played = (index + 1) / waveform.length <= progress;
-                  return (
-                    <rect
-                      className={played ? styles.barPlayed : styles.barWaiting}
-                      key={`${level}-${index}`}
-                      x={index * barWidth}
-                      y={100 - level}
-                      width={barWidth * 0.56}
-                      height={level}
-                      rx={barWidth * 0.28}
-                    />
-                  );
-                })}
-              </svg>
+              {Array.isArray(waveform) ? (
+                <svg
+                  className={`${styles.waveform} ${isPlaying ? styles.waveformPlaying : ''}`}
+                  viewBox="0 0 100 100"
+                  preserveAspectRatio="none"
+                  role="img"
+                  aria-label={`Pitch progress ${progressPercent} percent`}
+                >
+                  {waveform.map((level, index) => {
+                    const barWidth = 100 / waveform.length;
+                    const played = (index + 1) / waveform.length <= progress;
+                    return (
+                      <rect
+                        className={played ? styles.barPlayed : styles.barWaiting}
+                        key={`${level}-${index}`}
+                        x={index * barWidth}
+                        y={100 - level}
+                        width={barWidth * 0.56}
+                        height={level}
+                        rx={barWidth * 0.28}
+                      />
+                    );
+                  })}
+                </svg>
+              ) : (
+                // CP-2: accessible fallback. Progress still tracks the real
+                // audio; we never render a fabricated signal.
+                <div className={styles.waveformFallback}>
+                  <div
+                    className={styles.progressTrack}
+                    role="img"
+                    aria-label={`Pitch progress ${progressPercent} percent`}
+                  >
+                    <div className={styles.progressFill} style={{ width: `${progressPercent}%` }} />
+                  </div>
+                  <p className={styles.waveformStatus} role="status">
+                    {waveform === 'loading'
+                      ? 'Analyzing the recording…'
+                      : 'Couldn’t load the audio waveform — playback still works.'}
+                  </p>
+                </div>
+              )}
               <div className={styles.timeRow}>
                 <span>{formatTime(elapsedMs)}</span>
                 <span>{formatTime(durationMs)}</span>

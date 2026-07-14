@@ -73,6 +73,8 @@ export type DatingProfileRow = {
   readonly photos: readonly string[];
   readonly dating_intent: string | null;
   readonly approximate_location: string | null;
+  readonly location_region: string | null;
+  readonly location_city: string | null;
   readonly profile_updated_at: string;
   readonly created_at: string;
   readonly updated_at: string;

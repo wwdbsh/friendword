@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import {
+  ageFromBirthDate,
+  canonicalApproximateLocation,
   confirmDisplayName,
   ConsentRepo,
   DataLayerError,
@@ -184,11 +186,37 @@ function audienceError(minAge: string, maxAge: string): string | null {
   return null;
 }
 
-function locationSummary(locationPrecision: LocationPrecision): string {
-  if (locationPrecision === 'hidden') {
-    return 'Location hidden';
+function datingIntentLabel(value: DatingIntent): string {
+  return DATING_INTENTS.find((intent) => intent.value === value)?.label ?? value;
+}
+
+/**
+ * Client-side gate mirroring the server's set_dater_profile checks (CP-1): the
+ * dater confirms an 18+ birth date, a region, and what they're looking for
+ * before the page can publish. The server re-validates all three.
+ */
+function daterProfileError(
+  birthDate: string,
+  region: string,
+  ownIntent: DatingIntent | '',
+): string | null {
+  if (birthDate === '') {
+    return 'Add your date of birth so we can confirm you’re 18 or older.';
   }
-  return locationPrecision === 'region' ? 'Region-level location' : 'City-level location';
+  const age = ageFromBirthDate(birthDate, new Date());
+  if (age === null) {
+    return 'Enter a valid date of birth.';
+  }
+  if (age < 18) {
+    return 'You must be 18 or older to publish a page.';
+  }
+  if (region.trim() === '') {
+    return 'Add your region (state, metro area, or region).';
+  }
+  if (ownIntent === '') {
+    return 'Choose what you’re looking for.';
+  }
+  return null;
 }
 
 export function ConsentFlow({ token }: { readonly token: string }) {
@@ -222,6 +250,12 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   const [maximumAge, setMaximumAge] = useState('');
   const [selectedIntents, setSelectedIntents] = useState<readonly DatingIntent[]>([]);
   const [preferenceError, setPreferenceError] = useState<string | null>(null);
+  // CP-1: the dater confirms their own age, location, and intent here.
+  const [birthDate, setBirthDate] = useState('');
+  const [region, setRegion] = useState('');
+  const [city, setCity] = useState('');
+  const [ownIntent, setOwnIntent] = useState<DatingIntent | ''>('');
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [hardClaimsConfirmed, setHardClaimsConfirmed] = useState(false);
   const [requestingChanges, setRequestingChanges] = useState(false);
   const [responseNote, setResponseNote] = useState('');
@@ -254,6 +288,11 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         setEditStatus(null);
         setEditError(null);
         setHardClaimsConfirmed(false);
+        setBirthDate('');
+        setRegion('');
+        setCity('');
+        setOwnIntent('');
+        setProfileError(null);
         setRequestingChanges(false);
         setResponseNote('');
         setResponseError(null);
@@ -363,10 +402,23 @@ export function ConsentFlow({ token }: { readonly token: string }) {
       setPreferenceError(validationMessage);
       return;
     }
+    const profileValidation = daterProfileError(birthDate, region, ownIntent);
+    if (profileValidation !== null || ownIntent === '') {
+      setProfileError(profileValidation ?? 'Choose what you’re looking for.');
+      return;
+    }
     approvalStartedRef.current = true;
     setState({ step: 'publishing', preview });
     try {
       const repo = new ConsentRepo(client);
+      // CP-1: confirm the dater's own profile (age/location/intent) before the
+      // publish preferences and approval snapshot are written.
+      await repo.setDaterProfile({
+        birthDate,
+        region: region.trim(),
+        ...(city.trim() === '' ? {} : { city: city.trim() }),
+        intent: ownIntent,
+      });
       await repo.setPublishPreferences({
         draftId: review.revision.pitch_draft_id,
         audience: {
@@ -700,6 +752,34 @@ export function ConsentFlow({ token }: { readonly token: string }) {
       editBody !== state.review.revision.body ||
       !sameIds(includedAssetIds, currentRevisionPhotoIds));
   const currentAudienceError = audienceError(minimumAge, maximumAge);
+  const currentProfileError = daterProfileError(birthDate, region, ownIntent);
+
+  // CP-1 real output preview: the exact snapshot the public page will show,
+  // built from the approval revision plus the dater's confirmed inputs.
+  const reviewPhotos = state.step === 'review' ? state.photos : [];
+  const previewIncludedPhotos = reviewPhotos.filter((photo) =>
+    includedAssetIds.includes(photo.assetId),
+  );
+  const representativePhoto = previewIncludedPhotos[0] ?? null;
+  const previewAge = birthDate === '' ? null : ageFromBirthDate(birthDate, new Date());
+  const previewLocation =
+    locationPrecision === 'hidden'
+      ? null
+      : canonicalApproximateLocation(
+          locationPrecision === 'region' ? 'region' : 'city',
+          region.trim() === '' ? null : region.trim(),
+          city.trim() === '' ? null : city.trim(),
+          null,
+        );
+  const previewAudience = (() => {
+    const min = minimumAge.trim() === '' ? '18' : minimumAge.trim();
+    const range = maximumAge.trim() === '' ? `${min}+` : `${min}–${maximumAge.trim()}`;
+    const intents =
+      selectedIntents.length === 0
+        ? 'any intent'
+        : selectedIntents.map((intent) => datingIntentLabel(intent)).join(', ');
+    return `Ages ${range} · ${intents}`;
+  })();
 
   return (
     <main className={styles.page}>
@@ -1024,7 +1104,108 @@ export function ConsentFlow({ token }: { readonly token: string }) {
             </div>
 
             <fieldset className={styles.preferenceBlock}>
-              <legend className={styles.sectionHeading}>Who can see this &amp; for how long</legend>
+              <legend className={styles.sectionHeading}>About you</legend>
+              <p className={styles.muted}>
+                Confirm a few details about yourself. Your date of birth stays private — only your
+                age appears on your page.
+              </p>
+
+              <div className={styles.fieldGroup}>
+                <label className={styles.label} htmlFor="dater-birth-date">
+                  Date of birth
+                </label>
+                <input
+                  id="dater-birth-date"
+                  className={styles.input}
+                  type="date"
+                  value={birthDate}
+                  onChange={(event) => {
+                    setBirthDate(event.target.value);
+                    setProfileError(null);
+                  }}
+                />
+              </div>
+
+              <div className={styles.ageGrid}>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.label} htmlFor="dater-region">
+                    Region
+                  </label>
+                  <input
+                    id="dater-region"
+                    className={styles.input}
+                    type="text"
+                    maxLength={80}
+                    placeholder="e.g. Puget Sound"
+                    value={region}
+                    onChange={(event) => {
+                      setRegion(event.target.value);
+                      setProfileError(null);
+                    }}
+                  />
+                </div>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.label} htmlFor="dater-city">
+                    City (optional)
+                  </label>
+                  <input
+                    id="dater-city"
+                    className={styles.input}
+                    type="text"
+                    maxLength={80}
+                    placeholder="e.g. Seattle"
+                    value={city}
+                    onChange={(event) => {
+                      setCity(event.target.value);
+                      setProfileError(null);
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.fieldGroup}>
+                <label className={styles.label} htmlFor="dater-own-intent">
+                  What you’re looking for
+                </label>
+                <select
+                  id="dater-own-intent"
+                  className={styles.input}
+                  value={ownIntent}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (
+                      value === '' ||
+                      value === 'long-term' ||
+                      value === 'open-to-either' ||
+                      value === 'short-term'
+                    ) {
+                      setOwnIntent(value);
+                      setProfileError(null);
+                    }
+                  }}
+                >
+                  <option value="">Choose one…</option>
+                  {DATING_INTENTS.map((intent) => (
+                    <option key={intent.value} value={intent.value}>
+                      {intent.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {profileError !== null && (
+                <p className={styles.error} role="status">
+                  {profileError}
+                </p>
+              )}
+            </fieldset>
+
+            <fieldset className={styles.preferenceBlock}>
+              <legend className={styles.sectionHeading}>Who can reach out &amp; for how long</legend>
+              <p className={styles.muted}>
+                Your page is public — anyone with the link can watch it. These settings only decide
+                who is allowed to send you interest and how precisely your location shows.
+              </p>
 
               <div className={styles.fieldGroup}>
                 <span className={styles.label}>Public duration</span>
@@ -1105,7 +1286,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
               </div>
 
               <div className={styles.fieldGroup}>
-                <span className={styles.label}>Dating intents (optional)</span>
+                <span className={styles.label}>Only accept interest from these intents (optional)</span>
                 <div className={styles.checkboxList}>
                   {DATING_INTENTS.map((intent) => (
                     <label className={styles.choice} key={intent.value}>
@@ -1169,25 +1350,83 @@ export function ConsentFlow({ token }: { readonly token: string }) {
             )}
 
             <div className={styles.profileSummary}>
-              <h2 className={styles.sectionHeading}>This is how your page will look</h2>
-              <dl className={styles.summaryList}>
-                <div>
-                  <dt>Display name</dt>
-                  <dd>{displayName}</dd>
-                </div>
-                <div>
-                  <dt>Location</dt>
-                  <dd>{locationSummary(locationPrecision)}</dd>
-                </div>
-                <div>
-                  <dt>Public duration</dt>
-                  <dd>{publishDays} days</dd>
-                </div>
-                <div>
-                  <dt>Included photos</dt>
-                  <dd>{includedAssetIds.length}</dd>
-                </div>
-              </dl>
+              <h2 className={styles.sectionHeading}>This is your page — exactly what people will see</h2>
+              <p className={styles.muted}>
+                A still preview built from what you approved above. On the live page,{' '}
+                {state.preview.introducerDisplayName}’s voice plays over these photos.
+              </p>
+              <div className={styles.previewFrame}>
+                {representativePhoto === null ? (
+                  <p className={styles.muted}>Keep at least one photo to preview your cover.</p>
+                ) : (
+                  <div className={styles.previewCover}>
+                    <img
+                      className={styles.previewCoverImg}
+                      src={representativePhoto.url}
+                      alt="Your page cover"
+                    />
+                    <div className={styles.previewCoverMeta}>
+                      <span className={styles.previewName}>
+                        {displayName}
+                        {previewAge === null ? '' : `, ${previewAge}`}
+                      </span>
+                      {previewLocation !== null && (
+                        <span className={styles.previewSub}>{previewLocation}</span>
+                      )}
+                      <span className={styles.previewSub}>{relationshipLine(state.preview)}</span>
+                    </div>
+                  </div>
+                )}
+
+                {editHeadline.trim() !== '' && (
+                  <p className={styles.previewHeadline}>{editHeadline}</p>
+                )}
+
+                {previewIncludedPhotos.length > 1 && (
+                  <div className={styles.previewThumbs}>
+                    {previewIncludedPhotos.map((photo, index) => (
+                      <div key={photo.assetId} className={styles.previewThumb}>
+                        <img src={photo.url} alt={`Photo ${index + 1} in play order`} />
+                        {index === 0 && <span className={styles.repTag}>Cover</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {editBody.trim() !== '' && <p className={styles.previewBody}>{editBody}</p>}
+
+                <dl className={styles.summaryList}>
+                  <div>
+                    <dt>Looking for</dt>
+                    <dd>{ownIntent === '' ? 'Choose above' : datingIntentLabel(ownIntent)}</dd>
+                  </div>
+                  <div>
+                    <dt>Can reach out</dt>
+                    <dd>{previewAudience}</dd>
+                  </div>
+                  <div>
+                    <dt>Location shown</dt>
+                    <dd>{previewLocation ?? 'Hidden'}</dd>
+                  </div>
+                  <div>
+                    <dt>Public for</dt>
+                    <dd>{publishDays} days</dd>
+                  </div>
+                  <div>
+                    <dt>Voice</dt>
+                    <dd>
+                      {state.voiceUrl === null
+                        ? 'Not ready to play here'
+                        : 'Your friend’s original recording'}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+              <p className={styles.muted}>
+                Photos play in your friend’s original order — you choose which to include, not the
+                order. You control the words and photos here; the voice recording itself can’t be
+                trimmed, but you can request changes or decline below.
+              </p>
             </div>
 
             <div className={styles.controlNote}>
@@ -1213,6 +1452,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                 uploadingPhoto ||
                 editsDirty ||
                 currentAudienceError !== null ||
+                currentProfileError !== null ||
                 includedAssetIds.length === 0 ||
                 ((state.review.hardClaims.length > 0 || state.review.daterEdited) &&
                   !hardClaimsConfirmed)

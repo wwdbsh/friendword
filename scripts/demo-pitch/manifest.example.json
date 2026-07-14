@@ -1,0 +1,35 @@
+{
+  "_comment": "Input contract for scripts/seed-demo-pitch.mjs (GP-P0-3). Fill `audio` with a path to Sangheon's RIGHTS-CLEARED recording when it arrives; keep it null until then. TTS / AI-synthesised voice is FORBIDDEN as a substitute (2026-07-13 decision). Transcript + segments are hand-written, so no OPENAI key is needed. Photos are public paths under apps/web/public.",
+  "campaignSlug": "demo-blair",
+  "daterName": "Blair",
+  "introducerPseudonym": "Maya",
+  "relationship": "Friends for 6 years",
+  "approximateLocation": "Brooklyn, New York",
+  "audio": null,
+  "rightsCleared": false,
+  "transcript": "Blair is the person who turns an ordinary Tuesday into the story you tell all year. She remembers your coffee order and somehow always finds the best song for the walk home. She is curious, quick-witted, and genuinely shows up when it matters. Her ideal night is live music, great noodles, and a conversation that runs past midnight. If you are kind, playful, and ready for something real, I think you should meet Blair.",
+  "segments": [
+    { "start": 0.0, "end": 12.0, "text": "Blair is the person who turns an ordinary Tuesday into the story you tell all year." },
+    { "start": 12.0, "end": 24.0, "text": "She remembers your coffee order and somehow always finds the best song for the walk home." },
+    { "start": 24.0, "end": 36.0, "text": "She is curious, quick-witted, and genuinely shows up when it matters." },
+    { "start": 36.0, "end": 48.0, "text": "Her ideal night is live music, great noodles, and a conversation that runs past midnight." },
+    { "start": 48.0, "end": 60.0, "text": "If you are kind, playful, and ready for something real, I think you should meet Blair." }
+  ],
+  "structure": {
+    "hook": "Blair is the person who turns an ordinary Tuesday into the story you tell all year.",
+    "relationship_context": "Maya has been close friends with Blair for six years.",
+    "three_specific_qualities": [
+      "Remembers the small things — your coffee order, the song for the walk home.",
+      "Curious and quick-witted, always up for a conversation that runs past midnight.",
+      "Genuinely shows up when it actually matters."
+    ],
+    "evidence_or_anecdote": "Her ideal night is live music, great noodles, and talking until the trains stop running.",
+    "good_match_for": "Someone kind, playful, and ready for something real.",
+    "hard_claims_requiring_confirmation": []
+  },
+  "photos": [
+    { "src": "/fixtures/blair-portrait-1.svg", "alt": "Illustrated portrait placeholder for Blair in a tangerine jacket" },
+    { "src": "/fixtures/blair-portrait-2.svg", "alt": "Illustrated portrait placeholder for Blair holding a record" },
+    { "src": "/fixtures/blair-portrait-3.svg", "alt": "Illustrated portrait placeholder for Blair on a sunny city walk" }
+  ]
+}

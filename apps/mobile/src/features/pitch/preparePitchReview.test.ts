@@ -8,6 +8,7 @@ import { PitchDraftSchema, type PitchDraft, type PitchReview } from '../../servi
 import {
   getAiDraftFailureMessage,
   isAiConsentRequiredFailure,
+  ManualRecapRequiredError,
   preparePitchReview,
   type PitchReviewPreparationDependencies,
 } from './preparePitchReview';
@@ -29,6 +30,13 @@ function draftWithServer(): PitchDraft {
     },
     createdAt: '2026-07-13T00:00:00.000Z',
     updatedAt: '2026-07-13T00:00:00.000Z',
+  });
+}
+
+function draftWithServerRecording(caption: string): PitchDraft {
+  return PitchDraftSchema.parse({
+    ...draftWithServer(),
+    recording: { uri: 'file:///voice.m4a', durationMillis: 32_000, caption },
   });
 }
 
@@ -269,7 +277,7 @@ describe('preparePitchReview', () => {
   });
 
   it('keeps manual writing free of consent and AI, yet still stores the media', async () => {
-    const draft = draftWithServer();
+    const draft = draftWithServerRecording('A real recap story about Jordan.');
     const uploadDraftMedia = vi.fn(async () => draft);
     const recordAiConsent = vi.fn().mockResolvedValue(undefined);
     const generateDraft = vi.fn().mockResolvedValue({ kind: 'generated' });
@@ -287,6 +295,39 @@ describe('preparePitchReview', () => {
     expect(recordAiConsent).not.toHaveBeenCalled();
     expect(generateDraft).not.toHaveBeenCalled();
     expect(getDisclosureRevision).not.toHaveBeenCalled();
+  });
+
+  it('lets the AI path proceed without a text recap (CP-8)', async () => {
+    const draft = draftWithServerRecording('');
+    const uploadDraftMedia = vi.fn(async () => draft);
+    const generateDraft = vi.fn().mockResolvedValue({ kind: 'generated' });
+
+    await preparePitchReview(
+      serviceFor(draft, { uploadDraftMedia }),
+      draft.id,
+      'affirm_ai_consent',
+      dependencies({ generateDraft }),
+    );
+
+    expect(uploadDraftMedia).toHaveBeenCalledOnce();
+    expect(generateDraft).toHaveBeenCalledOnce();
+  });
+
+  it('blocks the manual path when there is no text recap, uploading nothing (CP-8)', async () => {
+    const draft = draftWithServerRecording('   ');
+    const uploadDraftMedia = vi.fn(async () => draft);
+    const generateDraft = vi.fn().mockResolvedValue({ kind: 'generated' });
+
+    await expect(
+      preparePitchReview(
+        serviceFor(draft, { uploadDraftMedia }),
+        draft.id,
+        'write_manually',
+        dependencies({ generateDraft }),
+      ),
+    ).rejects.toBeInstanceOf(ManualRecapRequiredError);
+    expect(uploadDraftMedia).not.toHaveBeenCalled();
+    expect(generateDraft).not.toHaveBeenCalled();
   });
 
   it('never uploads or contacts AI for a local-only draft', async () => {

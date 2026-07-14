@@ -254,7 +254,7 @@ Grand Prize에서 중요한 단위는 거대한 TAM이 아니라 **활성 캠페
 | 관심 표현의 scam 인상 | 관심 표현자 사진·기본 소개·연령·전화 확인 | M | MVP 필수 |
 | 연락처 노출 위험 | 수락 후에만 1:1 Intro Room, 신고·차단 | L | MVP 필수 |
 | 다중 친구 맥락 | 승인된 추가 추천을 동적 Vouch Card로 표시 | M | MVP 후반 |
-| 이미 공유된 피치 수정 | 동적 웹 피치만 즉시 업데이트, 기존 MP4는 자동 수정하지 않음 | S | 정책으로 확정 |
+| 이미 공유된 피치 수정 | 동적 웹 피치만 즉시 업데이트, (로드맵의) MP4 export는 자동 수정하지 않음 | S | 정책으로 확정, MP4는 post-launch |
 | Introducer 반복 동기 | 가명 프로필, 완료 수, 감사 배지, 커스터마이징 해금 | M | 글로벌 랭킹 없이 구현 |
 | 수익화 | 무료 Starter + $4.99 Creator Launch + 30일 Campaign Pass | M~L | Shipaton 필수 |
 | 운영 안전 | 텍스트·이미지 moderation, 신고 큐, SLA, 감사 로그 | L/XL | 범위를 제한하되 MVP 필수 |
@@ -314,10 +314,8 @@ Grand Prize에서 중요한 단위는 거대한 TAM이 아니라 **활성 캠페
 
 - Campaign Pass: 추가 친구 1~5명의 Vouch Card
 - Introducer 가명 프로필과 소개 완료 배지
-- Creator Launch: premium visual theme와 social asset 재생성
-- Creator Launch: MP4 export/share kit
-- Campaign Pass: 캠페인 analytics — views, source, interests, accepted intros
-- Campaign Pass: 관심 표현 필터 — 연령대, 거리/지역, 관계 의도
+- Creator Launch: premium visual theme, social asset 재생성, 서버 렌더 MP4 export (정적 share kit은 이미 MVP로 출시됨 — 위 상품 계약 참조)
+- Campaign Pass: accepted-intro 단계까지의 확장 analytics (view→interest source별 퍼널은 이미 MVP Pass 가치)
 - push notification: 승인 요청, 관심 도착, 수락, 새 메시지
 - BuildInPublic용 익명화된 성장 스냅샷
 
@@ -439,18 +437,29 @@ User A
 
 ### Creator Launch — $4.99
 
-**Introducer가 특정 친구의 피치 하나를 더 잘 제작·공유하기 위해 구매하는 피치당 일회성 Launch Pack**이다. 무료 피치 공개의 입장료가 아니며, 이미 무료로 가능한 연결을 막지 않는다. `Creator`는 상품의 마케팅 명칭일 뿐 별도의 사용자 역할이 아니고, 도메인과 데이터 모델에서 구매자는 기존 `Introducer`다.
+**Introducer가 특정 친구의 피치 하나를 더 잘 공유하기 위해 구매하는 피치당 일회성 상품**이다. 무료 피치 공개의 입장료가 아니며, 이미 무료로 가능한 연결·공유를 막지 않는다. `Creator`는 상품의 마케팅 명칭일 뿐 별도의 사용자 역할이 아니고, 도메인과 데이터 모델에서 구매자는 기존 `Introducer`다.
+
+> **현행 MVP 계약(canonical)** — [`docs/DECISIONS.md`](docs/DECISIONS.md) 2026-07-13 "Creator Launch·Campaign Pass 최종 MVP 상품 계약". 감사 CP-5의 "정직한 축소" 결정으로 Creator Launch $4.99가 실제로 제공하는 것은 **승인 콘텐츠 기반 정적 share kit** 하나다. 아래 목록이 판매·약속하는 전부이며, 그 아래 "원 계약(historical)" 표기는 초기 기획 기록으로 현재 상품 범위가 아니다.
+
+- 승인된 피치에서 생성한 9:16 세로형 정적 share card 1개(PNG)
+- Instagram/TikTok/iMessage 스토리용 caption pack(완전한 공개 URL 포함)
+- 발행 후 `/kit/[draftId]`에서 크레딧 1회 소비로 unlock, 이후 영구 재진입(재소비 없음)
+
+**판매하지 않으며 카피에서 약속하지 않는(post-launch 로드맵) 항목**: premium motion theme, AI 추가 composition, 서버 렌더 MP4 export, end card 커스터마이즈, social asset 재생성. 킷 산출물은 Dater 승인 snapshot의 콘텐츠(승인 headline, 대표 사진=포함 사진 중 sort_order 최솟값)만 사용하며 별도 재승인이 필요한 신규 표현을 만들지 않는다.
+
+Creator Launch에는 캠페인 공개 기간, 관심 표현 필터, Vouch 관리, 관심 인박스, 캠페인 운영 analytics가 포함되지 않는다. 이는 Dater용 Campaign Pass의 영역이다.
+
+크레딧은 private draft 단계에서 예약할 수 있지만 발행 후 kit unlock 시점에만 소비된다. Dater가 거절하거나 unlock 전에 캠페인이 삭제되면 credit을 Introducer의 계정으로 반환한다. 이미 unlock으로 소비된 credit은 다른 캠페인으로 이전하지 않으며 환불로도 재발급하지 않는다(전달 완료된 소모성 디지털 재화 — DECISIONS 2026-07-14 "Commerce 상태기계 확정" refund 계약). 결제가 Dater의 승인권·수정권·공개권·삭제권을 제한해서는 안 된다.
+
+#### 원 계약(historical — post-launch 로드맵, 현재 미판매)
+
+초기 기획의 Creator Launch Pack 구성은 아래와 같았다. 감사 CP-5로 현재 상품에서 제외됐고 향후 로드맵으로만 남는다.
 
 - premium motion theme 1개
 - AI가 제안하는 추가 pitch composition
 - 서버 렌더 MP4 export 1회
-- Instagram/TikTok/iMessage용 social share kit
 - Friendword 기본 end card 커스터마이징
 - Dater가 승인한 콘텐츠 기준 social asset 재생성 1회
-
-Creator Launch에는 캠페인 공개 기간, 관심 표현 필터, Vouch 관리, 관심 인박스, 캠페인 운영 analytics가 포함되지 않는다. 이는 Dater용 Campaign Pass의 영역이다.
-
-결제는 private draft 단계에서 예약할 수 있지만 Dater 승인 후 premium asset을 실제 생성할 때만 credit을 소비한다. Dater가 거절하거나 premium asset 생성 전에 캠페인이 삭제되면 credit을 Introducer의 계정으로 반환한다. 생성이 완료된 credit은 다른 캠페인으로 이전하지 않는다. 결제가 Dater의 승인권·수정권·공개권·삭제권을 제한해서는 안 된다.
 
 iOS에서는 반복 구매 가능한 consumable IAP `creator_launch_credit_499`로 구현한다. 사용자 관점에서는 자동 갱신이 없는 피치당 일회성 결제지만, 같은 Introducer가 다른 친구를 소개할 때 다시 구매할 수 있다. RevenueCat webhook과 서버 `purchase_credit_ledger`에서 `available → reserved → consumed` 및 publish 전 반환을 idempotent하게 처리하며, RevenueCat entitlement 하나만으로 consumable 사용 여부를 판정하지 않는다.
 
@@ -458,16 +467,28 @@ iOS에서는 반복 구매 가능한 consumable IAP `creator_launch_credit_499`�
 
 초기 정가 가설: **USD $19.99**, 비자동 갱신. **Dater가 자신이 소유한 캠페인을 30일 동안 더 적극적으로 운영하기 위해 구매하는 독립 상품**이다. Creator Launch와 상하 관계가 아니며, Creator Launch 구매 여부와 가격에 영향을 주지 않는다.
 
-- 캠페인 30일 활성
+> **현행 MVP 계약(canonical)** — DECISIONS 2026-07-13 상품 계약 + 2026-07-14 "Commerce 상태기계 확정"(Slice 4). 감사 CP-6의 가치 정직화로 Campaign Pass $19.99가 실제로 제공하는 것은 아래 셋이다. 그 아래 "원 계약(historical)"은 초기 기획 기록으로 현재 상품 범위가 아니다.
+
+- 구매 시점 기준 **30일 연장** — 정확히 `GREATEST(now, ends_at) + 30일`(active면 잔여기간 뒤에 적층, 만료 상태면 구매 시점부터. scheduler 지연과 무관하게 동일)
+- Pass-게이트 캠페인 퍼널 분석(view→interest를 source별로 집계)
+- 인박스의 Pass 섹션
+
+**재구매·재개 규칙**: 활성 Pass 중에는 서버가 재구매를 거부하고 **만료 후에만** 재구매한다(가치 누적 스택 없음). 무료 resume는 불가하고 **유료 Campaign Pass 구매가 expired 캠페인의 유일한 재개 경로**다(2026-07-13의 "만료 후 재개 불가"를 Slice 4에서 명시적으로 개정). paused 캠페인 구매는 창만 연장하고 paused를 유지한다(자발적 중지 존중). 비공개 베타 중 revival grant는 review 큐로 보류되며(돈은 받되 벤핏 기록 유실 금지) 게이트 해제 후 반영된다.
+
+**판매하지 않으며 카피에서 약속하지 않는 항목**: 최대 5 Vouch Card, 여러 승인 버전 중 활성 버전 선택, 동적 web campaign 업데이트, 일정 관리, 향상된 관심 인박스·알림 관리. **관심 표현 필터(audience filter)는 무료 Dater consent 기능이지 Pass 가치가 아니다**(공개 설정에서 무료 제공).
+
+Creator Launch가 적용된 캠페인과 적용되지 않은 캠페인 모두 Campaign Pass 가격은 동일하게 $19.99다. 두 상품은 한 캠페인에 함께 적용될 수 있지만 혜택이 겹치지 않으며 결제 금액을 서로 차감하지 않는다.
+
+#### 원 계약(historical — post-launch 로드맵, 현재 미판매)
+
+초기 기획의 30-day Campaign Pass 구성은 아래와 같았다. 감사 CP-6으로 30일 연장·퍼널 분석·인박스 섹션만 남기고 나머지는 현재 상품에서 제외됐다.
+
+- 캠페인 30일 활성(→ 현행 유지, 단 적층 규칙은 위 상태기계)
 - 최대 5개의 승인된 Vouch Card
-- 캠페인 source/view/interest analytics
-- 관심 표현 필터
 - campaign pause/resume 일정 관리
 - 여러 승인 pitch version 중 활성 버전 선택
 - 추가 추천이 반영된 동적 web campaign 업데이트
 - 향상된 관심 인박스·알림 관리
-
-Creator Launch가 적용된 캠페인과 적용되지 않은 캠페인 모두 Campaign Pass 가격은 동일하게 $19.99다. 두 상품은 한 캠페인에 함께 적용될 수 있지만 혜택이 겹치지 않으며 결제 금액을 서로 차감하지 않는다.
 
 iOS에서는 한 달과 같은 정해진 기간의 접근을 제공하는 **non-renewing subscription**, Android에서는 **1개월 prepaid subscription**을 우선 검토한다. Apple은 non-renewing subscription을 특정 기간의 서비스 접근용으로 정의하고, Google Play는 1개월 prepaid base plan을 지원한다. RevenueCat의 non-subscription entitlement는 자동 만료 처리에 주의가 필요하므로 [Non-Subscription Purchases](https://www.revenuecat.com/docs/platform-resources/non-subscriptions) 문서를 따라 서버와 webhook으로 만료 상태를 검증한다.
 
@@ -491,9 +512,9 @@ iOS에서는 한 달과 같은 정해진 기간의 접근을 제공하는 **non-
 | Creator Launch | Campaign Pass | 캠페인 상태 |
 |---|---|---|
 | 미구매 | 미구매 | 기본 제작·공유·연결이 가능한 Free Starter |
-| 구매 | 미구매 | premium social asset이 적용된 무료 운영 캠페인 |
-| 미구매 | 구매 | 기본 pitch asset으로 30일 확장 운영하는 캠페인 |
-| 구매 | 구매 | premium 제작과 30일 확장 운영이 각각 적용된 캠페인 |
+| 구매 | 미구매 | 정적 share kit을 unlock한 무료 운영 캠페인 |
+| 미구매 | 구매 | 30일 연장 + 퍼널 분석으로 운영하는 캠페인 |
+| 구매 | 구매 | share kit unlock과 30일 연장 운영이 각각 적용된 캠페인 |
 
 Creator Launch 구매 기록과 credit은 Introducer가 소유하고, Campaign Pass와 공개 campaign은 Dater가 소유한다. Introducer가 Creator Launch를 결제해도 Dater의 캠페인 소유권이나 통제권을 얻지 않는다.
 

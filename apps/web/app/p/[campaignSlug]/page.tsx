@@ -129,19 +129,58 @@ export default async function PitchPage({ params }: PitchPageProps) {
         <PitchPlayer pitch={pitch} />
       </section>
 
-      {(pitch.approvedBody !== null || pitch.transcriptText !== null) && (
+      {(pitch.structure !== null ||
+        pitch.approvedBody !== null ||
+        pitch.transcriptText !== null) && (
         <section
           className={`${styles.storySection} ${styles.revealTwo}`}
           aria-labelledby="story-heading"
         >
           <article className={styles.storyCard}>
+            {pitch.isDemo && <span className={styles.demoBadge}>Demo data</span>}
             <h2 id="story-heading">In {pitch.introducerPseudonym}’s words</h2>
-            {pitch.approvedBody !== null && (
-              <p className={styles.storyBody}>{pitch.approvedBody}</p>
+
+            {/* CP-2: render the dater-approved structure as distinct scenes —
+                hook, qualities, anecdote, good match — instead of one generic
+                body blob. Older pitches without a structure snapshot fall back
+                to the approved body. */}
+            {pitch.structure !== null ? (
+              <div className={styles.structure}>
+                <div className={styles.structureScene}>
+                  <span className={styles.structureLabel}>The hook</span>
+                  <p className={styles.storyBody}>{pitch.structure.hook}</p>
+                </div>
+                <div className={styles.structureScene}>
+                  <span className={styles.structureLabel}>How they know each other</span>
+                  <p>{pitch.structure.relationship_context}</p>
+                </div>
+                <div className={styles.structureScene}>
+                  <span className={styles.structureLabel}>Three specific things</span>
+                  <ul className={styles.qualityList}>
+                    {pitch.structure.three_specific_qualities.map((quality) => (
+                      <li key={quality}>{quality}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div className={styles.structureScene}>
+                  <span className={styles.structureLabel}>A moment that shows it</span>
+                  <p>{pitch.structure.evidence_or_anecdote}</p>
+                </div>
+                <div className={styles.structureScene}>
+                  <span className={styles.structureLabel}>A good match for</span>
+                  <p>{pitch.structure.good_match_for}</p>
+                </div>
+              </div>
+            ) : (
+              pitch.approvedBody !== null && (
+                <p className={styles.storyBody}>{pitch.approvedBody}</p>
+              )
             )}
+
             <p className={styles.storyMeta}>
-              Structured from {pitch.introducerPseudonym}’s voice note — every word here was
-              reviewed and approved by {pitch.daterName} before publishing.
+              {pitch.isDemo
+                ? `A structured example of how a friend’s pitch is organized. Demo data — no live recording or approval yet.`
+                : `Structured from ${pitch.introducerPseudonym}’s voice note — every word here was reviewed and approved by ${pitch.daterName} before publishing.`}
             </p>
             {pitch.transcriptText !== null && (
               <details className={styles.transcript}>
@@ -153,34 +192,6 @@ export default async function PitchPage({ params }: PitchPageProps) {
         </section>
       )}
 
-      {pitch.vouches.length > 0 && (
-        <section className={styles.vouchSection} aria-labelledby="vouch-heading">
-          <div className={`${styles.vouchHeading} ${styles.revealTwo}`}>
-            <span className={styles.countBadge}>
-              +{pitch.vouches.length} friend{pitch.vouches.length === 1 ? '' : 's'} vouch
-            </span>
-            <h2 id="vouch-heading">The liner notes</h2>
-            <p>
-              More people who know {pitch.daterName} in real life, shared only after{' '}
-              {pitch.daterName} approved them.
-            </p>
-          </div>
-
-          <div className={styles.vouchGrid}>
-            {pitch.vouches.map((vouch, index) => (
-              <article
-                className={`${styles.vouchCard} ${index === 0 ? styles.vouchLeft : styles.vouchRight} ${index === 0 ? styles.revealThree : styles.revealFour}`}
-                key={vouch.pseudonym}
-              >
-                <span className={styles.vouchBadge}>{vouch.relationship}</span>
-                <blockquote>“{vouch.quote}”</blockquote>
-                <p>— {vouch.pseudonym}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-      )}
-
       <section
         className={`${styles.trustNote} ${styles.revealFive}`}
         aria-labelledby="trust-heading"
@@ -189,16 +200,19 @@ export default async function PitchPage({ params }: PitchPageProps) {
           ✓
         </span>
         <div>
-          <h2 id="trust-heading">{pitch.daterName} stays in control.</h2>
+          <h2 id="trust-heading">
+            {pitch.isDemo ? 'How control works on a real page.' : `${pitch.daterName} stays in control.`}
+          </h2>
           {/* TODO(identity-provider): Restore identity-verification copy after verification ships. */}
-          {/* Copy honesty (second audit §11): claims below match the shipped
-              Slice 7 dater controls — text editing, own photos, audience,
-              location precision, and duration — no more, no less. */}
+          {/* Copy honesty (third audit CP-1): the dater edits the wording,
+              photos, and claims and chooses the audience + duration — they do
+              NOT re-record. The friend's original voice recording is immutable,
+              so we no longer imply "could edit any of it". Framed as "who can
+              reach out", not "who can see it" (viewing is open to anyone). */}
           <p>
-            {pitch.daterName} reviewed this pitch — the recording, the wording, the photos shown
-            here, and its claims — could edit any of it, and chose who can reach out and how long
-            this page stays up before approving it. Interest requires signing in and completing a
-            dating profile with 2 photos, a bio, and dating intent. Contact details stay private.
+            {pitch.isDemo
+              ? `On a real page, the person being introduced reviews the pitch before it goes live, edits the wording, photos, and claims, chooses who can reach out, and sets how long the page stays up. The friend’s original voice recording plays as they made it. Interest requires signing in and completing a dating profile with 2 photos, a bio, and dating intent. Contact details stay private.`
+              : `${pitch.daterName} reviewed this pitch before it went live, edited the wording, photos, and claims, chose who can reach out, and set how long this page stays up.${pitch.audioUrl !== null ? ' The friend’s original voice recording plays as they made it.' : ''} Interest requires signing in and completing a dating profile with 2 photos, a bio, and dating intent. Contact details stay private.`}
           </p>
         </div>
       </section>

@@ -22,6 +22,23 @@ type GenerateDraft = (serverDraftId: string) => Promise<DraftGenerationResult>;
 export type PitchReviewPreparationChoice =
   'affirm_ai_consent' | 'use_existing_ai_consent' | 'write_manually';
 
+/**
+ * CP-8: the AI path derives captions from the transcript, so the recording step
+ * no longer forces a text recap. The manual (no-AI) path has no transcript, so
+ * the typed recap is its only caption source and stays required — this error is
+ * thrown before any media is uploaded when a manual submission has no recap.
+ */
+export class ManualRecapRequiredError extends Error {
+  constructor() {
+    super('Add a short text recap to publish without AI captions.');
+    this.name = 'ManualRecapRequiredError';
+  }
+}
+
+export function isManualRecapRequiredFailure(error: unknown): boolean {
+  return error instanceof ManualRecapRequiredError;
+}
+
 export type PitchReviewPreparationDependencies = {
   readonly generateDraft: GenerateDraft;
   readonly getDisclosureRevision: () => Promise<string>;
@@ -69,6 +86,11 @@ export async function preparePitchReview(
   // needs its media on the server for the friend to review, so it uploads —
   // the server does a structure-only check when no AI consent is on record.
   if (prepared.server === null || choice === 'write_manually') {
+    // CP-8: an explicit manual submission publishes the typed recap as its
+    // captions, so it must carry one. The AI path below never reaches here.
+    if (choice === 'write_manually' && (prepared.recording?.caption?.trim() ?? '') === '') {
+      throw new ManualRecapRequiredError();
+    }
     if (prepared.server !== null) {
       await service.uploadDraftMedia(draftId);
     }

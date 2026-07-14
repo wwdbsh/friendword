@@ -219,6 +219,39 @@
   animation-delay: calc(var(--motion-fast) * -1);
 }
 
+/* CP-2: accessible waveform fallback — a real progress track plus an honest
+   status line, shown while decoding or after a decode failure. Never a fake
+   signal. */
+.waveformFallback {
+  display: flex;
+  height: 2.5rem;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-xs);
+}
+
+.progressTrack {
+  width: 100%;
+  height: 0.5rem;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-stage-text-secondary) 45%, transparent);
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--color-flirt);
+  transition: width var(--motion-fast) var(--motion-ease-out);
+}
+
+.waveformStatus {
+  margin: 0;
+  color: var(--color-stage-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+}
+
 .timeRow {
   display: flex;
   justify-content: space-between;

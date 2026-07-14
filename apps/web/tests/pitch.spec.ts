@@ -30,7 +30,9 @@ test('shows the honest written demo and opens the interest flow', async ({ page 
   await test.step('Given the public pitch with share attribution', async () => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('/p/demo-blair?src=instagram');
-    await expect(page.getByRole('heading', { level: 1, name: 'Blair, 29' })).toBeVisible();
+    // GP-P0-3: the demo shows no fabricated age — the heading is the name alone.
+    await expect(page.getByRole('heading', { level: 1, name: 'Blair', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Blair, 29' })).toHaveCount(0);
     await expect
       .poll(() => page.evaluate(() => window.sessionStorage.getItem('fw_attribution')))
       .toBe('instagram');
@@ -64,7 +66,9 @@ test('shows the honest written demo and opens the interest flow', async ({ page 
     await page.screenshot({ path: '/tmp/friendword-pitch-interest-focus.png', fullPage: false });
     await interestButton.click();
     await page.waitForURL('**/p/demo-blair/interest');
-    await expect(page.getByRole('heading', { name: 'This one’s just a demo.' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'This is a demo — Blair isn’t a real person.' }),
+    ).toBeVisible();
     await page.screenshot({ path: '/tmp/friendword-pitch-interest-demo.png', fullPage: false });
     expect(pageErrors).toEqual([]);
     expect(failedResponses).toEqual([]);
@@ -81,7 +85,11 @@ for (const viewport of viewports) {
 
     await test.step('When the demo pitch loads', async () => {
       await page.goto('/p/demo-blair');
-      await expect(page.getByText('+2 friends vouch')).toBeVisible();
+      // GP-P0-3: no fabricated "+2 friends vouch" (Flow D is unshipped). CP-2:
+      // the dater-approved structure renders as labelled scenes instead.
+      await expect(page.getByText('friends vouch')).toHaveCount(0);
+      await expect(page.getByText('Three specific things')).toBeVisible();
+      await expect(page.getByText('Demo data').first()).toBeVisible();
       await expect
         .poll(() =>
           page.evaluate(() =>
@@ -115,8 +123,10 @@ for (const viewport of viewports) {
         });
         const mobileInterestButton = page.getByRole('link', { name: "I'm interested" }).last();
         await expect(mobileInterestButton).toBeVisible();
-        const firstVouchCard = page.locator('blockquote').first().locator('..');
-        await firstVouchCard.evaluate((card) => {
+        // The vouch cards are gone (Flow D unshipped); anchor the scroll on the
+        // structured story card, which sits mid-page above the footer.
+        const storyCard = page.locator('[class*="storyCard"]').first();
+        await storyCard.evaluate((card) => {
           const dock = document.querySelector('[class*="mobileInterest"]');
           if (!(dock instanceof HTMLElement)) {
             return;
@@ -149,7 +159,7 @@ test('returns not found when the campaign slug is unknown', async ({ page }) => 
   });
 
   await test.step('Then the pitch player is not rendered', async () => {
-    await expect(page.getByRole('heading', { name: 'Blair, 29' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Blair' })).toHaveCount(0);
   });
 });
 

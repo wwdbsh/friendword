@@ -26,7 +26,11 @@ import {
 } from './errors';
 import { buildPitchMediaPath, PitchDraftRepo } from './pitchDraftRepo';
 import { InterestRepo } from './interestRepo';
-import { getPublishedPitchBySlug } from './publishedPitchRepo';
+import {
+  ageFromBirthDate,
+  canonicalApproximateLocation,
+  getPublishedPitchBySlug,
+} from './publishedPitchRepo';
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
@@ -903,6 +907,56 @@ describe('ConsentRepo', () => {
     });
   });
 
+  it('confirms the dater profile and maps birth date, region, optional city, and intent', async () => {
+    signedInSession();
+    mocks.rpc.mockResolvedValue({ data: null, error: null });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await repo.setDaterProfile({
+      birthDate: '1994-05-20',
+      region: 'Puget Sound',
+      city: 'Seattle',
+      intent: 'long-term',
+    });
+
+    expect(mocks.rpc).toHaveBeenCalledWith('set_dater_profile', {
+      target_birth_date: '1994-05-20',
+      target_region: 'Puget Sound',
+      target_city: 'Seattle',
+      target_intent: 'long-term',
+    });
+  });
+
+  it('passes a null city to the profile RPC when the city is omitted', async () => {
+    signedInSession();
+    mocks.rpc.mockResolvedValue({ data: null, error: null });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await repo.setDaterProfile({
+      birthDate: '1990-01-01',
+      region: 'Bay Area',
+      intent: 'open-to-either',
+    });
+
+    expect(mocks.rpc).toHaveBeenCalledWith('set_dater_profile', {
+      target_birth_date: '1990-01-01',
+      target_region: 'Bay Area',
+      target_city: null,
+      target_intent: 'open-to-either',
+    });
+  });
+
+  it('rejects a malformed birth date before calling the profile RPC', async () => {
+    signedInSession();
+    mocks.rpc.mockResolvedValue({ data: null, error: null });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await expect(
+      repo.setDaterProfile({ birthDate: '05/20/1994', region: 'Puget Sound', intent: 'long-term' }),
+    ).rejects.toThrow();
+    expect(mocks.rpc).not.toHaveBeenCalledWith('set_dater_profile', expect.anything());
+  });
+
   it('uploads a dater photo before registering it at the next sort order', async () => {
     signedInSession();
     const fileBody = new ArrayBuffer(8);
@@ -1051,6 +1105,7 @@ describe('getPublishedPitchBySlug', () => {
     status: 'published',
     published_at: '2026-07-13T00:00:00Z',
     slug: 'blair-abc123',
+    location_precision: 'city',
   };
   const draftRow = {
     id: '10000000-0000-0000-0000-000000000001',
@@ -1061,11 +1116,22 @@ describe('getPublishedPitchBySlug', () => {
     body: null,
     relationship_type: 'friend',
     relationship_duration: 'y3to10',
+    structure: null,
   };
   const profileRows = [
-    { user_id: '00000000-0000-0000-0000-000000000001', display_name: 'Maya' },
-    { user_id: '00000000-0000-0000-0000-000000000002', display_name: 'Blair' },
+    { user_id: '00000000-0000-0000-0000-000000000001', display_name: 'Maya', birth_date: null },
+    {
+      user_id: '00000000-0000-0000-0000-000000000002',
+      display_name: 'Blair',
+      birth_date: '1994-05-20',
+    },
   ];
+  const datingProfileRow = {
+    approximate_location: 'Seattle',
+    location_region: 'Puget Sound',
+    location_city: 'Seattle',
+    dating_intent: 'long-term',
+  };
 
   const assetRows = [
     {
@@ -1081,9 +1147,19 @@ describe('getPublishedPitchBySlug', () => {
 
   function configurePublishedPitchClient(
     campaign: unknown,
-    options: { readonly betaValue?: string | null; readonly allowlisted?: boolean } = {},
+    options: {
+      readonly betaValue?: string | null;
+      readonly allowlisted?: boolean;
+      readonly datingProfile?: unknown;
+      readonly draft?: unknown;
+    } = {},
   ): void {
-    const { betaValue = 'on', allowlisted = false } = options;
+    const {
+      betaValue = 'on',
+      allowlisted = false,
+      datingProfile = datingProfileRow,
+      draft = draftRow,
+    } = options;
     tableMock.mockImplementation((table: string) => {
       if (table === 'app_config') {
         return {
@@ -1124,7 +1200,7 @@ describe('getPublishedPitchBySlug', () => {
       }
       if (table === 'pitch_drafts') {
         return {
-          select: () => ({ eq: () => ({ single: async () => ({ data: draftRow, error: null }) }) }),
+          select: () => ({ eq: () => ({ single: async () => ({ data: draft, error: null }) }) }),
         };
       }
       if (table === 'dating_profiles') {
@@ -1132,7 +1208,7 @@ describe('getPublishedPitchBySlug', () => {
           select: () => ({
             eq: () => ({
               maybeSingle: async () => ({
-                data: { approximate_location: 'Seattle' },
+                data: datingProfile,
                 error: null,
               }),
             }),
@@ -1226,7 +1302,10 @@ describe('getPublishedPitchBySlug', () => {
       headline: null,
       body: null,
       transcript: null,
-      approximateLocation: 'Seattle',
+      structure: null,
+      age: 32,
+      datingIntent: 'long-term',
+      approximateLocation: 'Seattle, Puget Sound',
       voiceUrl: `https://storage.example/${draftRow.id}/voice.m4a`,
       photos: [
         {
@@ -1235,5 +1314,120 @@ describe('getPublishedPitchBySlug', () => {
         },
       ],
     });
+  });
+
+  it('canonicalizes region precision to the region without the city (CP-1)', async () => {
+    configurePublishedPitchClient({ ...campaignRow, location_precision: 'region' });
+    const client = createServiceClient('https://project.example', 'service-key');
+
+    const regionPitch = await getPublishedPitchBySlug(client, 'blair-abc123');
+
+    configurePublishedPitchClient({ ...campaignRow, location_precision: 'city' });
+    const cityPitch = await getPublishedPitchBySlug(client, 'blair-abc123');
+
+    // The third-audit CP-1 bug: region and city precision returned the same
+    // raw string. They must now differ.
+    expect(regionPitch?.approximateLocation).toBe('Puget Sound');
+    expect(cityPitch?.approximateLocation).toBe('Seattle, Puget Sound');
+    expect(regionPitch?.approximateLocation).not.toBe(cityPitch?.approximateLocation);
+  });
+
+  it('fails region precision closed for a legacy dating profile with no structured region (CP-1)', async () => {
+    // A pre-0041 row only has the unstructured city-level string.
+    configurePublishedPitchClient(
+      { ...campaignRow, location_precision: 'region' },
+      {
+        datingProfile: {
+          approximate_location: 'Seattle',
+          location_region: null,
+          location_city: null,
+          dating_intent: 'long-term',
+        },
+      },
+    );
+    const client = createServiceClient('https://project.example', 'service-key');
+
+    const pitch = await getPublishedPitchBySlug(client, 'blair-abc123');
+
+    expect(pitch?.approximateLocation).toBeNull();
+  });
+
+  it('hides the location entirely when precision is hidden (CP-1)', async () => {
+    configurePublishedPitchClient({ ...campaignRow, location_precision: 'hidden' });
+    const client = createServiceClient('https://project.example', 'service-key');
+
+    const pitch = await getPublishedPitchBySlug(client, 'blair-abc123');
+
+    expect(pitch?.approximateLocation).toBeNull();
+    // Intent still surfaces even when the location is hidden.
+    expect(pitch?.datingIntent).toBe('long-term');
+  });
+
+  it('exposes the dater-approved structure snapshot when it matches the shape (CP-1/CP-2)', async () => {
+    const structure = {
+      hook: 'The friend who always shows up',
+      relationship_context: 'college roommates',
+      three_specific_qualities: ['loyal', 'funny', 'curious'],
+      evidence_or_anecdote: 'drove six hours to help me move',
+      good_match_for: 'someone who values showing up',
+      hard_claims_requiring_confirmation: [],
+    };
+    configurePublishedPitchClient(campaignRow, { draft: { ...draftRow, structure } });
+    const client = createServiceClient('https://project.example', 'service-key');
+
+    const pitch = await getPublishedPitchBySlug(client, 'blair-abc123');
+
+    expect(pitch?.structure).toEqual(structure);
+  });
+
+  it('reads a partial structure snapshot as null rather than leaking it (CP-2)', async () => {
+    configurePublishedPitchClient(campaignRow, {
+      draft: { ...draftRow, structure: { hook: 'partial only' } },
+    });
+    const client = createServiceClient('https://project.example', 'service-key');
+
+    const pitch = await getPublishedPitchBySlug(client, 'blair-abc123');
+
+    expect(pitch?.structure).toBeNull();
+  });
+});
+
+describe('ageFromBirthDate', () => {
+  it('returns whole years elapsed in UTC', () => {
+    expect(ageFromBirthDate('1994-05-20', new Date('2026-07-14T00:00:00Z'))).toBe(32);
+  });
+
+  it('does not count a birthday that has not arrived this year', () => {
+    expect(ageFromBirthDate('1994-12-31', new Date('2026-07-14T00:00:00Z'))).toBe(31);
+  });
+
+  it('returns null for a missing or unparseable date and for a future date', () => {
+    expect(ageFromBirthDate(null, new Date('2026-07-14T00:00:00Z'))).toBeNull();
+    expect(ageFromBirthDate('not-a-date', new Date('2026-07-14T00:00:00Z'))).toBeNull();
+    expect(ageFromBirthDate('2030-01-01', new Date('2026-07-14T00:00:00Z'))).toBeNull();
+  });
+});
+
+describe('canonicalApproximateLocation', () => {
+  it('strips the city for region precision but keeps "City, Region" for city', () => {
+    expect(canonicalApproximateLocation('region', 'Puget Sound', 'Seattle', null)).toBe(
+      'Puget Sound',
+    );
+    expect(canonicalApproximateLocation('city', 'Puget Sound', 'Seattle', null)).toBe(
+      'Seattle, Puget Sound',
+    );
+  });
+
+  it('falls back to the region alone when the city is blank', () => {
+    expect(canonicalApproximateLocation('city', 'Puget Sound', '  ', null)).toBe('Puget Sound');
+  });
+
+  it('fails region precision closed for legacy rows but lets city fall back', () => {
+    // CP-1 invariant: region precision must never leak the city-level legacy
+    // string, so it fails closed to null.
+    expect(canonicalApproximateLocation('region', null, null, 'Seattle')).toBeNull();
+    expect(canonicalApproximateLocation('city', null, null, 'Seattle')).toBe('Seattle');
+    expect(canonicalApproximateLocation('region', null, null, null)).toBeNull();
+    expect(canonicalApproximateLocation('city', null, null, null)).toBeNull();
   });
 });

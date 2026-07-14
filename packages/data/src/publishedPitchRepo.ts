@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-import type { RelationshipDuration, RelationshipType } from '@friendword/contracts';
+import {
+  pitchStructureSchema,
+  type PitchStructure,
+  type RelationshipDuration,
+  type RelationshipType,
+} from '@friendword/contracts';
 
 import type { ServiceSupabaseClient } from './client';
 import { DataLayerError } from './errors';
@@ -77,10 +82,85 @@ export type PublishedPitch = {
   readonly headline: string | null;
   readonly body: string | null;
   readonly transcript: PublishedTranscript | null;
+  /**
+   * The dater-approved structured pitch (CP-1/CP-2 contract for the motion
+   * demo). Parsed from the published draft's `structure` JSONB; null when the
+   * snapshot is missing or does not match the full PitchStructure shape.
+   */
+  readonly structure: PitchStructure | null;
+  /**
+   * Dater's age in whole years, derived server-side from `profiles.birth_date`
+   * (CP-1). The raw birth date is never exposed. Null when no birth date is on
+   * file yet.
+   */
+  readonly age: number | null;
+  /** Dater's own stated dating intent (CP-1), shown in the approved preview. */
+  readonly datingIntent: string | null;
+  /**
+   * Canonical approximate location per the dater's precision choice (CP-1):
+   * 'hidden' → null, 'region' → region only, 'city' → "City, Region". Region
+   * and city precision now yield different strings.
+   */
   readonly approximateLocation: string | null;
   readonly voiceUrl: string | null;
   readonly photos: readonly PublishedPitchPhoto[];
 };
+
+/**
+ * Whole-year age from an ISO birth date, computed in UTC to line up with the
+ * server-side `date_part('year', age(birth_date))` gate. Returns null for a
+ * missing or unparseable date, or a date in the future.
+ */
+export function ageFromBirthDate(birthDate: string | null, now: Date): number | null {
+  if (birthDate === null) {
+    return null;
+  }
+  const dob = new Date(birthDate);
+  if (Number.isNaN(dob.getTime())) {
+    return null;
+  }
+  let age = now.getUTCFullYear() - dob.getUTCFullYear();
+  const monthDelta = now.getUTCMonth() - dob.getUTCMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && now.getUTCDate() < dob.getUTCDate())) {
+    age -= 1;
+  }
+  return age >= 0 ? age : null;
+}
+
+function normalizeLocationPart(value: string | null): string | null {
+  if (value === null) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}
+
+/**
+ * Canonical location string for a non-hidden precision (CP-1). Region precision
+ * strips the city; city precision prints "City, Region". Falls back to the
+ * legacy unstructured `approximate_location` only when no structured region is
+ * stored (pre-0041 rows), which can't be split further.
+ */
+export function canonicalApproximateLocation(
+  precision: 'region' | 'city',
+  region: string | null,
+  city: string | null,
+  legacy: string | null,
+): string | null {
+  const canonicalRegion = normalizeLocationPart(region);
+  const canonicalCity = normalizeLocationPart(city);
+  if (canonicalRegion !== null) {
+    if (precision === 'region') {
+      return canonicalRegion;
+    }
+    return canonicalCity === null ? canonicalRegion : `${canonicalCity}, ${canonicalRegion}`;
+  }
+  // Pre-0041 rows only carry the unstructured `approximate_location`, which is
+  // a city-level string. Region precision must never leak it (CP-1 invariant:
+  // region never shows a city-level string), so it fails closed to null; only
+  // city precision may fall back to the legacy string.
+  return precision === 'city' ? normalizeLocationPart(legacy) : null;
+}
 
 /**
  * Server-only read model for the public pitch page. Takes the service client
@@ -134,12 +214,14 @@ export async function getPublishedPitchBySlug(
     throw new DataLayerError('publishedPitch.profiles', profilesError);
   }
 
-  const daterDisplayName =
-    profiles.find((profile) => profile.user_id === campaign.owner_user_id)?.display_name ??
-    'A friend';
+  const ownerProfile = profiles.find((profile) => profile.user_id === campaign.owner_user_id);
+  const daterDisplayName = ownerProfile?.display_name ?? 'A friend';
   const introducerDisplayName =
     profiles.find((profile) => profile.user_id === draft.created_by_user_id)?.display_name ??
     'A friend';
+
+  // CP-1: age is derived from the dater's birth date, never the raw value.
+  const age = ageFromBirthDate(ownerProfile?.birth_date ?? null, new Date());
 
   const { data: signed } = await client.storage
     .from(PITCH_MEDIA_BUCKET)
@@ -198,16 +280,34 @@ export async function getPublishedPitchBySlug(
     transcript = { text: candidate.text, segments };
   }
 
-  // CP-1 location precision: 'hidden' publishes no location at all.
-  let approximateLocation: string | null = null;
-  if (campaign.location_precision !== 'hidden') {
-    const { data: daterDatingProfile } = await client
-      .from('dating_profiles')
-      .select('approximate_location')
-      .eq('user_id', campaign.owner_user_id)
-      .maybeSingle();
-    approximateLocation = daterDatingProfile?.approximate_location ?? null;
-  }
+  // CP-1: the dater's own profile carries their stated intent and the
+  // structured location. Read it regardless of precision so intent still
+  // surfaces when the location is hidden.
+  const { data: daterDatingProfile } = await client
+    .from('dating_profiles')
+    .select('approximate_location, location_region, location_city, dating_intent')
+    .eq('user_id', campaign.owner_user_id)
+    .maybeSingle();
+
+  // CP-1 location precision: 'hidden' publishes no location; 'region' strips
+  // the city; 'city' prints "City, Region".
+  const approximateLocation =
+    campaign.location_precision === 'hidden'
+      ? null
+      : canonicalApproximateLocation(
+          campaign.location_precision === 'region' ? 'region' : 'city',
+          daterDatingProfile?.location_region ?? null,
+          daterDatingProfile?.location_city ?? null,
+          daterDatingProfile?.approximate_location ?? null,
+        );
+
+  const datingIntent = daterDatingProfile?.dating_intent ?? null;
+
+  // CP-1/CP-2: expose the dater-approved structured pitch for the motion demo.
+  // A snapshot that doesn't match the full shape reads as null rather than
+  // leaking a partial structure downstream.
+  const parsedStructure = pitchStructureSchema.safeParse(draft.structure);
+  const structure = parsedStructure.success ? parsedStructure.data : null;
 
   return {
     campaignId: campaign.id,
@@ -220,6 +320,9 @@ export async function getPublishedPitchBySlug(
     headline: draft.headline,
     body: draft.body,
     transcript,
+    structure,
+    age,
+    datingIntent,
     approximateLocation,
     voiceUrl: signed?.signedUrl ?? null,
     photos,

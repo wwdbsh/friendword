@@ -224,7 +224,7 @@ export default function CampaignsScreen() {
         <View style={styles.sectionHeading}>
           <Text style={styles.sectionTitle}>Campaigns about me</Text>
           <Text style={styles.message}>
-            Campaign Pass adds 30 days from purchase and unlocks campaign funnel analytics.
+            Campaign Pass adds 30 days to a campaign’s live window and unlocks its funnel analytics.
           </Text>
         </View>
 

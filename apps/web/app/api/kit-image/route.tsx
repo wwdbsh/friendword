@@ -21,8 +21,6 @@ const palette = {
   hype: '#FFC63F',
 } as const;
 
-const waveform = [30, 52, 78, 40, 92, 60, 100, 46, 84, 56, 96, 38, 72, 50, 88, 64] as const;
-
 /**
  * Creator Launch benefit (Slice F): renders the unlocked 9:16 share card
  * from the published, dater-approved content. Requires the introducer's
@@ -196,24 +194,28 @@ export async function GET(request: Request): Promise<Response> {
       <div
         style={{
           display: 'flex',
-          alignItems: 'flex-end',
-          gap: 10,
-          height: 120,
+          alignItems: 'center',
+          gap: 22,
           marginBottom: 30,
         }}
       >
-        {waveform.map((height, index) => (
-          <div
-            key={index}
-            style={{
-              display: 'flex',
-              width: 46,
-              height: `${height}%`,
-              borderRadius: 16,
-              background: index % 3 === 0 ? palette.flirt : palette.ink,
-            }}
-          />
-        ))}
+        <div
+          style={{
+            display: 'flex',
+            border: `6px solid ${palette.ink}`,
+            borderRadius: 20,
+            background: palette.flirt,
+            color: palette.cream,
+            padding: '18px 30px',
+            fontSize: 36,
+            fontWeight: 800,
+          }}
+        >
+          VOICE PITCH
+        </div>
+        <div style={{ display: 'flex', flex: 1, fontSize: 30, fontWeight: 600, color: '#5f5347' }}>
+          Press play at the link to hear it.
+        </div>
       </div>
 
       <div style={{ display: 'flex', fontSize: 40, fontWeight: 700 }}>

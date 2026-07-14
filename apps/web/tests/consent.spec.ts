@@ -167,6 +167,11 @@ async function mockClaimedReview(
   await page.route('**/rest/v1/rpc/set_publish_preferences*', (route) =>
     route.fulfill({ json: null }),
   );
+  // CP-1 (Slice 6): the dater confirms their own age/location/intent before
+  // the page can publish.
+  await page.route('**/rest/v1/rpc/set_dater_profile*', (route) =>
+    route.fulfill({ json: null }),
+  );
   // Dater AI-processing disclosure + consent (third audit P0-NEW-3): every
   // claimed review fetches the current disclosure revision, and agreeing records
   // draft-scoped consent before any photo/text reaches the AI review.
@@ -177,6 +182,20 @@ async function mockClaimedReview(
     route.fulfill({ json: 'consent-id' }),
   );
   await mockConsentReview(page);
+}
+
+/** CP-1: fill the dater's own profile inputs so approval can proceed. */
+async function fillDaterProfile(
+  page: Page,
+  options: { readonly birthDate?: string; readonly region?: string; readonly city?: string } = {},
+): Promise<void> {
+  const { birthDate = '1994-05-20', region = 'Puget Sound', city = 'Seattle' } = options;
+  await page.getByLabel('Date of birth').fill(birthDate);
+  await page.getByLabel('Region').fill(region);
+  if (city !== '') {
+    await page.getByLabel('City (optional)').fill(city);
+  }
+  await page.getByLabel('What you’re looking for').selectOption('long-term');
 }
 
 test('allows transcription only while a draft is editable', () => {
@@ -233,6 +252,11 @@ test('shows the invite preview and sends a magic link while signed out', async (
 test('claims, reviews the voice pitch, and publishes when signed in', async ({ page }) => {
   await mockClaimedReview(page);
   let approveBody: unknown;
+  let profileBody: unknown;
+  await page.route('**/rest/v1/rpc/set_dater_profile*', (route) => {
+    profileBody = route.request().postDataJSON();
+    return route.fulfill({ json: null });
+  });
   await page.route('**/rest/v1/rpc/approve_and_publish_pitch*', (route) => {
     approveBody = route.request().postDataJSON();
     return route.fulfill({
@@ -275,8 +299,18 @@ test('claims, reviews the voice pitch, and publishes when signed in', async ({ p
     }
   });
 
-  await test.step('A minimum age below 18 blocks approval on the client', async () => {
+  await test.step('The dater must confirm their own age, location, and intent (CP-1)', async () => {
     await page.getByLabel('I confirm all of these claims are true.').check();
+    // Missing profile inputs keep approval disabled.
+    await expect(page.getByRole('button', { name: 'Approve & publish my page' })).toBeDisabled();
+    await fillDaterProfile(page);
+    // The real output preview reflects the confirmed inputs (region+city).
+    await expect(page.getByText('Blair, 32')).toBeVisible();
+    await expect(page.getByText('Seattle, Puget Sound').first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Approve & publish my page' })).toBeEnabled();
+  });
+
+  await test.step('A minimum age below 18 blocks approval on the client', async () => {
     await page.getByLabel('Minimum age').fill('17');
     await expect(page.getByText('Minimum age must be 18 or older.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Approve & publish my page' })).toBeDisabled();
@@ -287,6 +321,12 @@ test('claims, reviews the voice pitch, and publishes when signed in', async ({ p
     await page.getByLabel('I confirm all of these claims are true.').check();
     await page.getByRole('button', { name: 'Approve & publish my page' }).click();
     await page.waitForURL('**/p/blair-mix123');
+    expect(profileBody).toEqual({
+      target_birth_date: '1994-05-20',
+      target_region: 'Puget Sound',
+      target_city: 'Seattle',
+      target_intent: 'long-term',
+    });
     expect(approveBody).toEqual({
       draft_id: DRAFT_ID,
       campaign_days: 14,
@@ -371,14 +411,15 @@ test('saves dater edits with voice retained, reloads the revision, and publishes
     included_asset_ids: [SECOND_PHOTO_ID, VOICE_ASSET_ID],
   });
 
+  await fillDaterProfile(page);
   await page.getByLabel('7 days').check();
   await page.getByLabel('Location visibility').selectOption('hidden');
   await page.getByLabel('Minimum age').fill('21');
   await page.getByLabel('Maximum age (optional)').fill('35');
   await page.getByLabel('Long-term').check();
-  await expect(page.getByText('Location hidden')).toBeVisible();
-  await expect(page.getByText('7 days', { exact: true }).last()).toBeVisible();
-  await expect(page.getByText('Blair', { exact: true })).toBeVisible();
+  // Hidden precision keeps the location out of the real preview snapshot.
+  await expect(page.locator('dd', { hasText: 'Hidden' })).toBeVisible();
+  await expect(page.getByText('Blair, 32')).toBeVisible();
   await page.getByLabel('I confirm all of these claims are true.').check();
   await page.getByRole('button', { name: 'Approve & publish my page' }).click();
   await page.waitForURL('**/p/blair-edited');
@@ -629,6 +670,7 @@ test('requires the dater to reload when approval targets a stale revision', asyn
 
   await page.goto(`/consent/${CONSENT_TOKEN}`);
   await page.getByLabel('I confirm all of these claims are true.').check();
+  await fillDaterProfile(page);
   await page.getByRole('button', { name: 'Approve & publish my page' }).click();
 
   await expect(page.getByRole('heading', { name: 'The introduction was updated.' })).toBeVisible();

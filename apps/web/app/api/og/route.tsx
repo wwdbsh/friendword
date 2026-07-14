@@ -33,7 +33,9 @@ const palette = {
   hype: '#FFC63F',
 } as const;
 
-const waveform = [28, 46, 72, 38, 86, 58, 96, 42, 78, 52, 90, 34, 68, 48, 82, 60] as const;
+// CP-2 honesty: the OG card carries a decorative sticker underline, NOT a bar
+// "waveform". A fixed decorative array rendered as variable-height bars read as
+// a real audio signal, which the share card cannot substantiate.
 const abstractPhotoUrl = `data:image/svg+xml,${encodeURIComponent(`
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1100">
     <rect width="900" height="1100" fill="#221B15"/>
@@ -219,19 +221,17 @@ function renderCampaignOg({ daterName, introducerName, photoUrl }: CampaignOg): 
           >
             {daterName}
           </div>
-          <div style={{ display: 'flex', marginTop: 34, alignItems: 'flex-end', gap: 9 }}>
-            {waveform.map((height, index) => (
-              <div
-                key={`${height}-${index}`}
-                style={{
-                  width: 14,
-                  height,
-                  display: 'flex',
-                  borderRadius: 999,
-                  background: index < 10 ? palette.flirt : palette.pop,
-                }}
-              />
-            ))}
+          {/* Decorative sticker underline — clearly branding, not a signal. */}
+          <div style={{ display: 'flex', marginTop: 34, alignItems: 'center', gap: 14 }}>
+            <div
+              style={{ display: 'flex', width: 168, height: 14, borderRadius: 999, background: palette.flirt }}
+            />
+            <div
+              style={{ display: 'flex', width: 22, height: 22, borderRadius: 999, background: palette.hype }}
+            />
+            <div
+              style={{ display: 'flex', width: 14, height: 14, borderRadius: 999, background: palette.pop }}
+            />
           </div>
         </div>
 

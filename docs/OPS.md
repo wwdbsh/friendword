@@ -240,7 +240,7 @@ rollback에서 **이번 세션에 업로드한** `profile-media` 객체를 실�
 1. Apple Developer Program 멤버십(연 $99, 미가입 시 승인까지 최대 48h).
 2. Expo 계정: `pnpm dlx eas-cli login`
 3. `cd apps/mobile && pnpm dlx eas-cli init` → 출력된 project ID를 루트 `.env`에 `EAS_PROJECT_ID=<uuid>`로 추가.
-4. 빌드 env 업로드(값은 로컬에만): `pnpm dlx eas-cli env:push production --path ../../.env` 후 EAS 대시보드에서 EXPO_PUBLIC_* 3종만 남기고 서버 전용 키는 제거(클라이언트 번들에 불필요).
+4. 빌드 env 등록(선별 — 서버 전용 키는 EAS에 올리지 않는다): `pnpm dlx eas-cli env:create production` 를 반복 실행해 `EAS_PROJECT_ID`, `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY`(및 설정 시 `EXPO_PUBLIC_WEB_ORIGIN`) 5개만 plain visibility로 등록. 값은 사용자가 직접 입력(Claude 미수신 원칙).
 5. 첫 빌드: `pnpm dlx eas-cli build --platform ios --profile production` (Apple 로그인·인증서/프로파일은 EAS가 자동 관리 — 첫 실행에서 대화형 승인).
 6. 제출: `pnpm dlx eas-cli submit --platform ios --latest` (App Store Connect 앱 레코드 자동 생성 가능).
 7. App Store Connect → TestFlight → Internal Testing 그룹 생성 → 본인 Apple ID 추가 → 폰의 TestFlight 앱에서 설치. 이후 새 빌드는 5~6번 반복이면 자동 알림.

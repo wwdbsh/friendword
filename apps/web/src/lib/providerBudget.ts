@@ -8,7 +8,7 @@ export type ProviderReservation =
   | {
       readonly ok: true;
       readonly reservationId: string;
-      readonly priorStatus: string;
+      readonly priorStatus: string | null;
       readonly granted: boolean;
       readonly leaseToken: string | null;
     }
@@ -16,7 +16,8 @@ export type ProviderReservation =
 
 type ReserveRow = {
   readonly reservation_id: string;
-  readonly prior_status: string;
+  // NULL on a fresh reservation (no prior attempt existed for this ref).
+  readonly prior_status: string | null;
   readonly granted: boolean;
   readonly lease_token: string | null;
 };
@@ -49,14 +50,14 @@ function extractReserveRow(data: unknown): ReserveRow | null {
   const row = raw as Record<string, unknown>;
   if (
     typeof row.reservation_id !== 'string' ||
-    typeof row.prior_status !== 'string' ||
+    (row.prior_status !== null && typeof row.prior_status !== 'string') ||
     typeof row.granted !== 'boolean'
   ) {
     return null;
   }
   return {
     reservation_id: row.reservation_id,
-    prior_status: row.prior_status,
+    prior_status: row.prior_status as string | null,
     granted: row.granted,
     lease_token: typeof row.lease_token === 'string' ? row.lease_token : null,
   };

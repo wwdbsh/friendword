@@ -162,7 +162,10 @@ describe('media/validate — third audit consent + replay + failure accounting',
       downloadBytes: validPngBytes(),
       reserveRow: {
         reservation_id: 'res-3',
-        prior_status: 'new',
+        // A FRESH reservation returns prior_status NULL — the value the real
+        // RPC produces. A string here once hid a parse bug that 500ed every
+        // first-time validation in production E2E; keep this null.
+        prior_status: null,
         granted: true,
         lease_token: 'lease-3',
       },

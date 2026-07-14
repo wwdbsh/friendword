@@ -267,6 +267,26 @@ async function deleteAccountData(admin, userId, scope) {
       );
     }
   });
+  await runStage('introducer voice erasure', async () => {
+    // Third audit Slice 3 follow-up: 0037 deletes the introducer's voice
+    // asset ROWS synchronously and archives the voiceless campaigns, but a
+    // draft preserved for another owner (reassignment) keeps its storage
+    // prefix alive, so the physical voice bytes — personal data — would
+    // survive both this job's prefix removal and the orphan sweep's
+    // protected-prefix rules. Remove exactly the voice object (and its
+    // validation row) for every preserved draft the deleted user created.
+    const voicePaths = scope.reassignments.map(
+      (reassignment) => `${reassignment.draftId}/voice.m4a`,
+    );
+    if (voicePaths.length > 0) {
+      await removeStorageObjects(admin, 'pitch-media', voicePaths);
+      for (const voicePath of voicePaths) {
+        await removeRows(admin, 'media_validations', (query) =>
+          query.eq('bucket_id', 'pitch-media').eq('object_name', voicePath),
+        );
+      }
+    }
+  });
   await runStage('purchase reference cleanup', async () => {
     // share_kits.credit_ledger_id is a RESTRICT FK (second audit H-2):
     // paid accounts with an unlocked kit must drop the kit rows before

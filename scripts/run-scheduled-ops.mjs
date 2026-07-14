@@ -13,6 +13,7 @@ const apply = process.argv.includes('--apply');
 const passes = [
   { label: 'campaign expiration', args: ['scripts/expire-campaigns.mjs'] },
   { label: 'account deletions', args: ['scripts/process-deletions.mjs'] },
+  { label: 'review payload scrub', args: ['scripts/scrub-review-payloads.mjs'] },
   {
     label: 'orphan media sweep',
     args: apply

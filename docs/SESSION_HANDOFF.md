@@ -4,7 +4,7 @@
 
 ## CURRENT STATE
 
-- 판정: **기능성 내부 베타**. 3차 감사의 코드 게이트(P0-NEW-1~~4, GP-P0-1·2 코드분, H-1~~H-9)는 Slice 0~~5로, GP-P0-3·CP-1·CP-2·CP-5·CP-6·CP-8 코드분은 Slice 6(`90e9516`)으로 해소. 외부 공개·실결제·Grand Prize 제출은 여전히 아님(잔여: Slice 7~~8 + 사용자 키 게이트 + **데모 실음성 녹음**). green test는 완료 증거가 아니며 acceptance는 감사 문서 기준.
+- 판정: **기능성 내부 베타**. 3차 감사의 코드 게이트는 Slice 0~~5, Slice 6(`90e9516`, GP-P0-3·CP-1·CP-2·CP-5·CP-6·CP-8 코드분), Slice 7(`69efcf3`, §8 디자인·접근성 코드분)로 해소. 외부 공개·실결제·Grand Prize 제출은 여전히 아님(잔여: Slice 8 + 사용자 키 게이트 + **데모 실음성 녹음** + **실기기 iOS QA**). green test는 완료 증거가 아니며 acceptance는 감사 문서 기준.
 - 게이트: `real_payments_enabled=off`(결제 차단), `public_beta_enabled=off`(interest 제출+publish 전이+공개 read/OG 전부 차단, 0034). 내부 QA 예외는 service-role 전용 `qa_preview_allowlist`(pitch_draft 단위)뿐 — 프로덕션 E2E도 gate 전역 토글 대신 이걸 쓴다.
 - 파이프라인: pnpm 모노레포(`apps/mobile`·`apps/web`·`packages/*`·`supabase`). migrations **0001~0041 hosted 배포**(ref oknolcxsvogrhnxnyosr, **0040은 의도적 미사용 갭** — ON CONFLICT 게이트 우회가 실증으로 기각됨, c11 참조). 모든 상태 전이는 SECURITY DEFINER RPC+트리거, authenticated RPC는 전수 active-account 가드(0037). publish는 Dater 확정 birth date 18+ fail-closed(0041).
 - 비용·동의: provider reserve/reconcile은 service-role 전용+request_ref lease+보수적 실패 회계(0035). AI 동의는 4개 usage kind 전부에 `ai_disclosure_current_revision` binding으로 선행(무동의 시 구조 검사만, 외부 AI 0회). 채팅은 reactive-only moderation 정책(문서화됨).
@@ -30,15 +30,20 @@
   - recap 이원화: AI path는 transcript 파생(요구 제거), manual path만 필수.
   - 커머스 truth: canonical 계약 단일화(HANDOFF historical 분리), kit·OG 가짜 waveform 제거, kit 승인 콘텐츠 경계 c10.
   - DECISIONS 3건 추가, audit3 c08~c11 신설.
+- **Slice 7 `69efcf3`** (2026-07-14, 워커 s7-web·s7-mobile + Advisor 재검증·시뮬레이터 QA):
+  - Trust Layer 스펙 수치 확정(DESIGN.md)·토큰화: 1px hairline·soft shadow·tilt 0, borderMuted/borderSuccess로 3:1 미달 경계 2건 해소(red-first), contrast matrix 음성가드 편입.
+  - consent 검토 6단계+sticky progress rail(전 입력 마운트 유지 — RPC·검증·Slice 6 프리뷰 무변경, 기존 16 스펙 보존), 44px 실측 전수, §11 browser 회귀(Playwright 46).
+  - 시뮬레이터 QA가 잠복 결함 발견·수정: app/ 콜로케이트 테스트가 expo-router 라우트로 번들돼 Expo Go 부팅 불가(07-13 유래) → src/screens/__tests__ 이동+재발 가드. 로그아웃 campaigns sign-in 유도 통일.
+  - 잔여(의도적 보류): interest 카드-레벨 시각 하향은 kit 공유 모듈 분리 리팩터 후속.
 
 ## IN PROGRESS
 
-- Slice 7 착수(워커 s7-web·s7-mobile): trust flow 시각 강도 하향·consent 단계화·접근성·소화면 QA.
+- 없음. Slice 0~7은 승인·배포 완료 상태로 인계.
 
 ## TODO
 
-1. (P0) Slice 7 잔여 — §8 acceptance 전체 + §11 browser/device 회귀 + 실기기 iOS QA(사용자 게이트).
-2. (P0) 데모 실음성: 상헌 님의 권리 확보 30~60초 영어 녹음 도착 시 `scripts/seed-demo-pitch.mjs`(manifest+`rightsCleared:true`) 1회 실행→hosted seed→육안 QA. TTS 금지(DECISIONS 07-13).
+1. (P0) 데모 실음성: 상헌 님의 권리 확보 30~60초 영어 녹음 도착 시 `scripts/seed-demo-pitch.mjs`(manifest+`rightsCleared:true`) 1회 실행→hosted seed→육안 QA. TTS 금지(DECISIONS 07-13).
+2. (P0) 실기기 iOS QA(사용자 게이트): 시뮬레이터 QA는 완료(iPhone 17 Pro — 부팅·campaigns·interests·consent 흐름), 실기기 확인만 잔존. 참고: Expo Go 부팅 불가 잠복 결함은 Slice 7에서 수정됨.
 3. (P0) Slice 8 — 외부 release proof: identity 벤더 sandbox, moderation enforcement on 실증, RevenueCat sandbox 실왕복, gate-on smoke/gate-off rollback 드릴(감사 §10 Slice 8) — 대부분 사용자 키 선행 필요.
 4. (P1) 사용자 키 게이트 안내: RevenueCat 셋업, identity 벤더 계약, OPENAI 키, Resend/`EXPO_PUBLIC_WEB_ORIGIN`, **GH Actions 시크릿(SUPABASE_URL·SUPABASE_SERVICE_ROLE_KEY) 등록 시 scheduled-ops cron 활성화**.
 5. (P1) 새 DB 변경마다 direct RPC 우회·RLS·concurrency·retry·실 UI 소비자 회귀 테스트 유지(감사 §0-5), 수정과 같은 turn 문서 truth reset(§0-6).

@@ -242,3 +242,10 @@
 - **이유**: 3차 감사 CP-5(계약 병존·가짜 waveform·재승인 경계)·CP-6(미구현 약속)·§9(문서 truth 충돌). "구현하지 않을 기능을 판매 카피로 약속하지 않는다".
 - **검토 대안**: 원계약 삭제(로드맵 기록 소실 — historical 분리 채택), kit waveform 실 파형 렌더(과도한 런타임 의존 — 기각).
 - **영향**: HANDOFF/PRODUCT/COST_MODEL·KitView·kit-image·InboxView·모바일 paywall/campaigns 카피 정렬, audit3 c10 신설. kit 픽셀 렌더 QA는 hosted 프로덕션 E2E(10g~10j)에서 검증.
+
+## 2026-07-14: Trust Layer 스펙 확정·consent 단계화·모바일 QA 차단 해소 (Slice 7, §8·§11)
+
+- **결정**: (1) **Trust Layer 시각 스펙을 수치로 확정**(DESIGN.md): trust 표면(consent/report/delete/payment)은 1px hairline(`strokes.trust`), soft shadow(`shadows.trust`=0 4px 16px rgba(34,27,21,0.08)), tilt 0, Unbounded는 카드당 heading 1개, teal은 신호 전용. 신규 토큰 `borderMuted`(#8A7D73)·`borderSuccess`(#0E8F76)로 3:1 미달 경계 2건(textFaint 2.72/2.92, fresh 2.35/2.51 — red-first)을 해소하고 contrast matrix에 영구 음성가드 2개를 편입. landing/공개 피치의 hype 강도는 유지. (2) **consent 검토는 wizard식 분리 대신 "6단계 numbered step + sticky scroll-spy progress rail"**: 모든 입력을 마운트 유지해 RPC 순서·검증·Slice 6 프리뷰를 무변경으로 보존(§8 acceptance는 단계화 OR sticky progress — 기존 16 스펙의 cross-step 단언 보존을 우선). (3) **interest 카드-레벨 하향은 의도적 보류**: kit(70% expression)과 스타일 모듈을 공유하므로 44px+정온 chip까지만 적용, 완전 분리는 interest 전용 trust 모듈 후속 리팩터로. (4) **app/ 콜로케이트 테스트 금지**: expo-router가 `app/` 하위 테스트를 라우트로 번들해 Expo Go 부팅이 불가능했던 잠복 결함(07-13 유래)을 S7 시뮬레이터 QA에서 발견 — 테스트를 `src/screens/__tests__/`로 이동하고 no-colocated-tests 가드 테스트로 재발 차단. (5) 로그아웃 campaigns의 introduced 섹션은 generic 에러 대신 sign-in 유도로 통일.
+- **이유**: 3차 감사 §8(trust 순간의 과도한 hype 강도·인지 부담·contrast 미검사·44px)·§10 Slice 7·§11 browser/device. 시뮬레이터 QA가 green test가 놓친 부팅 불가 결함을 즉시 드러냄 — "green test는 완료 증거가 아니다"의 실증.
+- **검토 대안**: wizard식 단계 분리(기존 스펙 커버리지 손실·상태 재작성 위험 — 기각), metro blockList(이동으로 근본 해소 가능 — 문서화만), kit까지 함께 하향(70% expression 표면 훼손 — 기각).
+- **영향**: ui-tokens 20 테스트(음성가드 2), 모바일 104(가드 1 포함), Playwright 46(consent 회귀 5 추가), 44px 실측표(§보고). 실기기 iOS QA만 사용자 게이트로 잔존. interest 전용 trust 모듈은 후속 항목.

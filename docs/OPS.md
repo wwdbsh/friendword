@@ -249,3 +249,11 @@ rollback에서 **이번 세션에 업로드한** `profile-media` 객체를 실�
 `cd apps/mobile && pnpm dlx eas-cli build -p ios --profile production && pnpm dlx eas-cli submit -p ios --latest`
 - 내부 테스터 전용인 동안 App Review 불필요(Internal Testing). External 그룹·공개 App Store release는 8/1 이후.
 - `real_payments_enabled=off`·`public_beta_enabled=off` 서버 게이트는 TestFlight 빌드에도 동일하게 적용됨(클라이언트 배포와 무관).
+
+## 웹 프로덕션 배포 채널 (2026-07-15 신설)
+
+- **Production origin: `https://friendword-web-nmsi.vercel.app`** (Vercel, GitHub `wwdbsh/friendword` main 연동 — push마다 자동 배포. Root Directory=`apps/web`).
+- Vercel 빌드는 `apps/web/vercel.json`의 `buildCommand: next build`를 사용(로컬 build 스크립트의 `.next-build` 리다이렉트는 dev 서버 충돌 방지용 — Vercel에는 불필요).
+- Vercel env: `NEXT_PUBLIC_SUPABASE_URL`·`NEXT_PUBLIC_SUPABASE_ANON_KEY`·`SUPABASE_URL`·`SUPABASE_SERVICE_ROLE_KEY`(Sensitive). `OPENAI_API_KEY`·`REVENUECAT_WEBHOOK_AUTH_TOKEN`은 후속 게이트에서 추가(없으면 해당 라우트만 401/501).
+- 배포 스모크(2026-07-15): landing/demo/inbox/rooms 200, unknown slug 404, OG 200 png, 공개 피치 noindex, lang=en, transcribe 401 graceful.
+- 모바일 연동: `EXPO_PUBLIC_WEB_ORIGIN`을 EAS production env와 루트 .env에 이 origin으로 설정 후 앱 재빌드. 커스텀 도메인 도입 시 EAS env·RevenueCat 웹훅 URL 함께 갱신.

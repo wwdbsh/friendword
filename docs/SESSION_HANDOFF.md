@@ -43,7 +43,7 @@
 ## TODO
 
 1. (P0) 데모 실음성: 상헌 님의 권리 확보 30~60초 영어 녹음 도착 시 `scripts/seed-demo-pitch.mjs`(manifest+`rightsCleared:true`) 1회 실행→hosted seed→육안 QA. TTS 금지(DECISIONS 07-13).
-2. (P0) 실기기 iOS QA(사용자 게이트): 시뮬레이터 QA는 완료(iPhone 17 Pro — 부팅·campaigns·interests·consent 흐름), 실기기 확인만 잔존. 참고: Expo Go 부팅 불가 잠복 결함은 Slice 7에서 수정됨.
+2. (P0) 실기기 iOS QA: **TestFlight 채널 개통 완료(2026-07-15)** — EAS production 빌드→제출→사용자 아이폰 설치 성공. 이제 실기기 QA 수행 가능(§8/§10 체크리스트로 진행). 반복 릴리스는 docs/OPS.md TestFlight 절차.
 3. (P0) Slice 8 — 외부 release proof: identity 벤더 sandbox, moderation enforcement on 실증, RevenueCat sandbox 실왕복, gate-on smoke/gate-off rollback 드릴(감사 §10 Slice 8) — 대부분 사용자 키 선행 필요.
 4. (P1) 사용자 키 게이트 안내: RevenueCat 셋업, identity 벤더 계약, OPENAI 키, Resend/`EXPO_PUBLIC_WEB_ORIGIN`, **GH Actions 시크릿(SUPABASE_URL·SUPABASE_SERVICE_ROLE_KEY) 등록 시 scheduled-ops cron 활성화**.
 5. (P1) 새 DB 변경마다 direct RPC 우회·RLS·concurrency·retry·실 UI 소비자 회귀 테스트 유지(감사 §0-5), 수정과 같은 turn 문서 truth reset(§0-6).

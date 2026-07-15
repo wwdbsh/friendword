@@ -149,4 +149,4 @@
 
 | Session | Owned paths                                                              | Dependency | Acceptance criteria                                                                 | Status                                                       | Updated    |
 | ------- | ------------------------------------------------------------------------ | ---------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------ | ---------- |
-| Advisor | `apps/mobile/eas.json`, `apps/mobile/assets/*`, app.config.ts 배선, OPS.md | Slice 7    | expo config 해석·typecheck green, 아이콘 1024 생성, 사용자 1회 셋업 런북 완비        | 코드 완료 — eas init·첫 빌드·TestFlight 그룹은 사용자 게이트 | 2026-07-14 |
+| Advisor | `apps/mobile/eas.json`, `apps/mobile/assets/*`, app.config.ts 배선, OPS.md | Slice 7    | expo config 해석·typecheck green, 아이콘 1024 생성, 사용자 1회 셋업 런북 완비        | 완료 (2026-07-15 첫 빌드→TestFlight 제출→실기기 설치 성공, pnpm 11.12.0 핀·projectId 배선·암호화 면제 포함) | 2026-07-15 |

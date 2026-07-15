@@ -19,6 +19,7 @@ const config: ExpoConfig = {
     bundleIdentifier: 'com.friendword.app',
     supportsTablet: true,
     infoPlist: {
+      ITSAppUsesNonExemptEncryption: false,
       NSMicrophoneUsageDescription:
         'Friendword uses your microphone to record a 30–60 second pitch for your friend.',
       NSPhotoLibraryUsageDescription:

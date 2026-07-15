@@ -9,6 +9,7 @@ import type { ExpoConfig } from 'expo/config';
 const config: ExpoConfig = {
   name: 'Friendword',
   slug: 'friendword',
+  owner: 'wwdbsh',
   version: '1.0.0',
   orientation: 'portrait',
   scheme: 'friendword',
@@ -56,10 +57,9 @@ const config: ExpoConfig = {
     ],
   ],
   extra: {
-    // EAS project link: `pnpm dlx eas-cli init` prints the project ID; paste it
-    // into EAS_PROJECT_ID in the root .env (not a secret — safe to commit too).
+    // EAS project link (@wwdbsh/friendword). The project ID is not a secret.
     eas: {
-      projectId: process.env['EAS_PROJECT_ID'] ?? '',
+      projectId: process.env['EAS_PROJECT_ID'] ?? '11a30ea3-adae-4578-9867-a023047bf432',
     },
     supabaseUrl: process.env['EXPO_PUBLIC_SUPABASE_URL'] ?? '',
     supabaseAnonKey: process.env['EXPO_PUBLIC_SUPABASE_ANON_KEY'] ?? '',

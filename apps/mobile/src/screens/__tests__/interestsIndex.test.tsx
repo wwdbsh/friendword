@@ -64,9 +64,28 @@ vi.mock('../../components', async () => {
   return {
     TrustCard: ({ children }: { readonly children?: ReactNode }) =>
       createElement('article', null, children),
+    SignInPromptCard: ({
+      title,
+      message,
+    }: {
+      readonly title: string;
+      readonly message: string;
+      readonly onSignIn: () => void;
+    }) =>
+      createElement(
+        'article',
+        null,
+        createElement('span', null, title),
+        createElement('span', null, message),
+        createElement('button', null, 'Sign in'),
+      ),
   };
 });
 vi.mock('../../services/supabaseClient', () => ({ getSupabaseClient: () => null }));
+// InterestsScreen mounts the sign-in sheet, but only the presentational
+// InterestsContent is rendered here — stub the sheet so its react-native/token
+// deps don't have to be mocked.
+vi.mock('../../features/auth/SignInSheet', () => ({ SignInSheet: () => null }));
 
 import type { MyInterest } from '@friendword/data';
 
@@ -97,6 +116,16 @@ describe('My interests mobile states', () => {
     const markup = renderToStaticMarkup(<InterestsContent state={state} interests={[]} />);
 
     expect(markup).toContain(copy);
+  });
+
+  it('offers a reachable sign-in action in the signed-out state', () => {
+    // Real-device QA (H-6): the signed-out card was a dead end with no way to
+    // sign in. It must now surface a sign-in control wired to onSignIn.
+    const markup = renderToStaticMarkup(
+      <InterestsContent state="signed_out" interests={[]} onSignIn={vi.fn()} />,
+    );
+
+    expect(markup).toContain('<button>Sign in</button>');
   });
 
   it('renders the authenticated empty state', () => {

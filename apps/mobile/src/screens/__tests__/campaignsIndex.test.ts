@@ -38,9 +38,13 @@ vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn() }));
 vi.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'section' }));
 vi.mock('../../components', () => ({
   HypeButton: 'button',
+  SignInPromptCard: 'article',
   StickerCard: 'article',
   TrustCard: 'article',
 }));
+// CampaignsScreen mounts the sign-in sheet; this suite only exercises the
+// module's pure helpers, so stub the sheet to avoid loading its deps.
+vi.mock('../../features/auth/SignInSheet', () => ({ SignInSheet: () => null }));
 vi.mock('../../services/draftServiceInstance', () => ({ pitchDraftService: {} }));
 vi.mock('../../services/pitchDraftsSupabase', () => ({
   isRecoveredServerDraft: (draft: {

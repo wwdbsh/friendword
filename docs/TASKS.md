@@ -152,3 +152,5 @@
 | Advisor | `apps/mobile/eas.json`, `apps/mobile/assets/*`, app.config.ts 배선, OPS.md | Slice 7    | expo config 해석·typecheck green, 아이콘 1024 생성, 사용자 1회 셋업 런북 완비        | 완료 (2026-07-15 첫 빌드→TestFlight 제출→실기기 설치 성공, pnpm 11.12.0 핀·projectId 배선·암호화 면제 포함) | 2026-07-15 |
 
 | rc-rename | contracts·data·mobile 상수, `supabase/migrations/0042`, SQL 테스트 9종, README/HANDOFF/REVENUECAT_SETUP | 없음 | 옛 ID grep 0건(역사 migration 제외), red-first, 전 스위트 green | 승인 (Advisor 재실행 green, hosted 0042 배포) | 2026-07-18 |
+
+| m-auth-nav | apps/mobile (SignInPromptCard 신규, campaigns/interests CTA, _layout 헤더 등록) | 없음 | 4차 H-6·CP-7 코드분: signed-out 카드 sign-in CTA + SignInSheet 연결, 미등록 화면 헤더·백라벨 누출 제거, red-first 106 green | 승인 (Advisor 재실행 + 시뮬레이터 QA — 실기기 QA 중 사용자 발견 결함) | 2026-07-18 |

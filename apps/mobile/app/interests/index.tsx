@@ -5,7 +5,8 @@ import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { TrustCard } from '../../src/components';
+import { SignInPromptCard, TrustCard } from '../../src/components';
+import { SignInSheet } from '../../src/features/auth/SignInSheet';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 
 export type InterestsLoadState = 'loading' | 'ready' | 'signed_out' | 'error';
@@ -13,6 +14,7 @@ export type InterestsLoadState = 'loading' | 'ready' | 'signed_out' | 'error';
 type InterestsContentProps = {
   readonly state: InterestsLoadState;
   readonly interests: readonly MyInterest[];
+  readonly onSignIn?: () => void;
 };
 
 export function getInterestTitle(interest: MyInterest): string {
@@ -49,18 +51,17 @@ export function getInterestStatusLabel(interest: MyInterest): string {
   }
 }
 
-export function InterestsContent({ state, interests }: InterestsContentProps) {
+export function InterestsContent({ state, interests, onSignIn }: InterestsContentProps) {
   if (state === 'loading') {
     return <Text style={styles.message}>Loading your interests…</Text>;
   }
   if (state === 'signed_out') {
     return (
-      <TrustCard>
-        <Text style={styles.cardTitle}>Sign in to see your interests</Text>
-        <Text style={styles.message}>
-          Interests are private and only appear for the account that sent them.
-        </Text>
-      </TrustCard>
+      <SignInPromptCard
+        title="Sign in to see your interests"
+        message="Interests are private and only appear for the account that sent them."
+        onSignIn={onSignIn ?? (() => {})}
+      />
     );
   }
   if (state === 'error') {
@@ -112,41 +113,42 @@ export function InterestsContent({ state, interests }: InterestsContentProps) {
 export default function InterestsScreen() {
   const [state, setState] = useState<InterestsLoadState>('loading');
   const [interests, setInterests] = useState<readonly MyInterest[]>([]);
+  const [signInVisible, setSignInVisible] = useState(false);
 
-  useFocusEffect(
-    useCallback(() => {
-      let active = true;
-      const client = getSupabaseClient();
-      setInterests([]);
-      if (client === null) {
-        setState('signed_out');
-        return () => {
-          active = false;
-        };
-      }
-
-      setState('loading');
-      const repo = new InterestRepo(client);
-      void repo
-        .listMyInterests()
-        .then((rows) => {
-          if (active) {
-            setInterests(rows);
-            setState('ready');
-          }
-        })
-        .catch((error: unknown) => {
-          if (active) {
-            setInterests([]);
-            setState(error instanceof UnauthenticatedError ? 'signed_out' : 'error');
-          }
-        });
-
+  const load = useCallback(() => {
+    let active = true;
+    const client = getSupabaseClient();
+    setInterests([]);
+    if (client === null) {
+      setState('signed_out');
       return () => {
         active = false;
       };
-    }, []),
-  );
+    }
+
+    setState('loading');
+    const repo = new InterestRepo(client);
+    void repo
+      .listMyInterests()
+      .then((rows) => {
+        if (active) {
+          setInterests(rows);
+          setState('ready');
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setInterests([]);
+          setState(error instanceof UnauthenticatedError ? 'signed_out' : 'error');
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useFocusEffect(load);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -158,8 +160,20 @@ export default function InterestsScreen() {
             Follow the campaigns you reached out to and see each decision clearly.
           </Text>
         </View>
-        <InterestsContent state={state} interests={interests} />
+        <InterestsContent
+          state={state}
+          interests={interests}
+          onSignIn={() => setSignInVisible(true)}
+        />
       </ScrollView>
+      <SignInSheet
+        visible={signInVisible}
+        onClose={() => setSignInVisible(false)}
+        onSignedIn={() => {
+          setSignInVisible(false);
+          load();
+        }}
+      />
     </SafeAreaView>
   );
 }

@@ -11,7 +11,14 @@ import { useCallback, useState } from 'react';
 import { Linking, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { HypeButton, QuietNavAction, StickerCard, TrustCard } from '../../src/components';
+import {
+  HypeButton,
+  QuietNavAction,
+  SignInPromptCard,
+  StickerCard,
+  TrustCard,
+} from '../../src/components';
+import { SignInSheet } from '../../src/features/auth/SignInSheet';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
 import {
   buildIntroducerShareUrl,
@@ -92,6 +99,7 @@ export default function CampaignsScreen() {
   const [introducedState, setIntroducedState] = useState<IntroducedLoadState>('loading');
   const [copiedCampaignId, setCopiedCampaignId] = useState<string | null>(null);
   const [introducerShareError, setIntroducerShareError] = useState<string | null>(null);
+  const [signInVisible, setSignInVisible] = useState(false);
 
   const shareIntroducedPitch = useCallback(
     async (campaign: IntroducedCampaign, shareUrl: string): Promise<void> => {
@@ -135,79 +143,79 @@ export default function CampaignsScreen() {
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      let active = true;
-      setLoading(true);
+  const load = useCallback(() => {
+    let active = true;
+    setLoading(true);
+    setOwnedCampaigns([]);
+    setOwnedCampaignState('loading');
+    setIntroduced([]);
+    setIntroducedState('loading');
+    setCopiedCampaignId(null);
+    setIntroducerShareError(null);
+    pitchDraftService
+      .getMyDrafts()
+      .then((savedDrafts) => {
+        if (active) {
+          setDrafts(savedDrafts);
+          setErrorMessage(null);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setErrorMessage('Your saved pitches could not be loaded.');
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
+
+    const client = getSupabaseClient();
+    if (client === null) {
       setOwnedCampaigns([]);
-      setOwnedCampaignState('loading');
+      setOwnedCampaignState('signed_out');
       setIntroduced([]);
-      setIntroducedState('loading');
-      setCopiedCampaignId(null);
-      setIntroducerShareError(null);
-      pitchDraftService
-        .getMyDrafts()
-        .then((savedDrafts) => {
+      setIntroducedState('signed_out');
+    } else {
+      const benefits = new BenefitsRepo(client);
+      void benefits
+        .listMyOwnedCampaigns()
+        .then((campaigns) => {
           if (active) {
-            setDrafts(savedDrafts);
-            setErrorMessage(null);
+            setOwnedCampaigns(campaigns);
+            setOwnedCampaignState('ready');
+          }
+        })
+        .catch((error: unknown) => {
+          if (!active) {
+            return;
+          }
+          setOwnedCampaigns([]);
+          setOwnedCampaignState(error instanceof UnauthenticatedError ? 'signed_out' : 'error');
+        });
+
+      void listMyIntroducedCampaigns()
+        .then((campaigns) => {
+          if (active) {
+            setIntroduced(campaigns);
+            setIntroducedState('ready');
           }
         })
         .catch(() => {
           if (active) {
-            setErrorMessage('Your saved pitches could not be loaded.');
-          }
-        })
-        .finally(() => {
-          if (active) {
-            setLoading(false);
+            setIntroduced([]);
+            setIntroducedState('error');
           }
         });
+    }
 
-      const client = getSupabaseClient();
-      if (client === null) {
-        setOwnedCampaigns([]);
-        setOwnedCampaignState('signed_out');
-        setIntroduced([]);
-        setIntroducedState('signed_out');
-      } else {
-        const benefits = new BenefitsRepo(client);
-        void benefits
-          .listMyOwnedCampaigns()
-          .then((campaigns) => {
-            if (active) {
-              setOwnedCampaigns(campaigns);
-              setOwnedCampaignState('ready');
-            }
-          })
-          .catch((error: unknown) => {
-            if (!active) {
-              return;
-            }
-            setOwnedCampaigns([]);
-            setOwnedCampaignState(error instanceof UnauthenticatedError ? 'signed_out' : 'error');
-          });
+    return () => {
+      active = false;
+    };
+  }, []);
 
-        void listMyIntroducedCampaigns()
-          .then((campaigns) => {
-            if (active) {
-              setIntroduced(campaigns);
-              setIntroducedState('ready');
-            }
-          })
-          .catch(() => {
-            if (active) {
-              setIntroduced([]);
-              setIntroducedState('error');
-            }
-          });
-      }
-
-      return () => {
-        active = false;
-      };
-    }, []),
-  );
+  useFocusEffect(load);
 
   // The introduced-campaigns RPC collapses every failure (including "no session")
   // into one generic error, so on its own it can't tell signed-out from a real
@@ -242,12 +250,11 @@ export default function CampaignsScreen() {
         ) : null}
 
         {ownedCampaignState === 'signed_out' ? (
-          <TrustCard>
-            <Text style={styles.emptyTitle}>Sign in to see your campaigns</Text>
-            <Text style={styles.message}>
-              Campaign Pass is only shown for published campaigns you own.
-            </Text>
-          </TrustCard>
+          <SignInPromptCard
+            title="Sign in to see your campaigns"
+            message="Campaign Pass is only shown for published campaigns you own."
+            onSignIn={() => setSignInVisible(true)}
+          />
         ) : null}
 
         {ownedCampaignState === 'error' ? (
@@ -329,12 +336,11 @@ export default function CampaignsScreen() {
         ) : null}
 
         {introducerSignedOut ? (
-          <TrustCard>
-            <Text style={styles.emptyTitle}>Sign in to see your live pitches</Text>
-            <Text style={styles.message}>
-              Your live pitches and their free share links appear here once you sign in.
-            </Text>
-          </TrustCard>
+          <SignInPromptCard
+            title="Sign in to see your live pitches"
+            message="Your live pitches and their free share links appear here once you sign in."
+            onSignIn={() => setSignInVisible(true)}
+          />
         ) : null}
 
         {introducedState === 'error' && !introducerSignedOut ? (
@@ -504,6 +510,14 @@ export default function CampaignsScreen() {
           </StickerCard>
         ))}
       </ScrollView>
+      <SignInSheet
+        visible={signInVisible}
+        onClose={() => setSignInVisible(false)}
+        onSignedIn={() => {
+          setSignInVisible(false);
+          load();
+        }}
+      />
     </SafeAreaView>
   );
 }

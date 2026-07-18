@@ -128,12 +128,22 @@ export default function RootLayout() {
           headerTintColor: colors.ink,
           headerShadowVisible: false,
           headerTitleStyle: { fontFamily: 'BricolageGrotesqueBold' },
+          // Real-device QA (CP-7): without this, an untitled previous screen
+          // (the headerless home) leaks its route name ("index") as the iOS back
+          // label. "minimal" shows the chevron only, no text label.
+          headerBackButtonDisplayMode: 'minimal',
         }}
       >
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="pitch/new" options={{ headerShown: false }} />
         <Stack.Screen name="campaigns/index" options={{ title: 'My dating campaigns' }} />
         <Stack.Screen name="interests/index" options={{ title: 'My interests' }} />
+        {/* review and share set their own dynamic titles inline; these register
+            them in the stack with a safe fallback so an unregistered route never
+            shows its raw path as the header title. */}
+        <Stack.Screen name="pitch/review" options={{ title: 'Review your draft' }} />
+        <Stack.Screen name="pitch/share" options={{ title: 'Share' }} />
+        <Stack.Screen name="paywall" options={{ title: 'Purchase' }} />
       </Stack>
     </>
   );

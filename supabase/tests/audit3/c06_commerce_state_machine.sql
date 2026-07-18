@@ -123,7 +123,7 @@ SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
 INSERT INTO c06_state
 SELECT 'active_intent', purchase_intent_id
-  FROM issue_purchase_intent('campaign_30d_1999', 'c6000000-0000-0000-0000-000000000002');
+  FROM issue_purchase_intent('campaign_pass_30d_1999', 'c6000000-0000-0000-0000-000000000002');
 RESET ROLE;
 
 SET LOCAL ROLE service_role;
@@ -135,7 +135,7 @@ BEGIN
     'id', 'c06-active-purchase',
     'type', 'INITIAL_PURCHASE',
     'app_user_id', '00000000-0000-0000-0000-000000000002',
-    'product_id', 'campaign_30d_1999',
+    'product_id', 'campaign_pass_30d_1999',
     'transaction_id', 'c06-active-tx',
     'original_transaction_id', 'c06-active-original',
     'environment', 'SANDBOX',
@@ -196,7 +196,7 @@ SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
 INSERT INTO c06_state
 SELECT 'revival_intent', purchase_intent_id
-  FROM issue_purchase_intent('campaign_30d_1999', 'c6000000-0000-0000-0000-000000000002');
+  FROM issue_purchase_intent('campaign_pass_30d_1999', 'c6000000-0000-0000-0000-000000000002');
 RESET ROLE;
 
 -- 5. Grant with the beta gate OPEN revives expired -> published, now+30d.
@@ -209,7 +209,7 @@ BEGIN
     'id', 'c06-revival-purchase',
     'type', 'INITIAL_PURCHASE',
     'app_user_id', '00000000-0000-0000-0000-000000000002',
-    'product_id', 'campaign_30d_1999',
+    'product_id', 'campaign_pass_30d_1999',
     'transaction_id', 'c06-revival-tx',
     'original_transaction_id', 'c06-revival-original',
     'environment', 'SANDBOX',
@@ -241,7 +241,7 @@ SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
 INSERT INTO c06_state
 SELECT 'lag_intent', purchase_intent_id
-  FROM issue_purchase_intent('campaign_30d_1999', 'c6000000-0000-0000-0000-000000000002');
+  FROM issue_purchase_intent('campaign_pass_30d_1999', 'c6000000-0000-0000-0000-000000000002');
 RESET ROLE;
 
 SET LOCAL ROLE service_role;
@@ -253,7 +253,7 @@ BEGIN
     'id', 'c06-lag-purchase',
     'type', 'INITIAL_PURCHASE',
     'app_user_id', '00000000-0000-0000-0000-000000000002',
-    'product_id', 'campaign_30d_1999',
+    'product_id', 'campaign_pass_30d_1999',
     'transaction_id', 'c06-lag-tx',
     'original_transaction_id', 'c06-lag-original',
     'environment', 'SANDBOX',
@@ -285,7 +285,7 @@ SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
 INSERT INTO c06_state
 SELECT 'blocked_intent', purchase_intent_id
-  FROM issue_purchase_intent('campaign_30d_1999', 'c6000000-0000-0000-0000-000000000002');
+  FROM issue_purchase_intent('campaign_pass_30d_1999', 'c6000000-0000-0000-0000-000000000002');
 RESET ROLE;
 
 SET LOCAL ROLE service_role;
@@ -295,7 +295,7 @@ BEGIN
     'id', 'c06-blocked-purchase',
     'type', 'INITIAL_PURCHASE',
     'app_user_id', '00000000-0000-0000-0000-000000000002',
-    'product_id', 'campaign_30d_1999',
+    'product_id', 'campaign_pass_30d_1999',
     'transaction_id', 'c06-blocked-tx',
     'original_transaction_id', 'c06-blocked-original',
     'environment', 'SANDBOX',

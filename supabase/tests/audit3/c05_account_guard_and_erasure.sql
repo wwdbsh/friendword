@@ -213,7 +213,7 @@ INSERT INTO purchase_event_reviews (provider_event_id, event_type, reason, paylo
 VALUES
   ('evt-resolved-old', 'TRANSFER', 'transfer_requires_ops_review',
    jsonb_build_object(
-     'id', 'evt-resolved-old', 'type', 'TRANSFER', 'product_id', 'campaign_30d_1999',
+     'id', 'evt-resolved-old', 'type', 'TRANSFER', 'product_id', 'campaign_pass_30d_1999',
      'environment', 'PRODUCTION', 'app_user_id', 'user-abc-123',
      'transaction_id', 'txn-999', 'original_transaction_id', 'otxn-999',
      'subscriber_attributes', jsonb_build_object('$email', jsonb_build_object('value', 'someone@example.test'))
@@ -250,7 +250,7 @@ BEGIN
   END IF;
   -- Non-PII operational summary is retained.
   IF (resolved_payload ->> 'type') <> 'TRANSFER'
-     OR (resolved_payload ->> 'product_id') <> 'campaign_30d_1999' THEN
+     OR (resolved_payload ->> 'product_id') <> 'campaign_pass_30d_1999' THEN
     RAISE EXCEPTION 'c05 H-2: resolved review lost its operational summary';
   END IF;
   -- Open review is untouched.

@@ -256,3 +256,10 @@
 - **이유**: 실기기 QA(Slice 7 잔여 사용자 게이트)를 장소 제약 없이 반복 가능하게. Shipaton 규칙상 8/1 전 비공개 테스트 허용 — 공개 release만 창구 내(수동 release 전략 유지).
 - **검토 대안**: 로컬 케이블 설치(장소 제약 — 기각), Ad Hoc 배포(기기 UDID 관리 부담 — 기각), 공개 App Store 조기 출시(Shipaton 규칙 위반 — 금지).
 - **영향**: expo config 정상 해석·모바일 typecheck green. 잔여: 사용자 1회 셋업(OPS.md) 후 첫 TestFlight 빌드. RevenueCat sandbox 검증(Slice 8)은 TestFlight 빌드에서 이어서 가능.
+
+## 2026-07-18: Campaign Pass 제품 ID rename과 ASC 상품 유형 확정
+
+- **결정**: (1) Campaign Pass의 스토어 제품 ID를 `campaign_30d_1999` → **`campaign_pass_30d_1999`**로 전 계층 1:1 rename(dual-ID 매핑 계층 금지, migration 0042가 활성 RPC 5개를 최신 정의본에서 문자열만 교체해 재정의). 사유: App Store Connect에서 동일 ID의 IAP를 생성 후 삭제하는 실수로 Apple이 ID를 팀 단위 영구 잠금. (2) ASC 상품 유형은 두 상품 모두 **소모품(Consumable)** — 새 ASC UI에 "갱신 안 함 구독" 유형이 없고, Pass의 30일 기간·적층·만료는 서버 상태기계가 전담하므로 스토어 유형 의존이 없다. 자동 갱신 구독은 비자동 갱신 계약 위반이라 금지.
+- **이유**: RevenueCat/ASC 실제 셋업 중 발견. 운영 교훈: **ASC IAP ID는 삭제해도 영구 소각** — 생성 전 ID 재확인, 삭제 금지.
+- **검토 대안**: 서버-스토어 ID 매핑 계층(진실 이원화 — 기각), 자동 갱신 구독 유형(계약 위반 — 기각).
+- **영향**: 0042 hosted 배포, contracts/data/mobile 상수·SQL 테스트 9종·문서 3종 교체(rc-rename 워커, red-first: 옛 RPC에서 새 ID 거부 재현 → 0042 후 green, Advisor 전 스위트 재실행 green). RevenueCat/ASC에는 새 ID로 상품 등록.

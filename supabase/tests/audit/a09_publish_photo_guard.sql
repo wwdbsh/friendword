@@ -83,7 +83,7 @@ VALUES
 INSERT INTO campaign_entitlements (campaign_id, product_id, active, expires_at)
 VALUES (
   'a0900000-0000-0000-0000-000000000002',
-  'campaign_30d_1999',
+  'campaign_pass_30d_1999',
   true,
   now() + INTERVAL '30 days'
 );

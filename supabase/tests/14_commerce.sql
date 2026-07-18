@@ -603,7 +603,7 @@ SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002
 INSERT INTO commerce_test_state (key, value)
 SELECT 'pass_intent', purchase_intent_id
   FROM issue_purchase_intent(
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     '20000000-0000-0000-0000-000000000001'
   );
 DO $$
@@ -613,7 +613,7 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000001', true);
   BEGIN
     PERFORM * FROM issue_purchase_intent(
-      'campaign_30d_1999',
+      'campaign_pass_30d_1999',
       '20000000-0000-0000-0000-000000000001'
     );
   EXCEPTION WHEN raise_exception THEN
@@ -637,7 +637,7 @@ BEGIN
     'commerce-pass-purchase',
     'INITIAL_PURCHASE',
     '00000000-0000-0000-0000-000000000002',
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     (SELECT value FROM commerce_test_state WHERE key = 'pass_intent'),
     'commerce-pass-tx',
     'commerce-pass-original'
@@ -654,7 +654,7 @@ BEGIN
        SELECT 1
          FROM campaign_entitlements
         WHERE campaign_id = '20000000-0000-0000-0000-000000000001'
-          AND product_id = 'campaign_30d_1999'
+          AND product_id = 'campaign_pass_30d_1999'
           AND active
      ) THEN
     RAISE EXCEPTION 'campaign pass did not stack 30d onto the remaining window';
@@ -664,7 +664,7 @@ BEGIN
     'commerce-pass-expiration',
     'EXPIRATION',
     '00000000-0000-0000-0000-000000000002',
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     (SELECT value FROM commerce_test_state WHERE key = 'pass_intent'),
     'commerce-pass-tx',
     'commerce-pass-original'
@@ -673,7 +673,7 @@ BEGIN
     SELECT 1
       FROM campaign_entitlements
      WHERE campaign_id = '20000000-0000-0000-0000-000000000001'
-       AND product_id = 'campaign_30d_1999'
+       AND product_id = 'campaign_pass_30d_1999'
        AND active
   ) THEN
     RAISE EXCEPTION 'expiration did not deactivate the campaign pass';
@@ -684,7 +684,7 @@ BEGIN
       'commerce-pass-transfer',
       'TRANSFER',
       '00000000-0000-0000-0000-000000000002',
-      'campaign_30d_1999',
+      'campaign_pass_30d_1999',
       (SELECT value FROM commerce_test_state WHERE key = 'pass_intent'),
       'commerce-pass-transfer-tx',
       'commerce-pass-original'
@@ -772,7 +772,7 @@ INSERT INTO purchase_intents (
 VALUES (
   '14000000-0000-0000-0000-000000000032',
   '00000000-0000-0000-0000-000000000003',
-  'campaign_30d_1999',
+  'campaign_pass_30d_1999',
   'CAMPAIGN',
   '14000000-0000-0000-0000-000000000031',
   'issued',
@@ -789,7 +789,7 @@ BEGIN
       'commerce-pass-cross-scope',
       'INITIAL_PURCHASE',
       '00000000-0000-0000-0000-000000000003',
-      'campaign_30d_1999',
+      'campaign_pass_30d_1999',
       '14000000-0000-0000-0000-000000000032',
       'commerce-pass-cross-scope-tx',
       'commerce-pass-original'
@@ -811,7 +811,7 @@ BEGIN
     'commerce-pass-out-of-order-refund',
     'REFUND',
     '00000000-0000-0000-0000-000000000003',
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     '14000000-0000-0000-0000-000000000032',
     'commerce-pass-out-of-order-tx',
     'commerce-pass-out-of-order-original'
@@ -820,7 +820,7 @@ BEGIN
     'commerce-pass-out-of-order-purchase',
     'INITIAL_PURCHASE',
     '00000000-0000-0000-0000-000000000003',
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     '14000000-0000-0000-0000-000000000032',
     'commerce-pass-out-of-order-tx',
     'commerce-pass-out-of-order-original'
@@ -829,7 +829,7 @@ BEGIN
     SELECT 1
       FROM campaign_entitlements
      WHERE campaign_id = '14000000-0000-0000-0000-000000000031'
-       AND product_id = 'campaign_30d_1999'
+       AND product_id = 'campaign_pass_30d_1999'
        AND original_transaction_id = 'commerce-pass-out-of-order-original'
        AND NOT active
   ) THEN
@@ -844,7 +844,7 @@ SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002
 INSERT INTO commerce_test_state (key, value)
 SELECT 'pass_intent_b', purchase_intent_id
   FROM issue_purchase_intent(
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     '20000000-0000-0000-0000-000000000001'
   );
 RESET ROLE;
@@ -856,7 +856,7 @@ BEGIN
     'commerce-pass-purchase-b',
     'INITIAL_PURCHASE',
     '00000000-0000-0000-0000-000000000002',
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     (SELECT value FROM commerce_test_state WHERE key = 'pass_intent_b'),
     'commerce-pass-tx-b',
     'commerce-pass-original-b'
@@ -865,7 +865,7 @@ BEGIN
     'commerce-pass-stale-expiration',
     'EXPIRATION',
     '00000000-0000-0000-0000-000000000002',
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     (SELECT value FROM commerce_test_state WHERE key = 'pass_intent'),
     'commerce-pass-tx',
     'commerce-pass-original'
@@ -874,7 +874,7 @@ BEGIN
     SELECT 1
       FROM campaign_entitlements
      WHERE campaign_id = '20000000-0000-0000-0000-000000000001'
-       AND product_id = 'campaign_30d_1999'
+       AND product_id = 'campaign_pass_30d_1999'
        AND original_transaction_id = 'commerce-pass-original-b'
        AND active
   ) THEN
@@ -884,7 +884,7 @@ BEGIN
     'commerce-pass-expiration-b',
     'EXPIRATION',
     '00000000-0000-0000-0000-000000000002',
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     (SELECT value FROM commerce_test_state WHERE key = 'pass_intent_b'),
     'commerce-pass-tx-b',
     'commerce-pass-original-b'
@@ -893,7 +893,7 @@ BEGIN
     SELECT 1
       FROM campaign_entitlements
      WHERE campaign_id = '20000000-0000-0000-0000-000000000001'
-       AND product_id = 'campaign_30d_1999'
+       AND product_id = 'campaign_pass_30d_1999'
        AND active
   ) THEN
     RAISE EXCEPTION 'the current pass expiration did not deactivate its entitlement';
@@ -919,7 +919,7 @@ VALUES
   (
     '14000000-0000-0000-0000-000000000040',
     '00000000-0000-0000-0000-000000000002',
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     'CAMPAIGN',
     '20000000-0000-0000-0000-000000000001',
     'consumed',
@@ -928,7 +928,7 @@ VALUES
   (
     '14000000-0000-0000-0000-000000000041',
     '00000000-0000-0000-0000-000000000002',
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     'CAMPAIGN',
     '20000000-0000-0000-0000-000000000001',
     'consumed',
@@ -945,7 +945,7 @@ BEGIN
       'commerce-pass-purchase-c',
       'INITIAL_PURCHASE',
       '00000000-0000-0000-0000-000000000002',
-      'campaign_30d_1999',
+      'campaign_pass_30d_1999',
       '14000000-0000-0000-0000-000000000040',
       'commerce-pass-tx-c',
       'commerce-pass-original-c'
@@ -958,7 +958,7 @@ BEGIN
       'commerce-pass-purchase-d',
       'INITIAL_PURCHASE',
       '00000000-0000-0000-0000-000000000002',
-      'campaign_30d_1999',
+      'campaign_pass_30d_1999',
       '14000000-0000-0000-0000-000000000041',
       'commerce-pass-tx-d',
       'commerce-pass-original-d'
@@ -970,7 +970,7 @@ BEGIN
     'commerce-pass-refund-d',
     'REFUND',
     '00000000-0000-0000-0000-000000000002',
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     '14000000-0000-0000-0000-000000000041',
     'commerce-pass-tx-d',
     'commerce-pass-original-d'
@@ -979,7 +979,7 @@ BEGIN
     SELECT 1
       FROM campaign_entitlements
      WHERE campaign_id = '20000000-0000-0000-0000-000000000001'
-       AND product_id = 'campaign_30d_1999'
+       AND product_id = 'campaign_pass_30d_1999'
        AND original_transaction_id = 'commerce-pass-original-c'
        AND active
   ) THEN
@@ -990,7 +990,7 @@ BEGIN
     'commerce-pass-cancel-c',
     'CANCELLATION',
     '00000000-0000-0000-0000-000000000002',
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     '14000000-0000-0000-0000-000000000040',
     'commerce-pass-tx-c',
     'commerce-pass-original-c'
@@ -999,7 +999,7 @@ BEGIN
     SELECT 1
       FROM campaign_entitlements
      WHERE campaign_id = '20000000-0000-0000-0000-000000000001'
-       AND product_id = 'campaign_30d_1999'
+       AND product_id = 'campaign_pass_30d_1999'
        AND active
   ) THEN
     RAISE EXCEPTION 'cancelling the final valid pass left the entitlement active';
@@ -1010,7 +1010,7 @@ BEGIN
       'commerce-pass-renewal-c',
       'RENEWAL',
       '00000000-0000-0000-0000-000000000002',
-      'campaign_30d_1999',
+      'campaign_pass_30d_1999',
       '14000000-0000-0000-0000-000000000040',
       'commerce-pass-renewal-tx-c',
       'commerce-pass-original-c'
@@ -1023,7 +1023,7 @@ BEGIN
        SELECT 1
          FROM campaign_entitlements
         WHERE campaign_id = '20000000-0000-0000-0000-000000000001'
-          AND product_id = 'campaign_30d_1999'
+          AND product_id = 'campaign_pass_30d_1999'
           AND original_transaction_id = 'commerce-pass-original-c'
           AND active
      ) THEN

@@ -531,7 +531,7 @@ INSERT INTO purchase_intents (
 )
 SELECT 'a0400000-0000-0000-0000-000000000104',
        owner_user_id,
-       'campaign_30d_1999',
+       'campaign_pass_30d_1999',
        'CAMPAIGN',
        id,
        'issued',
@@ -548,7 +548,7 @@ BEGIN
     'provider_event_id', 'audit-p04-pass-purchase',
     'event_type', 'INITIAL_PURCHASE',
     'app_user_id', '00000000-0000-0000-0000-000000000001',
-    'product_id', 'campaign_30d_1999',
+    'product_id', 'campaign_pass_30d_1999',
     'purchase_intent_id', 'a0400000-0000-0000-0000-000000000104',
     'transaction_id', 'audit-p04-pass-transaction',
     'original_transaction_id', 'audit-p04-pass-original'
@@ -565,7 +565,7 @@ BEGIN
     SELECT 1 FROM campaign_entitlements ce
     JOIN campaigns c ON c.id = ce.campaign_id
      WHERE c.pitch_draft_id = 'a0400000-0000-0000-0000-000000000001'
-       AND ce.product_id = 'campaign_30d_1999'
+       AND ce.product_id = 'campaign_pass_30d_1999'
        AND ce.active
   ) THEN
     RAISE EXCEPTION 'AUDIT-P04: Campaign Pass entitlement was not activated';

@@ -521,7 +521,7 @@ Creator Launch 구매 기록과 credit은 Introducer가 소유하고, Campaign P
 ### RevenueCat을 잘 사용하는 방식
 
 - Offering: `starter`, `creator_launch`, `campaign_30d`
-- Products: `creator_launch_credit_499`, `campaign_30d_1999`
+- Products: `creator_launch_credit_499`, `campaign_pass_30d_1999`
 - Entitlement: `campaign_plus`; consumable Creator Launch는 entitlement가 아니라 서버 credit ledger로 관리
 - Paywall 이벤트, 구매, 취소/환불, 만료를 analytics와 연결
 - sandbox purchase와 webhook test event를 모두 검증

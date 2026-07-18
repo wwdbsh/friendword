@@ -150,3 +150,5 @@
 | Session | Owned paths                                                              | Dependency | Acceptance criteria                                                                 | Status                                                       | Updated    |
 | ------- | ------------------------------------------------------------------------ | ---------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------ | ---------- |
 | Advisor | `apps/mobile/eas.json`, `apps/mobile/assets/*`, app.config.ts 배선, OPS.md | Slice 7    | expo config 해석·typecheck green, 아이콘 1024 생성, 사용자 1회 셋업 런북 완비        | 완료 (2026-07-15 첫 빌드→TestFlight 제출→실기기 설치 성공, pnpm 11.12.0 핀·projectId 배선·암호화 면제 포함) | 2026-07-15 |
+
+| rc-rename | contracts·data·mobile 상수, `supabase/migrations/0042`, SQL 테스트 9종, README/HANDOFF/REVENUECAT_SETUP | 없음 | 옛 ID grep 0건(역사 migration 제외), red-first, 전 스위트 green | 승인 (Advisor 재실행 green, hosted 0042 배포) | 2026-07-18 |

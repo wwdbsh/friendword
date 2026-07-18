@@ -64,7 +64,7 @@ Never commit real credentials or user data. Keep client-safe identifiers separat
 
 ## RevenueCat sandbox
 
-Configure the `starter`, `creator_launch`, and `campaign_30d` offerings against sandbox products. `creator_launch_credit_499` is a repeatable consumable tracked by the server credit ledger, while `campaign_30d_1999` grants 30-day non-renewing campaign access and synchronizes its expiration through customer state and webhooks. Test purchase, webhook idempotency/replay, restore, expiration, and refund paths. Restore must not reissue an already-consumed Creator Launch credit. Production credentials and products must remain separate from sandbox configuration.
+Configure the `starter`, `creator_launch`, and `campaign_30d` offerings against sandbox products. `creator_launch_credit_499` is a repeatable consumable tracked by the server credit ledger, while `campaign_pass_30d_1999` grants 30-day non-renewing campaign access and synchronizes its expiration through customer state and webhooks. Test purchase, webhook idempotency/replay, restore, expiration, and refund paths. Restore must not reissue an already-consumed Creator Launch credit. Production credentials and products must remain separate from sandbox configuration.
 
 ## Provider adapters and staged enforcement
 

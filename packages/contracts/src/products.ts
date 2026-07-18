@@ -5,7 +5,7 @@
  */
 export const PRODUCTS = {
   creatorLaunch: 'creator_launch_credit_499',
-  campaignPass30d: 'campaign_30d_1999',
+  campaignPass30d: 'campaign_pass_30d_1999',
 } as const;
 
 export const OFFERINGS = {

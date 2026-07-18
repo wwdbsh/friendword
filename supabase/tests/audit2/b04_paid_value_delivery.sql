@@ -109,7 +109,7 @@ INSERT INTO public.campaign_entitlements (
   campaign_id, product_id, active, expires_at
 ) VALUES (
   '20000000-0000-0000-0000-000000000001',
-  'campaign_30d_1999',
+  'campaign_pass_30d_1999',
   true,
   now() + INTERVAL '20 days'
 )
@@ -150,7 +150,7 @@ BEGIN
     true
   );
   IF NOT pg_temp.intent_is_rejected(
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     '20000000-0000-0000-0000-000000000001'
   ) THEN
     PERFORM pg_temp.note_paid_failure('active Campaign Pass allowed duplicate intent');
@@ -176,7 +176,7 @@ INSERT INTO public.purchase_intents (
   (
     'b0400000-0000-0000-0000-000000000011',
     '00000000-0000-0000-0000-000000000001',
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     'CAMPAIGN',
     '20000000-0000-0000-0000-000000000002',
     'issued',
@@ -229,7 +229,7 @@ BEGIN
     'audit2-pass-event-1',
     'NON_RENEWING_PURCHASE',
     '00000000-0000-0000-0000-000000000001',
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     'b0400000-0000-0000-0000-000000000011',
     'audit2-pass-transaction',
     'audit2-pass-original'
@@ -237,12 +237,12 @@ BEGIN
   SELECT expires_at INTO pass_expiry_before
     FROM public.campaign_entitlements
    WHERE campaign_id = '20000000-0000-0000-0000-000000000002'
-     AND product_id = 'campaign_30d_1999';
+     AND product_id = 'campaign_pass_30d_1999';
   PERFORM public.record_revenuecat_event(pg_temp.revenuecat_payload(
     'audit2-pass-event-1',
     'NON_RENEWING_PURCHASE',
     '00000000-0000-0000-0000-000000000001',
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     'b0400000-0000-0000-0000-000000000011',
     'audit2-pass-transaction',
     'audit2-pass-original'
@@ -251,7 +251,7 @@ BEGIN
     'audit2-pass-event-2',
     'NON_RENEWING_PURCHASE',
     '00000000-0000-0000-0000-000000000001',
-    'campaign_30d_1999',
+    'campaign_pass_30d_1999',
     'b0400000-0000-0000-0000-000000000011',
     'audit2-pass-transaction',
     'audit2-pass-original'
@@ -259,7 +259,7 @@ BEGIN
   SELECT expires_at INTO pass_expiry_after
     FROM public.campaign_entitlements
    WHERE campaign_id = '20000000-0000-0000-0000-000000000002'
-     AND product_id = 'campaign_30d_1999';
+     AND product_id = 'campaign_pass_30d_1999';
   IF pass_expiry_after IS DISTINCT FROM pass_expiry_before THEN
     RAISE EXCEPTION 'AUDIT2-P0-6: replay changed Pass expiry from % to %',
       pass_expiry_before,

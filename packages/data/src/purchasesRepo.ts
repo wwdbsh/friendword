@@ -12,7 +12,7 @@ export type PurchaseBenefitScope =
       readonly pitchDraftId: string;
     }
   | {
-      readonly productId: 'campaign_30d_1999';
+      readonly productId: 'campaign_pass_30d_1999';
       readonly campaignId: string;
     };
 

@@ -1,74 +1,67 @@
 # PROJECT HANDOFF
 
-> 갱신: 2026-07-14 KST. acceptance source of truth는 [`docs/FRIENDWORD_THIRD_AUDIT_HANDOFF_2026-07-14.md`](FRIENDWORD_THIRD_AUDIT_HANDOFF_2026-07-14.md)(3차 감사). 1·2차 감사 문서는 역사적 기준. 상세 결정 이력은 [`docs/DECISIONS.md`](DECISIONS.md), 작업 소유권은 [`docs/TASKS.md`](TASKS.md).
+> 갱신: 2026-07-19 KST. **acceptance source of truth = [`docs/FRIENDWORD_FOURTH_AUDIT_HANDOFF_2026-07-15.md`](FRIENDWORD_FOURTH_AUDIT_HANDOFF_2026-07-15.md)(4차 감사)** — 1~3차는 역사적 기준. 결정 이력 [`docs/DECISIONS.md`](DECISIONS.md), 작업 소유권 [`docs/TASKS.md`](TASKS.md).
+>
+> **새 머신(클론) 부트스트랩**: Node 22(.nvmrc)·corepack로 pnpm 11.12.0·`pnpm install`. **`.env`는 git에 없으므로 이전 머신에서 직접 복사**(변수 목록은 `.env.example`). DB 테스트는 brew Postgres 17 필요. hosted push는 supabase CLI(로그인 필요). 시뮬레이터 QA는 Xcode. Claude 메모리(~/.claude)는 머신 로컬이라 이 문서가 유일한 인계 수단이다.
 
 ## CURRENT STATE
 
-- 판정: **기능성 내부 베타**. 3차 감사의 코드 게이트는 Slice 0~~5, Slice 6(`90e9516`, GP-P0-3·CP-1·CP-2·CP-5·CP-6·CP-8 코드분), Slice 7(`69efcf3`, §8 디자인·접근성 코드분)로 해소. 외부 공개·실결제·Grand Prize 제출은 여전히 아님(잔여: Slice 8 + 사용자 키 게이트 + **데모 실음성 녹음** + **실기기 iOS QA**). green test는 완료 증거가 아니며 acceptance는 감사 문서 기준.
-- 게이트: `real_payments_enabled=off`(결제 차단), `public_beta_enabled=off`(interest 제출+publish 전이+공개 read/OG 전부 차단, 0034). 내부 QA 예외는 service-role 전용 `qa_preview_allowlist`(pitch_draft 단위)뿐 — 프로덕션 E2E도 gate 전역 토글 대신 이걸 쓴다.
-- 파이프라인: pnpm 모노레포(`apps/mobile`·`apps/web`·`packages/*`·`supabase`). migrations **0001~0041 hosted 배포**(ref oknolcxsvogrhnxnyosr, **0040은 의도적 미사용 갭** — ON CONFLICT 게이트 우회가 실증으로 기각됨, c11 참조). 모든 상태 전이는 SECURITY DEFINER RPC+트리거, authenticated RPC는 전수 active-account 가드(0037). publish는 Dater 확정 birth date 18+ fail-closed(0041).
-- 비용·동의: provider reserve/reconcile은 service-role 전용+request_ref lease+보수적 실패 회계(0035). AI 동의는 4개 usage kind 전부에 `ai_disclosure_current_revision` binding으로 선행(무동의 시 구조 검사만, 외부 AI 0회). 채팅은 reactive-only moderation 정책(문서화됨).
-- 커머스: intent (user,product,scope) 유일성, Campaign Pass `GREATEST(now,ends_at)+30d`(expired 유료 부활, beta gate 중엔 review 보류), restore는 intent 무발급, TRANSFER는 `resolve_purchase_event_review` 운영 도구(0038).
-- 성장: owner당 활성 캠페인 1개 guard, `referral_claims` first-touch chain(publish 시 서버 연결), anon `join_waitlist`, Introducer 무료 공유(`list_my_introduced_campaigns`), exporter는 K-factor 없이 server-recorded·net-paid·메타데이터 출력(0039).
-- 회귀: 스위트 01~~18 · audit 7/7 · audit2 14/14 · **audit3 c01~~c11(11/11) + 웹 49 테스트** · unit 203+web · Playwright 41/41 · 프로덕션 E2E 전 체크 PASS 2연속(7w~~7z 신규 게이트 검증 포함, 마지막 커밋 `90e9516`).
-- 작업 체제: Advisor(오케스트레이터) + Claude Opus 워커 2~3명(슬라이스당 생성, 승인 후 종료). Codex 미사용.
+- 판정: **기능성 내부 베타**. 3차 감사 Slice 0~7 해소 완료. **4차 감사가 새 기준이며 대응 미착수** — 새 P0 10건+GP-P0 4건+H 17건, 실행 계획 §10 Slice 0~9. 배포 판정: 본인 단독 내부 QA만 조건부 허용(테스트 계정·gate off), 외부 테스터 초대·공개·Grand Prize 제출 차단.
+- 게이트: `real_payments_enabled=off`·`public_beta_enabled=off` (publish·공개 read·interest 차단). QA 예외는 draft 단위 `qa_preview_allowlist`뿐 — 운영 도구 `scripts/qa-preview-allowlist.mjs`(find/add/remove/list).
+- 인프라 (전부 가동, 계정 소유는 사용자):
+  - **DB**: Supabase hosted `oknolcxsvogrhnxnyosr`, migrations **0001~0042 배포**(0040은 의도적 미사용 갭 — c11 참조).
+  - **웹**: Vercel `https://friendword-web-nmsi.vercel.app` — GitHub `wwdbsh/friendword` main push마다 자동 배포(Root=`apps/web`, `vercel.json`의 `buildCommand: next build`). env: Supabase 4종 등록됨, `OPENAI_API_KEY`·`REVENUECAT_WEBHOOK_AUTH_TOKEN`은 사용자 등록 상태 확인 필요.
+  - **모바일**: EAS `@wwdbsh/friendword` → TestFlight 내부 배포 가동(실기기 설치 2회 성공). `eas.json`에 pnpm 11.12.0 핀 필수. 반복 릴리스 절차 `docs/OPS.md`.
+  - **RevenueCat**: 프로젝트 연동 완료 — iOS 앱(`com.friendword.app`)+IAP 키, 상품 `creator_launch_credit_499`·`campaign_pass_30d_1999`(ASC 둘 다 **Consumable**), default offering 패키지 2개, 웹훅→`/api/revenuecat`, SDK 키 EAS env. ASC 샌드박스 테스터 생성됨.
+  - **scheduled-ops cron**: GH Actions 시크릿(`SUPABASE_URL`·`SUPABASE_SERVICE_ROLE_KEY`) 등록 전까지 매시간 fail-fast 메일 — 등록 여부 미확인.
+- 회귀: DB base · audit 7/7 · audit2 14/14 · **audit3 c01~c11(11/11)** · unit 219(mobile 106 포함) · web 유닛 49 · Playwright 46/46. green test ≠ 완료 증거.
+- 작업 체제: Advisor(오케스트레이터)+Opus 워커(작업 단위 생성, 승인 후 종료). 워커 결과는 Advisor가 diff·동일 테스트 재실행으로 검증 후에만 승인.
 
 ## DONE
 
-- **3차 감사 Slice 0~5 완주** (모두 2026-07-14, red-first + Advisor 재검증 + hosted 드릴 + 프로덕션 E2E):
-  - Slice 0 `f4b4b06`: public beta gate authoritative(publish·read·OG), qa_preview_allowlist, audit3 신설.
-  - Slice 1 `165efb7`: 비용 원장 service-only+lease, AI 동의 선행·revision binding·own_content scope, manual 무 AI.
-  - Slice 2 `d0e084e`(+`fcf6694`): Dater 사진 403 해소, revision/publish validation·moderation 게이트, dater_edited 확인, transcript snapshot copy, manual 제출 차단 정직 카피.
-  - Slice 3 `0a79451`(+`357c4e9`): RPC 계정 가드 전수, introducer 삭제 시 voice 물리 삭제+무성 캠페인 archived, review payload 90일 scrub, token/로컬 미디어 purge, storage 실삭제, scheduled-ops GH cron.
-  - Slice 4 `971e43c`: intent 유일성, Pass 적층·부활 상태기계, restore 무 intent, alias 귀속, resolve 도구, refund/kit 계약.
-  - Slice 5 `358a2ae`: 활성 1캠페인 guard, referral chain, waitlist, Introducer 무료 공유, exporter 진실화.
-- 문서 truth reset 동반: README·PRODUCT·COST_MODEL·ANALYTICS_PLAN·PRIVACY_DATA_MAP·OPS·REVENUECAT_SETUP·GROWTH_EVIDENCE·COMMUNITY_GUIDELINES·DECISIONS(9건 추가)·TASKS.
-- **Slice 6 `90e9516`** (2026-07-14, 워커 s6-demo·s6-dater·s6-truth + Advisor 재검증·hosted 0041 배포·프로덕션 E2E 2연속 PASS):
-  - 데모: age/vouch 미구현 정보 제거, structure 기반 scene(실 segment 타이밍), segment-level caption 정직화, waveform 실패 접근성 상태, 실음성 seed 파이프라인(파일은 사용자 게이트, TTS 금지).
-  - judge-safe: allowlist 한정 interest→inbox→accept→room을 c09로 잠금, ON CONFLICT 재제출 우회는 실증 기각(0040 미사용, c11 잠금).
-  - Dater 통제(0041): consent 실 출력 스냅샷 프리뷰, birth date 18+ publish fail-closed, canonical location(legacy region은 null fail-closed), dating intent, dater revision voice 자동 포함(Advisor 파생 하드닝).
-  - recap 이원화: AI path는 transcript 파생(요구 제거), manual path만 필수.
-  - 커머스 truth: canonical 계약 단일화(HANDOFF historical 분리), kit·OG 가짜 waveform 제거, kit 승인 콘텐츠 경계 c10.
-  - DECISIONS 3건 추가, audit3 c08~c11 신설.
-- **Slice 7 `69efcf3`** (2026-07-14, 워커 s7-web·s7-mobile + Advisor 재검증·시뮬레이터 QA):
-  - Trust Layer 스펙 수치 확정(DESIGN.md)·토큰화: 1px hairline·soft shadow·tilt 0, borderMuted/borderSuccess로 3:1 미달 경계 2건 해소(red-first), contrast matrix 음성가드 편입.
-  - consent 검토 6단계+sticky progress rail(전 입력 마운트 유지 — RPC·검증·Slice 6 프리뷰 무변경, 기존 16 스펙 보존), 44px 실측 전수, §11 browser 회귀(Playwright 46).
-  - 시뮬레이터 QA가 잠복 결함 발견·수정: app/ 콜로케이트 테스트가 expo-router 라우트로 번들돼 Expo Go 부팅 불가(07-13 유래) → src/screens/__tests__ 이동+재발 가드. 로그아웃 campaigns sign-in 유도 통일.
-  - 잔여(의도적 보류): interest 카드-레벨 시각 하향은 kit 공유 모듈 분리 리팩터 후속.
+- **3차 감사 Slice 6**(`90e9516`, migration 0041): 데모 정직화(structure scene·segment 타이밍·age/vouch 제거), judge-safe flow(c09·c11, ON CONFLICT 우회 실증 기각), Dater 통제(실 프리뷰·18+ fail-closed·canonical location·voice 자동 포함), recap 이원화, 커머스 계약 단일화·kit/OG 가짜 waveform 제거.
+- **3차 감사 Slice 7**(`69efcf3`): Trust Layer 수치 스펙·contrast matrix(red-first 2건 해소), consent 6단계+sticky rail, 44px 실측, §11 browser 회귀, app/ 테스트 라우트 번들 크래시(Expo Go 부팅 불가 잠복 결함) 수정.
+- **TestFlight 채널 개통**: EAS 셋업(아이콘/스플래시 생성 포함)→빌드→제출→실기기 설치. 함정 해결: pnpm 핀, 크리덴셜 TTY, 암호화 면제 선언.
+- **웹 프로덕션 배포**: Vercel + 스모크 전 통과(landing/demo 200, 404 게이트, OG png, noindex, transcribe 401 graceful).
+- **RevenueCat/ASC 셋업**(위 상태 표) + **제품 ID rename**(`3dd6c1a`, migration 0042 — ASC ID 영구잠금 사고 대응, RPC 5개 재정의, 전 스위트 green).
+- **모바일 사인인·헤더 수정**(`03a8adf`): signed-out 카드에 SignInSheet 연결 CTA(4차 H-6·CP-7 코드분 선반영), 미등록 화면 헤더·"index" 백라벨 누출 제거.
+- 운영 도구: `scripts/qa-preview-allowlist.mjs`, 실기기 QA 체크리스트 `docs/DEVICE_QA.md`, 데모 실음성 seed `scripts/seed-demo-pitch.mjs`(파일 대기).
 
 ## IN PROGRESS
 
-- 없음. Slice 0~7은 승인·배포 완료 상태로 인계.
+- **실기기 풀 플로우 QA**: 준비 완료(도구·체크리스트·계정), 실행 전. `03a8adf` 반영 재빌드+submit이 됐는지부터 확인 필요(마지막 설치 빌드는 그 이전).
 
 ## TODO
 
-1. (P0) 데모 실음성: 상헌 님의 권리 확보 30~60초 영어 녹음 도착 시 `scripts/seed-demo-pitch.mjs`(manifest+`rightsCleared:true`) 1회 실행→hosted seed→육안 QA. TTS 금지(DECISIONS 07-13).
-2. (P0) 실기기 iOS QA: **TestFlight 채널 개통 완료(2026-07-15)** — EAS production 빌드→제출→사용자 아이폰 설치 성공. 이제 실기기 QA 수행 가능(§8/§10 체크리스트로 진행). 반복 릴리스는 docs/OPS.md TestFlight 절차.
-3. (P0) Slice 8 — 외부 release proof: identity 벤더 sandbox, moderation enforcement on 실증, RevenueCat sandbox 실왕복, gate-on smoke/gate-off rollback 드릴(감사 §10 Slice 8) — 대부분 사용자 키 선행 필요.
-4. (P1) 사용자 키 게이트 안내: RevenueCat 셋업, identity 벤더 계약, OPENAI 키, Resend/`EXPO_PUBLIC_WEB_ORIGIN`, **GH Actions 시크릿(SUPABASE_URL·SUPABASE_SERVICE_ROLE_KEY) 등록 시 scheduled-ops cron 활성화**.
-5. (P1) 새 DB 변경마다 direct RPC 우회·RLS·concurrency·retry·실 UI 소비자 회귀 테스트 유지(감사 §0-5), 수정과 같은 turn 문서 truth reset(§0-6).
-6. (P2) waitlist 초대 발송·보존 정책 확정(Resend 이후), 채팅 moderation 정책 외부 베타 전 재평가.
+1. (P0) `03a8adf` 반영 **재빌드+submit** 확인 → `docs/DEVICE_QA.md` 체크리스트로 실기기 QA 실행(draft 생성 시 allowlist 등록은 Advisor가 스크립트로).
+2. (P0) **OpenAI 키**: platform.openai.com 키+budget alert → Vercel `OPENAI_API_KEY` → Redeploy (ChatGPT 구독으로는 API 호출 불가 — 별도 과금, 최소 $5 크레딧). 미등록 시 AI 플로우 501.
+3. (P0) **GH Actions 시크릿** 등록 확인(`SUPABASE_URL`·`SUPABASE_SERVICE_ROLE_KEY`) → scheduled-ops 수동 트리거로 green 확인(실패 메일 중단 + 만료/삭제 runtime 가동).
+4. (P0) **sandbox 결제 드릴**: Advisor 주도 — `real_payments_enabled` on(SQL) → 앱에서 sandbox 구매/복원 왕복 → 웹훅·원장 검증 → off 원복·기록. 그 전까지 구매 버튼 금지.
+5. (P0) **4차 감사 대응 착수**: §10 Slice 0(기준 동결·truth reset)부터. GP-P0-1(structured motion 원계약 복원 vs 07-13 축소 유지)은 사용자 재결정 필요.
+6. (P0) **데모 실음성**: 권리 확보 30~60초 영어 녹음(TTS 금지) → seed 1회 실행.
+7. (P1) 실기기 QA 발견사항을 4차 Slice 8 입력으로 정리.
+8. (P1) prod Supabase 분리 결정은 4차 Slice 9에서(신규 prod 프로젝트 A안 우선 검토 — DECISIONS 예정).
+9. (P2) identity 벤더·Resend 도메인은 Slice 9 시점.
 
 ## IMPORTANT DECISIONS
 
-- **public_beta_enabled=off = 외부 공개 차단**(publish 전이+공개 read+interest). QA는 gate 토글이 아니라 `qa_preview_allowlist`로만.
-- **비용 원장**: reserve/reconcile service-role 전용, 라우트가 user/kind/scope/estimate 결정(1~50¢), lease로 attempt당 provider 1회, 실패는 estimate 이상 보수 유지. **record_revenuecat_event는 payload 단일 시그니처**(alias는 서버가 payload에서 파생 — 신규 RPC의 라우트-DB 시그니처는 mock-free 검증 필수).
-- **AI 동의**: 모든 usage kind, 서버 관리 revision binding, scope는 draft(`pitch_draft`, creator+subject)와 사용자(`own_content`). 무동의 업로드는 Supabase까지만(구조 검사, 외부 AI 0회). **enforcement on 동안 manual(no-AI) 제출은 의도적 차단**(정직 카피+AI 전환 제안).
-- **Dater 통제**: revision·publish에 사진 validation+content-addressed 텍스트 verdict(hash는 raw `headline\n\nbody`, 0026/라우트와 동일), dater edit 시 hard-claims 확인 강제(AI 재추출 없음), approve가 transcript를 draft로 무조건 copy.
-- **삭제 정책**: introducer 삭제 시 voice(행+물리 바이트) 삭제, 무성 캠페인 archived. review payload는 resolved 90일 후 PII scrub. 채팅은 reactive-only(사적 대화 상시 외부 전송 안 함).
-- **커머스**: 만료 재개는 유료 Pass만("30일"=`GREATEST(now,ends_at)+30d`), 무료 resume 불가 유지. restore는 intent 무발급. refund는 consumed kit 미회수. beta gate 중 부활은 entitlement 기록+review 보류(돈 유실 금지).
-- **성장**: 활성(published/paused) 캠페인 owner당 1개(Pass는 기간 상품). referral은 first-touch `claim_referral`+publish 시 서버 연결. acquisition은 waitlist(K-factor 주장 금지, exporter에서 명칭 제거).
+- **4차 감사 = acceptance 기준** 승격. TestFlight 내부 QA 허용 / 외부 노출 전면 차단 판정 준수.
+- **RevenueCat은 단일 프로젝트 + Apple sandbox**: 환경 구분은 이벤트의 SANDBOX/PRODUCTION 태그, 서버 게이트가 PRODUCTION 효익만 차단(SANDBOX 처리) — 개발용 별도 프로젝트 없음. H-14(sandbox/production namespace 분리)는 4차 대응에서 하드닝.
+- **상품 계약 스토어 반영**: 두 상품 모두 ASC **Consumable**(신 UI에 갱신 안 함 구독 없음, 기간은 서버 상태기계 전담, 자동 갱신 금지). Campaign Pass ID는 `campaign_pass_30d_1999`(구 ID는 ASC 영구잠금 — migration 0042).
+- **운영 교훈(불변)**: ASC IAP ID는 삭제 시 영구 소각 — 삭제 금지 / EAS는 eas.json에 pnpm 버전 핀 / EAS·Vercel 크리덴셜 1회 셋업은 진짜 TTY 필요 / Vercel은 `buildCommand: next build`(로컬 `.next-build` 리다이렉트는 dev 서버 충돌 방지용이므로 유지).
+- (기존 유지) TTS/합성 데모 음성 금지 · 게이트 전역 토글 금지(allowlist만) · 키·시크릿 값은 사용자 직접 입력(Claude 미수신) · 감사 §13 금지 표현 준수.
 
 ## ISSUES / RISKS
 
-- identity/moderation enforcement는 벤더·키 전까지 off — 실사용자 노출 전 필수. cap의 enforcement-on 실증, RevenueCat sandbox 실왕복, 실기기 iOS QA 미실시(사용자 게이트).
-- 감사 §13 금지 표현("Grand Prize ready", "launch ready", "identity verified", "K-factor" 등)은 acceptance 증거 전까지 계속 금지.
-- hosted에 실사용자 계정 1개(`wwdbsh@gmail.com`, 사용자 본인 추정) 존재 — 삭제·조작 금지.
-- 프로덕션 E2E에서 일시 실패 1회 관측(원인 미확보, 이후 연속 2회 전 체크 PASS) — 재발 시 로그 전체 캡처로 조사.
-- 운영 함정: DB push는 클린 트리에서만 · dev 서버(:3000 tmux) 실행 중 `web build` 금지(.next 오염→Playwright 대량 실패) · 통합 Playwright는 워커 편집이 멈춘 조용한 창에서 · RPC 재정의는 최신본(0035~0039 포함) 통째 복사 · plpgsql `NOT IN`+NULL · dater revision `included_asset_ids`는 voice 포함 전체 집합 · 신규 트리거는 owner당 활성 1캠페인 invariant와 픽스처 충돌 주의.
-- 웹 수동 QA 인증: 스크립트로 사용자 생성 후 localStorage `friendword-web-auth`에 setSession.
+- **4차 감사 P0 미해소**: 승인 snapshot 불일치(공개 structure 미검토·moderation 우회), verified interest 프로필 교체 우회, 미디어 검증 경로 신뢰, provider retry 비용 누락, 음성 길이 서버 invariant 부재, RevenueCat 복구·Pass 이중 시간축 — 외부 노출 차단의 근거이므로 QA 중 실사용자 유입 금지.
+- scheduled-ops 시크릿 미등록이면 매시간 실패 메일 지속(의도된 fail-fast).
+- OPENAI/identity/Resend 키 부재 플로우는 mock/차단 상태 — 완료로 기록 금지.
+- hosted 실계정 `wwdbsh@gmail.com` 삭제·조작 금지.
+- 운영 함정: DB push는 클린 트리에서만 · :3000 dev 서버 중 `web build` 금지 · Playwright는 편집 멈춘 창에서 · RPC 재정의는 최신본(0042 포함) 통째 복사 · `apps/mobile/app/` 하위 `*.test.*` 금지(라우트로 번들됨 — 가드 테스트 존재) · plpgsql `NOT IN`+NULL · 웹 수동 QA 인증은 localStorage `friendword-web-auth`.
 
 ## LOG SUMMARY
 
-- 2026-07-13: 1·2차 감사 대응 완주(migrations ~0033, audit2 14/14 CI 편입), launch gate off 유지 판정. `e9de0de`→`0f9311f`.
-- 2026-07-14: 3차 감사 수령 → **Slice 0~5 완주**(0034~~0039 hosted 배포, audit3 c01~~c07+웹 41 CI 편입, hosted 드릴 4회 클린, 프로덕션 E2E PASS). Advisor(Fable 5)+Opus 워커 체제로 진행, 워커 계약 불일치 2건(웹훅 시그니처, H-7 픽스처)을 통합 검증에서 잡아 correction으로 해결. `f4b4b06`→`358a2ae`.
+- 2026-07-14: 3차 감사 Slice 0~5(`358a2ae`)에 이어 **Slice 6·7 완주**(`90e9516`·`69efcf3`, 0041 배포, 프로덕션 E2E 2연속 PASS). 워커 5명 체제, Advisor 검증이 voice 보존 구멍·E2E 18+ 파손·우회 의혹 실증 기각 등을 처리.
+- 2026-07-15: **TestFlight 개통**(첫 빌드→설치). **4차 감사 수령**.
+- 2026-07-16: **Vercel 웹 프로덕션 배포**+스모크(`35c60aa`), scheduled-ops 시크릿 안내.
+- 2026-07-18: **RevenueCat/ASC 전체 셋업**, 제품 ID rename+0042(`3dd6c1a`), allowlist 도구(`84efa8b`), 모바일 사인인 CTA·헤더 수정(`03a8adf`) — 실기기 QA 직전 상태로 인계.

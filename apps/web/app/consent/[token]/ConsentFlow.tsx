@@ -799,8 +799,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   // The claims step only exists when there is something to confirm, so the
   // progress rail hides it otherwise (keeps step numbers honest).
   const showClaims =
-    state.step === 'review' &&
-    (state.review.hardClaims.length > 0 || state.review.daterEdited);
+    state.step === 'review' && (state.review.hardClaims.length > 0 || state.review.daterEdited);
   const reviewSteps = REVIEW_STEP_DEFS.filter(
     (definition) => definition.id !== 'claims' || showClaims,
   );
@@ -814,9 +813,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
     if (state.step !== 'review') {
       return;
     }
-    const sections = Array.from(
-      document.querySelectorAll<HTMLElement>('[data-consent-step]'),
-    );
+    const sections = Array.from(document.querySelectorAll<HTMLElement>('[data-consent-step]'));
     if (sections.length === 0 || typeof IntersectionObserver === 'undefined') {
       return;
     }
@@ -1257,94 +1254,94 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                   age appears on your page.
                 </p>
 
-              <div className={styles.fieldGroup}>
-                <label className={styles.label} htmlFor="dater-birth-date">
-                  Date of birth
-                </label>
-                <input
-                  id="dater-birth-date"
-                  className={styles.input}
-                  type="date"
-                  value={birthDate}
-                  onChange={(event) => {
-                    setBirthDate(event.target.value);
-                    setProfileError(null);
-                  }}
-                />
-              </div>
-
-              <div className={styles.ageGrid}>
                 <div className={styles.fieldGroup}>
-                  <label className={styles.label} htmlFor="dater-region">
-                    Region
+                  <label className={styles.label} htmlFor="dater-birth-date">
+                    Date of birth
                   </label>
                   <input
-                    id="dater-region"
+                    id="dater-birth-date"
                     className={styles.input}
-                    type="text"
-                    maxLength={80}
-                    placeholder="e.g. Puget Sound"
-                    value={region}
+                    type="date"
+                    value={birthDate}
                     onChange={(event) => {
-                      setRegion(event.target.value);
+                      setBirthDate(event.target.value);
                       setProfileError(null);
                     }}
                   />
                 </div>
-                <div className={styles.fieldGroup}>
-                  <label className={styles.label} htmlFor="dater-city">
-                    City (optional)
-                  </label>
-                  <input
-                    id="dater-city"
-                    className={styles.input}
-                    type="text"
-                    maxLength={80}
-                    placeholder="e.g. Seattle"
-                    value={city}
-                    onChange={(event) => {
-                      setCity(event.target.value);
-                      setProfileError(null);
-                    }}
-                  />
+
+                <div className={styles.ageGrid}>
+                  <div className={styles.fieldGroup}>
+                    <label className={styles.label} htmlFor="dater-region">
+                      Region
+                    </label>
+                    <input
+                      id="dater-region"
+                      className={styles.input}
+                      type="text"
+                      maxLength={80}
+                      placeholder="e.g. Puget Sound"
+                      value={region}
+                      onChange={(event) => {
+                        setRegion(event.target.value);
+                        setProfileError(null);
+                      }}
+                    />
+                  </div>
+                  <div className={styles.fieldGroup}>
+                    <label className={styles.label} htmlFor="dater-city">
+                      City (optional)
+                    </label>
+                    <input
+                      id="dater-city"
+                      className={styles.input}
+                      type="text"
+                      maxLength={80}
+                      placeholder="e.g. Seattle"
+                      value={city}
+                      onChange={(event) => {
+                        setCity(event.target.value);
+                        setProfileError(null);
+                      }}
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div className={styles.fieldGroup}>
-                <label className={styles.label} htmlFor="dater-own-intent">
-                  What you’re looking for
-                </label>
-                <select
-                  id="dater-own-intent"
-                  className={styles.input}
-                  value={ownIntent}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    if (
-                      value === '' ||
-                      value === 'long-term' ||
-                      value === 'open-to-either' ||
-                      value === 'short-term'
-                    ) {
-                      setOwnIntent(value);
-                      setProfileError(null);
-                    }
-                  }}
-                >
-                  <option value="">Choose one…</option>
-                  {DATING_INTENTS.map((intent) => (
-                    <option key={intent.value} value={intent.value}>
-                      {intent.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.label} htmlFor="dater-own-intent">
+                    What you’re looking for
+                  </label>
+                  <select
+                    id="dater-own-intent"
+                    className={styles.input}
+                    value={ownIntent}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      if (
+                        value === '' ||
+                        value === 'long-term' ||
+                        value === 'open-to-either' ||
+                        value === 'short-term'
+                      ) {
+                        setOwnIntent(value);
+                        setProfileError(null);
+                      }
+                    }}
+                  >
+                    <option value="">Choose one…</option>
+                    {DATING_INTENTS.map((intent) => (
+                      <option key={intent.value} value={intent.value}>
+                        {intent.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-              {profileError !== null && (
-                <p className={styles.error} role="status">
-                  {profileError}
-                </p>
-              )}
+                {profileError !== null && (
+                  <p className={styles.error} role="status">
+                    {profileError}
+                  </p>
+                )}
               </fieldset>
             </section>
 
@@ -1367,115 +1364,117 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                   Who can reach out &amp; for how long
                 </legend>
                 <p className={styles.muted}>
-                  Your page is public — anyone with the link can watch it. These settings only decide
-                  who is allowed to send you interest and how precisely your location shows.
+                  Your page is public — anyone with the link can watch it. These settings only
+                  decide who is allowed to send you interest and how precisely your location shows.
                 </p>
 
-              <div className={styles.fieldGroup}>
-                <span className={styles.label}>Public duration</span>
-                <div className={styles.choiceRow}>
-                  {PUBLISH_DAY_OPTIONS.map((days) => (
-                    <label className={styles.choice} key={days}>
-                      <input
-                        type="radio"
-                        name="publish-days"
-                        value={days}
-                        checked={publishDays === days}
-                        onChange={() => setPublishDays(days)}
-                      />
-                      <span>{days} days</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className={styles.fieldGroup}>
-                <label className={styles.label} htmlFor="location-precision">
-                  Location visibility
-                </label>
-                <select
-                  id="location-precision"
-                  className={styles.input}
-                  value={locationPrecision}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    if (value === 'city' || value === 'region' || value === 'hidden') {
-                      setLocationPrecision(value);
-                    }
-                  }}
-                >
-                  <option value="city">City</option>
-                  <option value="region">Region only</option>
-                  <option value="hidden">Hidden</option>
-                </select>
-              </div>
-
-              <div className={styles.ageGrid}>
                 <div className={styles.fieldGroup}>
-                  <label className={styles.label} htmlFor="audience-min-age">
-                    Minimum age
-                  </label>
-                  <input
-                    id="audience-min-age"
-                    className={styles.input}
-                    type="number"
-                    min={18}
-                    step={1}
-                    inputMode="numeric"
-                    value={minimumAge}
-                    onChange={(event) => {
-                      setMinimumAge(event.target.value);
-                      setPreferenceError(null);
-                    }}
-                  />
+                  <span className={styles.label}>Public duration</span>
+                  <div className={styles.choiceRow}>
+                    {PUBLISH_DAY_OPTIONS.map((days) => (
+                      <label className={styles.choice} key={days}>
+                        <input
+                          type="radio"
+                          name="publish-days"
+                          value={days}
+                          checked={publishDays === days}
+                          onChange={() => setPublishDays(days)}
+                        />
+                        <span>{days} days</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
+
                 <div className={styles.fieldGroup}>
-                  <label className={styles.label} htmlFor="audience-max-age">
-                    Maximum age (optional)
+                  <label className={styles.label} htmlFor="location-precision">
+                    Location visibility
                   </label>
-                  <input
-                    id="audience-max-age"
+                  <select
+                    id="location-precision"
                     className={styles.input}
-                    type="number"
-                    min={18}
-                    step={1}
-                    inputMode="numeric"
-                    value={maximumAge}
+                    value={locationPrecision}
                     onChange={(event) => {
-                      setMaximumAge(event.target.value);
-                      setPreferenceError(null);
+                      const value = event.target.value;
+                      if (value === 'city' || value === 'region' || value === 'hidden') {
+                        setLocationPrecision(value);
+                      }
                     }}
-                  />
+                  >
+                    <option value="city">City</option>
+                    <option value="region">Region only</option>
+                    <option value="hidden">Hidden</option>
+                  </select>
                 </div>
-              </div>
 
-              <div className={styles.fieldGroup}>
-                <span className={styles.label}>Only accept interest from these intents (optional)</span>
-                <div className={styles.checkboxList}>
-                  {DATING_INTENTS.map((intent) => (
-                    <label className={styles.choice} key={intent.value}>
-                      <input
-                        type="checkbox"
-                        checked={selectedIntents.includes(intent.value)}
-                        onChange={(event) =>
-                          setSelectedIntents((current) =>
-                            event.target.checked
-                              ? [...current, intent.value]
-                              : current.filter((value) => value !== intent.value),
-                          )
-                        }
-                      />
-                      <span>{intent.label}</span>
+                <div className={styles.ageGrid}>
+                  <div className={styles.fieldGroup}>
+                    <label className={styles.label} htmlFor="audience-min-age">
+                      Minimum age
                     </label>
-                  ))}
+                    <input
+                      id="audience-min-age"
+                      className={styles.input}
+                      type="number"
+                      min={18}
+                      step={1}
+                      inputMode="numeric"
+                      value={minimumAge}
+                      onChange={(event) => {
+                        setMinimumAge(event.target.value);
+                        setPreferenceError(null);
+                      }}
+                    />
+                  </div>
+                  <div className={styles.fieldGroup}>
+                    <label className={styles.label} htmlFor="audience-max-age">
+                      Maximum age (optional)
+                    </label>
+                    <input
+                      id="audience-max-age"
+                      className={styles.input}
+                      type="number"
+                      min={18}
+                      step={1}
+                      inputMode="numeric"
+                      value={maximumAge}
+                      onChange={(event) => {
+                        setMaximumAge(event.target.value);
+                        setPreferenceError(null);
+                      }}
+                    />
+                  </div>
                 </div>
-              </div>
 
-              {(preferenceError ?? currentAudienceError) !== null && (
-                <p className={styles.error} role="status">
-                  {preferenceError ?? currentAudienceError}
-                </p>
-              )}
+                <div className={styles.fieldGroup}>
+                  <span className={styles.label}>
+                    Only accept interest from these intents (optional)
+                  </span>
+                  <div className={styles.checkboxList}>
+                    {DATING_INTENTS.map((intent) => (
+                      <label className={styles.choice} key={intent.value}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIntents.includes(intent.value)}
+                          onChange={(event) =>
+                            setSelectedIntents((current) =>
+                              event.target.checked
+                                ? [...current, intent.value]
+                                : current.filter((value) => value !== intent.value),
+                            )
+                          }
+                        />
+                        <span>{intent.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {(preferenceError ?? currentAudienceError) !== null && (
+                  <p className={styles.error} role="status">
+                    {preferenceError ?? currentAudienceError}
+                  </p>
+                )}
               </fieldset>
             </section>
 
@@ -1533,184 +1532,184 @@ export function ConsentFlow({ token }: { readonly token: string }) {
               data-consent-step="approve"
               aria-labelledby="consent-step-approve-heading"
             >
-            <p className={styles.stepMarker}>
-              Step {reviewStepNumber('approve')} of {reviewStepCount}
-            </p>
-            <div className={styles.profileSummary}>
-              <h2
-                id="consent-step-approve-heading"
-                className={`${styles.sectionHeading} ${styles.stepHeading}`}
-                data-step-heading
-                tabIndex={-1}
-              >
-                This is your page — exactly what people will see
-              </h2>
-              <p className={styles.muted}>
-                A still preview built from what you approved above. On the live page,{' '}
-                {state.preview.introducerDisplayName}’s voice plays over these photos.
+              <p className={styles.stepMarker}>
+                Step {reviewStepNumber('approve')} of {reviewStepCount}
               </p>
-              <div className={styles.previewFrame}>
-                {representativePhoto === null ? (
-                  <p className={styles.muted}>Keep at least one photo to preview your cover.</p>
-                ) : (
-                  <div className={styles.previewCover}>
-                    <img
-                      className={styles.previewCoverImg}
-                      src={representativePhoto.url}
-                      alt="Your page cover"
-                    />
-                    <div className={styles.previewCoverMeta}>
-                      <span className={styles.previewName}>
-                        {displayName}
-                        {previewAge === null ? '' : `, ${previewAge}`}
-                      </span>
-                      {previewLocation !== null && (
-                        <span className={styles.previewSub}>{previewLocation}</span>
-                      )}
-                      <span className={styles.previewSub}>{relationshipLine(state.preview)}</span>
-                    </div>
-                  </div>
-                )}
-
-                {editHeadline.trim() !== '' && (
-                  <p className={styles.previewHeadline}>{editHeadline}</p>
-                )}
-
-                {previewIncludedPhotos.length > 1 && (
-                  <div className={styles.previewThumbs}>
-                    {previewIncludedPhotos.map((photo, index) => (
-                      <div key={photo.assetId} className={styles.previewThumb}>
-                        <img src={photo.url} alt={`Photo ${index + 1} in play order`} />
-                        {index === 0 && <span className={styles.repTag}>Cover</span>}
+              <div className={styles.profileSummary}>
+                <h2
+                  id="consent-step-approve-heading"
+                  className={`${styles.sectionHeading} ${styles.stepHeading}`}
+                  data-step-heading
+                  tabIndex={-1}
+                >
+                  This is your page — exactly what people will see
+                </h2>
+                <p className={styles.muted}>
+                  A still preview built from what you approved above. On the live page,{' '}
+                  {state.preview.introducerDisplayName}’s voice plays over these photos.
+                </p>
+                <div className={styles.previewFrame}>
+                  {representativePhoto === null ? (
+                    <p className={styles.muted}>Keep at least one photo to preview your cover.</p>
+                  ) : (
+                    <div className={styles.previewCover}>
+                      <img
+                        className={styles.previewCoverImg}
+                        src={representativePhoto.url}
+                        alt="Your page cover"
+                      />
+                      <div className={styles.previewCoverMeta}>
+                        <span className={styles.previewName}>
+                          {displayName}
+                          {previewAge === null ? '' : `, ${previewAge}`}
+                        </span>
+                        {previewLocation !== null && (
+                          <span className={styles.previewSub}>{previewLocation}</span>
+                        )}
+                        <span className={styles.previewSub}>{relationshipLine(state.preview)}</span>
                       </div>
-                    ))}
-                  </div>
-                )}
+                    </div>
+                  )}
 
-                {editBody.trim() !== '' && <p className={styles.previewBody}>{editBody}</p>}
+                  {editHeadline.trim() !== '' && (
+                    <p className={styles.previewHeadline}>{editHeadline}</p>
+                  )}
 
-                <dl className={styles.summaryList}>
-                  <div>
-                    <dt>Looking for</dt>
-                    <dd>{ownIntent === '' ? 'Choose above' : datingIntentLabel(ownIntent)}</dd>
-                  </div>
-                  <div>
-                    <dt>Can reach out</dt>
-                    <dd>{previewAudience}</dd>
-                  </div>
-                  <div>
-                    <dt>Location shown</dt>
-                    <dd>{previewLocation ?? 'Hidden'}</dd>
-                  </div>
-                  <div>
-                    <dt>Public for</dt>
-                    <dd>{publishDays} days</dd>
-                  </div>
-                  <div>
-                    <dt>Voice</dt>
-                    <dd>
-                      {state.voiceUrl === null
-                        ? 'Not ready to play here'
-                        : 'Your friend’s original recording'}
-                    </dd>
-                  </div>
-                </dl>
+                  {previewIncludedPhotos.length > 1 && (
+                    <div className={styles.previewThumbs}>
+                      {previewIncludedPhotos.map((photo, index) => (
+                        <div key={photo.assetId} className={styles.previewThumb}>
+                          <img src={photo.url} alt={`Photo ${index + 1} in play order`} />
+                          {index === 0 && <span className={styles.repTag}>Cover</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {editBody.trim() !== '' && <p className={styles.previewBody}>{editBody}</p>}
+
+                  <dl className={styles.summaryList}>
+                    <div>
+                      <dt>Looking for</dt>
+                      <dd>{ownIntent === '' ? 'Choose above' : datingIntentLabel(ownIntent)}</dd>
+                    </div>
+                    <div>
+                      <dt>Can reach out</dt>
+                      <dd>{previewAudience}</dd>
+                    </div>
+                    <div>
+                      <dt>Location shown</dt>
+                      <dd>{previewLocation ?? 'Hidden'}</dd>
+                    </div>
+                    <div>
+                      <dt>Public for</dt>
+                      <dd>{publishDays} days</dd>
+                    </div>
+                    <div>
+                      <dt>Voice</dt>
+                      <dd>
+                        {state.voiceUrl === null
+                          ? 'Not ready to play here'
+                          : 'Your friend’s original recording'}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+                <p className={styles.muted}>
+                  Photos play in your friend’s original order — you choose which to include, not the
+                  order. You control the words and photos here; the voice recording itself can’t be
+                  trimmed, but you can request changes or decline below.
+                </p>
               </div>
-              <p className={styles.muted}>
-                Photos play in your friend’s original order — you choose which to include, not the
-                order. You control the words and photos here; the voice recording itself can’t be
-                trimmed, but you can request changes or decline below.
-              </p>
-            </div>
 
-            <div className={styles.controlNote}>
-              <span aria-hidden="true">✓</span>
-              <p>
-                You stay in control: approving creates your page, and you can take it down anytime.
-                Not ready? Just close this tab — nothing publishes without you.
-              </p>
-            </div>
+              <div className={styles.controlNote}>
+                <span aria-hidden="true">✓</span>
+                <p>
+                  You stay in control: approving creates your page, and you can take it down
+                  anytime. Not ready? Just close this tab — nothing publishes without you.
+                </p>
+              </div>
 
-            {editsDirty && (
-              <p className={styles.muted} role="status">
-                Save your edits before approving this page.
-              </p>
-            )}
+              {editsDirty && (
+                <p className={styles.muted} role="status">
+                  Save your edits before approving this page.
+                </p>
+              )}
 
-            <button
-              className={styles.primary}
-              type="button"
-              disabled={
-                responding ||
-                savingEdits ||
-                uploadingPhoto ||
-                editsDirty ||
-                currentAudienceError !== null ||
-                currentProfileError !== null ||
-                includedAssetIds.length === 0 ||
-                ((state.review.hardClaims.length > 0 || state.review.daterEdited) &&
-                  !hardClaimsConfirmed)
-              }
-              onClick={handleApprove}
-            >
-              Approve &amp; publish my page
-            </button>
-
-            <div className={styles.responseActions}>
               <button
-                className={styles.secondary}
+                className={styles.primary}
                 type="button"
-                disabled={responding}
-                aria-expanded={requestingChanges}
-                aria-controls="consent-change-request-form"
-                onClick={() => {
-                  const nextRequestingChanges = !requestingChanges;
-                  setRequestingChanges(nextRequestingChanges);
-                  setResponseError(null);
-                  if (nextRequestingChanges) {
-                    window.requestAnimationFrame(() => responseNoteRef.current?.focus());
-                  }
-                }}
+                disabled={
+                  responding ||
+                  savingEdits ||
+                  uploadingPhoto ||
+                  editsDirty ||
+                  currentAudienceError !== null ||
+                  currentProfileError !== null ||
+                  includedAssetIds.length === 0 ||
+                  ((state.review.hardClaims.length > 0 || state.review.daterEdited) &&
+                    !hardClaimsConfirmed)
+                }
+                onClick={handleApprove}
               >
-                Request changes
+                Approve &amp; publish my page
               </button>
-              <button
-                className={`${styles.secondary} ${styles.declineAction}`}
-                type="button"
-                disabled={responding}
-                onClick={() => {
-                  void handleDecline();
-                }}
-              >
-                Politely decline
-              </button>
-            </div>
 
-            {requestingChanges && (
-              <form
-                id="consent-change-request-form"
-                className={styles.responseForm}
-                onSubmit={handleRequestChanges}
-              >
-                <label className={styles.label} htmlFor="consent-change-note">
-                  What should your friend change?
-                </label>
-                <textarea
-                  ref={responseNoteRef}
-                  id="consent-change-note"
-                  className={styles.textarea}
-                  required
-                  rows={4}
-                  value={responseNote}
-                  onChange={(event) => setResponseNote(event.target.value)}
-                />
-                <button className={styles.secondary} type="submit" disabled={responding}>
-                  {responding ? 'Sending…' : 'Send change request'}
+              <div className={styles.responseActions}>
+                <button
+                  className={styles.secondary}
+                  type="button"
+                  disabled={responding}
+                  aria-expanded={requestingChanges}
+                  aria-controls="consent-change-request-form"
+                  onClick={() => {
+                    const nextRequestingChanges = !requestingChanges;
+                    setRequestingChanges(nextRequestingChanges);
+                    setResponseError(null);
+                    if (nextRequestingChanges) {
+                      window.requestAnimationFrame(() => responseNoteRef.current?.focus());
+                    }
+                  }}
+                >
+                  Request changes
                 </button>
-              </form>
-            )}
+                <button
+                  className={`${styles.secondary} ${styles.declineAction}`}
+                  type="button"
+                  disabled={responding}
+                  onClick={() => {
+                    void handleDecline();
+                  }}
+                >
+                  Politely decline
+                </button>
+              </div>
 
-            {responseError !== null && <p className={styles.error}>{responseError}</p>}
+              {requestingChanges && (
+                <form
+                  id="consent-change-request-form"
+                  className={styles.responseForm}
+                  onSubmit={handleRequestChanges}
+                >
+                  <label className={styles.label} htmlFor="consent-change-note">
+                    What should your friend change?
+                  </label>
+                  <textarea
+                    ref={responseNoteRef}
+                    id="consent-change-note"
+                    className={styles.textarea}
+                    required
+                    rows={4}
+                    value={responseNote}
+                    onChange={(event) => setResponseNote(event.target.value)}
+                  />
+                  <button className={styles.secondary} type="submit" disabled={responding}>
+                    {responding ? 'Sending…' : 'Send change request'}
+                  </button>
+                </form>
+              )}
+
+              {responseError !== null && <p className={styles.error}>{responseError}</p>}
             </section>
           </section>
         )}

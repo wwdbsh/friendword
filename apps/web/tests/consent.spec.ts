@@ -169,9 +169,7 @@ async function mockClaimedReview(
   );
   // CP-1 (Slice 6): the dater confirms their own age/location/intent before
   // the page can publish.
-  await page.route('**/rest/v1/rpc/set_dater_profile*', (route) =>
-    route.fulfill({ json: null }),
-  );
+  await page.route('**/rest/v1/rpc/set_dater_profile*', (route) => route.fulfill({ json: null }));
   // Dater AI-processing disclosure + consent (third audit P0-NEW-3): every
   // claimed review fetches the current disclosure revision, and agreeing records
   // draft-scoped consent before any photo/text reaches the AI review.
@@ -844,9 +842,7 @@ test('exposes each review step as a labelled region for assistive tech (§8 acce
   await expect(page.getByRole('heading', { name: 'Make it yours' })).toBeVisible();
   // Fieldsets surface as groups named by their legends.
   await expect(page.getByRole('group', { name: 'About you' })).toBeVisible();
-  await expect(
-    page.getByRole('group', { name: 'Who can reach out & for how long' }),
-  ).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Who can reach out & for how long' })).toBeVisible();
   await expect(
     page.getByRole('heading', { name: 'This is your page — exactly what people will see' }),
   ).toBeVisible();
@@ -862,9 +858,7 @@ test('keeps the review free of horizontal overflow from 320 to 1440 (§11 browse
 }) => {
   await mockClaimedReview(page);
   await page.goto(`/consent/${CONSENT_TOKEN}`);
-  await expect(
-    page.getByRole('heading', { name: 'Hear what Maya says about you.' }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Hear what Maya says about you.' })).toBeVisible();
 
   for (const width of [320, 375, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });

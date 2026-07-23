@@ -201,7 +201,9 @@ export default async function PitchPage({ params }: PitchPageProps) {
         </span>
         <div>
           <h2 id="trust-heading">
-            {pitch.isDemo ? 'How control works on a real page.' : `${pitch.daterName} stays in control.`}
+            {pitch.isDemo
+              ? 'How control works on a real page.'
+              : `${pitch.daterName} stays in control.`}
           </h2>
           {/* TODO(identity-provider): Restore identity-verification copy after verification ships. */}
           {/* Copy honesty (third audit CP-1): the dater edits the wording,

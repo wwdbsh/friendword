@@ -69,7 +69,11 @@ function validateStructure(structure, errors) {
     }
   }
   const qualities = structure.three_specific_qualities;
-  if (!Array.isArray(qualities) || qualities.length !== 3 || !qualities.every((q) => typeof q === 'string' && q.trim() !== '')) {
+  if (
+    !Array.isArray(qualities) ||
+    qualities.length !== 3 ||
+    !qualities.every((q) => typeof q === 'string' && q.trim() !== '')
+  ) {
     errors.push('structure.three_specific_qualities: must be exactly 3 non-empty strings');
   }
   const hard = structure.hard_claims_requiring_confirmation;
@@ -80,7 +84,13 @@ function validateStructure(structure, errors) {
 
 function validateManifest(manifest) {
   const errors = [];
-  for (const field of ['campaignSlug', 'daterName', 'introducerPseudonym', 'relationship', 'transcript']) {
+  for (const field of [
+    'campaignSlug',
+    'daterName',
+    'introducerPseudonym',
+    'relationship',
+    'transcript',
+  ]) {
     if (typeof manifest[field] !== 'string' || manifest[field].trim() === '') {
       errors.push(`${field}: must be a non-empty string`);
     }
@@ -92,7 +102,11 @@ function validateManifest(manifest) {
   } else {
     let previousStart = -Infinity;
     segments.forEach((segment, index) => {
-      if (typeof segment.start !== 'number' || typeof segment.end !== 'number' || typeof segment.text !== 'string') {
+      if (
+        typeof segment.start !== 'number' ||
+        typeof segment.end !== 'number' ||
+        typeof segment.text !== 'string'
+      ) {
         errors.push(`segments[${index}]: needs numeric start, end and string text`);
         return;
       }
@@ -113,7 +127,11 @@ function validateManifest(manifest) {
     errors.push('photos: must be a non-empty array');
   } else {
     photos.forEach((photo, index) => {
-      if (typeof photo.src !== 'string' || typeof photo.alt !== 'string' || photo.alt.trim() === '') {
+      if (
+        typeof photo.src !== 'string' ||
+        typeof photo.alt !== 'string' ||
+        photo.alt.trim() === ''
+      ) {
         errors.push(`photos[${index}]: needs a string src and a non-empty alt`);
         return;
       }
@@ -127,7 +145,8 @@ function validateManifest(manifest) {
 
   if (manifest.audio !== null && manifest.audio !== undefined) {
     if (typeof manifest.audio !== 'string') errors.push('audio: must be a path string or null');
-    else if (!existsSync(resolve(REPO, manifest.audio))) errors.push(`audio: file not found at ${manifest.audio}`);
+    else if (!existsSync(resolve(REPO, manifest.audio)))
+      errors.push(`audio: file not found at ${manifest.audio}`);
   }
 
   return errors;
@@ -149,8 +168,14 @@ function distributePhotoScenes(photoCount, durationMs, segments) {
       const startSegment = segmentIndex;
       segmentIndex += take;
       windows.push({
-        startMs: photo === 0 ? 0 : (segments[startSegment]?.startMs ?? Math.round((photo * totalMs) / count)),
-        endMs: photo === count - 1 ? totalMs : (segments[segmentIndex]?.startMs ?? Math.round(((photo + 1) * totalMs) / count)),
+        startMs:
+          photo === 0
+            ? 0
+            : (segments[startSegment]?.startMs ?? Math.round((photo * totalMs) / count)),
+        endMs:
+          photo === count - 1
+            ? totalMs
+            : (segments[segmentIndex]?.startMs ?? Math.round(((photo + 1) * totalMs) / count)),
       });
     }
     return windows;
@@ -225,7 +250,9 @@ function main() {
   console.log(`  duration (from segments): ${(durationMs / 1000).toFixed(1)}s`);
   console.log(`  photo scenes (real segment timing, no 60s grid):`);
   scenes.forEach((scene, index) => {
-    console.log(`    photo ${index + 1}: ${(scene.startMs / 1000).toFixed(1)}s → ${(scene.endMs / 1000).toFixed(1)}s`);
+    console.log(
+      `    photo ${index + 1}: ${(scene.startMs / 1000).toFixed(1)}s → ${(scene.endMs / 1000).toFixed(1)}s`,
+    );
   });
   console.log(`  captions: ${manifest.segments.length} segment-level (real timestamps)`);
   console.log(`  structure scenes: hook / relationship / 3 qualities / anecdote / good-match`);
@@ -268,7 +295,9 @@ function main() {
     writeFileSync(args.emitFixture, `${JSON.stringify(fixture, null, 2)}\n`);
     console.log(`✓ emitted fixture data to ${args.emitFixture}`);
   } else if (!hasRealAudio) {
-    console.log('ℹ no rights-cleared recording yet → public surface stays the honest written preview.');
+    console.log(
+      'ℹ no rights-cleared recording yet → public surface stays the honest written preview.',
+    );
   }
 }
 

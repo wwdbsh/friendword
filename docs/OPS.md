@@ -232,11 +232,13 @@ rollback에서 **이번 세션에 업로드한** `profile-media` 객체를 실�
 목표: 상헌 님 실기기에서 장소 제약 없이 최신 빌드를 TestFlight로 수령. Shipaton 규칙과 정합 — 8/1 전 **비공개 테스트는 허용**, 첫 **공개** App Store release만 8/1~9/30 창구 내(App Review 조기 제출 + 수동 release 전략, HACKATHON_RULES.md).
 
 ### 구성 (커밋됨)
+
 - `apps/mobile/eas.json` — development(내부·dev client)/preview(내부 배포)/production(TestFlight, `autoIncrement`+remote 버전) 프로필.
 - `apps/mobile/assets/` — icon.png(1024, Devpost 요건 겸용)·adaptive-icon.png·splash-icon.png. app.config.ts에 배선.
 - `extra.eas.projectId`는 루트 `.env`의 `EAS_PROJECT_ID`에서 주입(비밀 아님).
 
 ### 1회 셋업 (사용자 게이트 — 대화형이라 직접 실행)
+
 1. Apple Developer Program 멤버십(연 $99, 미가입 시 승인까지 최대 48h).
 2. Expo 계정: `pnpm dlx eas-cli login`
 3. `cd apps/mobile && pnpm dlx eas-cli init` → 출력된 project ID를 루트 `.env`에 `EAS_PROJECT_ID=<uuid>`로 추가.
@@ -246,7 +248,9 @@ rollback에서 **이번 세션에 업로드한** `profile-media` 객체를 실�
 7. App Store Connect → TestFlight → Internal Testing 그룹 생성 → 본인 Apple ID 추가 → 폰의 TestFlight 앱에서 설치. 이후 새 빌드는 5~6번 반복이면 자동 알림.
 
 ### 반복 릴리스
+
 `cd apps/mobile && pnpm dlx eas-cli build -p ios --profile production && pnpm dlx eas-cli submit -p ios --latest`
+
 - 내부 테스터 전용인 동안 App Review 불필요(Internal Testing). External 그룹·공개 App Store release는 8/1 이후.
 - `real_payments_enabled=off`·`public_beta_enabled=off` 서버 게이트는 TestFlight 빌드에도 동일하게 적용됨(클라이언트 배포와 무관).
 

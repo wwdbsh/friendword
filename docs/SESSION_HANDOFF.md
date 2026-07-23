@@ -6,7 +6,7 @@
 
 ## CURRENT STATE
 
-- 판정: **기능성 내부 베타**. 3차 감사 Slice 0~7 해소 완료. **4차 감사가 새 기준이며 대응 미착수** — 새 P0 10건+GP-P0 4건+H 17건, 실행 계획 §10 Slice 0~9. 배포 판정: 본인 단독 내부 QA만 조건부 허용(테스트 계정·gate off), 외부 테스터 초대·공개·Grand Prize 제출 차단.
+- 판정: **기능성 내부 베타**. 3차 감사 Slice 0~~7 해소 완료. **4차 감사가 새 기준이며 대응 미착수** — 새 P0 10건+GP-P0 4건+H 17건, 실행 계획 §10 Slice 0~~9. 배포 판정: 본인 단독 내부 QA만 조건부 허용(테스트 계정·gate off), 외부 테스터 초대·공개·Grand Prize 제출 차단.
 - 게이트: `real_payments_enabled=off`·`public_beta_enabled=off` (publish·공개 read·interest 차단). QA 예외는 draft 단위 `qa_preview_allowlist`뿐 — 운영 도구 `scripts/qa-preview-allowlist.mjs`(find/add/remove/list).
 - 인프라 (전부 가동, 계정 소유는 사용자):
   - **DB**: Supabase hosted `oknolcxsvogrhnxnyosr`, migrations **0001~0042 배포**(0040은 의도적 미사용 갭 — c11 참조).

@@ -224,13 +224,31 @@ function renderCampaignOg({ daterName, introducerName, photoUrl }: CampaignOg): 
           {/* Decorative sticker underline — clearly branding, not a signal. */}
           <div style={{ display: 'flex', marginTop: 34, alignItems: 'center', gap: 14 }}>
             <div
-              style={{ display: 'flex', width: 168, height: 14, borderRadius: 999, background: palette.flirt }}
+              style={{
+                display: 'flex',
+                width: 168,
+                height: 14,
+                borderRadius: 999,
+                background: palette.flirt,
+              }}
             />
             <div
-              style={{ display: 'flex', width: 22, height: 22, borderRadius: 999, background: palette.hype }}
+              style={{
+                display: 'flex',
+                width: 22,
+                height: 22,
+                borderRadius: 999,
+                background: palette.hype,
+              }}
             />
             <div
-              style={{ display: 'flex', width: 14, height: 14, borderRadius: 999, background: palette.pop }}
+              style={{
+                display: 'flex',
+                width: 14,
+                height: 14,
+                borderRadius: 999,
+                background: palette.pop,
+              }}
             />
           </div>
         </div>

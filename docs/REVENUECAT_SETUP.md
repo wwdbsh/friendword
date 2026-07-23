@@ -11,6 +11,7 @@
    - `campaign_pass_30d_1999` — Consumable, $19.99 (30-day Campaign Pass) [^pass-id]
 
 [^pass-id]: Campaign Pass는 원래 옛 ID(migration 0014에서 정의, Non-renewing subscription)로 설계됐으나 두 가지가 바뀌었습니다. (1) ASC UI에서 non-renewing subscription 유형이 사라져 **Consumable**로 생성합니다(웹훅 계약은 `NON_RENEWING_PURCHASE`로 동일하게 처리). (2) 사용자가 옛 ID로 IAP를 생성 후 삭제해 Apple이 해당 ID를 **영구 잠금**했기 때문에 canonical ID를 `campaign_pass_30d_1999`로 rename했습니다. 코드·DB·테스트는 모두 새 ID 기준입니다.
+
 3. 두 제품을 **default offering**의 패키지로 추가
 4. Project settings → Integrations → **Webhooks**:
    - URL: `https://<웹 도메인>/api/revenuecat` (로컬 테스트: ngrok 등 터널)

@@ -138,7 +138,10 @@ function realPhotos(
   ];
 }
 
-function realCaptions(segments: readonly SceneWindow[], pitch: PublishedPitch): readonly PitchCaption[] {
+function realCaptions(
+  segments: readonly SceneWindow[],
+  pitch: PublishedPitch,
+): readonly PitchCaption[] {
   const source = pitch.transcript?.segments ?? [];
   // CP-2: captions carry the provider's real segment timestamps. When there
   // are no segments we return an EMPTY list — no fabricated timestamp.

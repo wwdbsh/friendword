@@ -125,8 +125,8 @@ export function RecordingStep({
         <View style={styles.captionField}>
           <Text style={styles.captionLabel}>Text recap (optional)</Text>
           <Text style={styles.captionHint}>
-            Say it once — AI writes your captions from the recording. Add a recap only if you plan to
-            publish without AI captions.
+            Say it once — AI writes your captions from the recording. Add a recap only if you plan
+            to publish without AI captions.
           </Text>
           <TextInput
             accessibilityLabel="Optional text recap for the voice recording"

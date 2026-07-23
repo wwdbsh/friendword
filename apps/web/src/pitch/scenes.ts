@@ -37,7 +37,10 @@ function alignedToSegments(
     const startSegment = segmentIndex;
     segmentIndex += take;
     windows.push({
-      startMs: photo === 0 ? 0 : (segments[startSegment]?.startMs ?? Math.round((photo * totalMs) / count)),
+      startMs:
+        photo === 0
+          ? 0
+          : (segments[startSegment]?.startMs ?? Math.round((photo * totalMs) / count)),
       endMs:
         photo === count - 1
           ? totalMs
@@ -74,10 +77,7 @@ export function distributePhotoScenes(
  * before the timeline starts and to the last once it ends. Returns 0 for an
  * empty list so callers can index safely.
  */
-export function activeWindowIndex(
-  windows: readonly SceneWindow[],
-  elapsedMs: number,
-): number {
+export function activeWindowIndex(windows: readonly SceneWindow[], elapsedMs: number): number {
   if (windows.length === 0) {
     return 0;
   }

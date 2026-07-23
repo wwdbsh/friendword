@@ -42,6 +42,9 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
     form.append('file', audioBlob, 'voice.m4a');
     form.append('model', TRANSCRIBE_MODEL);
     form.append('response_format', 'verbose_json');
+    // English-first MVP (Slice 8 decision): without a language hint, Whisper
+    // can misdetect accented English and return a translated transcript.
+    form.append('language', 'en');
 
     const response = await fetch(`${OPENAI_BASE_URL}/audio/transcriptions`, {
       method: 'POST',
@@ -96,6 +99,7 @@ Rules:
 - "evidence_or_anecdote": the most concrete story or example from the transcript.
 - "good_match_for": who would be a good match, per the speaker.
 - "hard_claims_requiring_confirmation": verbatim claims that need the subject's confirmation (income, absolutes like always/never, health, ownership). Empty array if none.
+- Write every field in the same language as the transcript.
 Respond with JSON only.`;
 
 export class OpenAiPitchStructureProvider implements PitchStructureProvider {

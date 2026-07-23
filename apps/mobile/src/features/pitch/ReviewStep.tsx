@@ -1,5 +1,5 @@
 import { colors, fontSizes, radii, spacing, strokes } from '@friendword/ui-tokens';
-import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
+import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Image, StyleSheet, Text, View } from 'react-native';
 
 import { HypeButton, StickerCard } from '../../components';
@@ -68,7 +68,19 @@ export function ReviewStep({
         </View>
         <HypeButton
           label={playerStatus.playing ? 'Pause recording' : 'Play recording'}
-          onPress={() => (playerStatus.playing ? player.pause() : player.play())}
+          onPress={() => {
+            if (playerStatus.playing) {
+              player.pause();
+              return;
+            }
+            // Playback must survive the iOS silent switch; the recorder's mode
+            // reset may have dropped playsInSilentMode before this screen.
+            void setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true })
+              .catch(() => undefined)
+              .then(() => {
+                player.play();
+              });
+          }}
           secondary
         />
         <HypeButton label="Record it again" onPress={onRerecord} secondary />
@@ -89,14 +101,23 @@ export function ReviewStep({
         <Text style={styles.sectionTitle}>Photo suggestions</Text>
         <View style={styles.photos}>
           {photos.map((photo, index) => (
-            <Image
-              key={photo.uri}
-              accessibilityLabel={`Suggested photo ${index + 1}`}
-              source={{ uri: photo.uri }}
-              style={styles.photo}
-            />
+            <View key={photo.uri} style={styles.photoFrame}>
+              <Image
+                accessibilityLabel={`Suggested photo ${index + 1}`}
+                source={{ uri: photo.uri }}
+                style={styles.photo}
+                onError={() => {
+                  // TODO(qa): temporary diagnostics — a picked photo URI that
+                  // no longer resolves (stale container path) renders blank.
+                  console.warn('[ReviewStep] photo failed to load', photo.uri);
+                }}
+              />
+            </View>
           ))}
         </View>
+        {photos.length === 0 ? (
+          <Text style={styles.detail}>No photos picked yet — go back to add up to four.</Text>
+        ) : null}
         <Text style={styles.consentCopy}>
           Nothing goes public until your friend approves or replaces every photo.
         </Text>
@@ -160,7 +181,11 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   photos: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  photo: { width: '47%', aspectRatio: 1, borderRadius: radii.sm },
+  // Mirror PhotosStep's proven frame pattern: a percentage-width Image with
+  // aspectRatio can resolve to zero height on the new architecture, so size
+  // the wrapping View and let the Image fill it.
+  photoFrame: { width: '47%', borderRadius: radii.sm, overflow: 'hidden' },
+  photo: { width: '100%', aspectRatio: 1, resizeMode: 'cover' },
   consentCopy: {
     color: colors.textSecondary,
     fontFamily: 'BricolageGrotesqueSemiBold',

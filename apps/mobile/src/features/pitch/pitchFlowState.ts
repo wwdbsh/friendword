@@ -44,6 +44,8 @@ export function handleSubmitError(
   setErrorMessage: (message: string) => void,
 ): void {
   if (error instanceof Error) {
+    // TODO(qa): temporary diagnostics while device QA hunts a submit failure.
+    console.warn('[pitchFlow] submit failed', error.message, error.stack);
     setErrorMessage(error.message);
     return;
   }

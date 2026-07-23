@@ -52,21 +52,25 @@ export function usePitchRecorder(
     if (wasRecording.current && !recorderState.isRecording) {
       recordingActive.current = false;
       saveFinishedRecording(recorderState.url ?? recorder.uri, lastDurationMillis.current);
-      void setAudioModeAsync({ allowsRecording: false }).catch((error: unknown) => {
-        handleRecordingError(error, setErrorMessage);
-      });
+      void setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(
+        (error: unknown) => {
+          handleRecordingError(error, setErrorMessage);
+        },
+      );
     }
     wasRecording.current = recorderState.isRecording;
   }, [recorderState]);
 
   useEffect(
     () => () => {
-      void setAudioModeAsync({ allowsRecording: false }).catch((error: unknown) => {
-        if (error instanceof Error) {
-          return;
-        }
-        throw error;
-      });
+      void setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(
+        (error: unknown) => {
+          if (error instanceof Error) {
+            return;
+          }
+          throw error;
+        },
+      );
     },
     [],
   );
@@ -94,7 +98,7 @@ export function usePitchRecorder(
     } catch (error: unknown) {
       recordingActive.current = false;
       try {
-        await setAudioModeAsync({ allowsRecording: false });
+        await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
       } catch (restoreError: unknown) {
         handleRecordingError(restoreError, setErrorMessage);
         return;
@@ -115,7 +119,7 @@ export function usePitchRecorder(
       );
       await recorder.stop();
       saveFinishedRecording(recorder.uri, lastDurationMillis.current);
-      await setAudioModeAsync({ allowsRecording: false });
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
     } catch (error: unknown) {
       recordingActive.current = recorderState.isRecording;
       handleRecordingError(error, setErrorMessage);

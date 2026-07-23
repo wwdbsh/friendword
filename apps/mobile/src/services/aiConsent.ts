@@ -63,7 +63,8 @@ const supabasePersistence: AiConsentPersistence = {
     if (client === null) {
       throw new AiConsentPersistenceError('revision');
     }
-    const rpc = client.rpc as unknown as UntypedRpc;
+    // bind: supabase-js rpc() reads this.rest, so a bare extraction loses `this`.
+    const rpc = client.rpc.bind(client) as unknown as UntypedRpc;
     const { data, error } = await rpc('get_ai_disclosure_revision');
     if (error !== null || typeof data !== 'string' || data.trim() === '') {
       throw new AiConsentPersistenceError('revision');

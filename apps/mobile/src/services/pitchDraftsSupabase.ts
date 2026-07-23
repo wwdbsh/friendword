@@ -11,6 +11,7 @@ import type {
   RelationshipType as ServerRelationshipType,
 } from '@friendword/contracts';
 
+import { putLocalFile } from './mediaFiles';
 import { requestMediaValidation } from './mediaValidation';
 import { requestPitchTextModeration } from './textModeration';
 import {
@@ -372,13 +373,12 @@ export class HybridPitchDraftService implements PitchDraftService {
     contentType: string,
   ): Promise<void> {
     const upload = await repo.requestAssetUpload(draftId, fileName);
-    const response = await fetch(upload.signedUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': contentType, 'x-upsert': 'false' },
-      body: await (await fetch(uri)).blob(),
+    const status = await putLocalFile(upload.signedUrl, uri, {
+      'Content-Type': contentType,
+      'x-upsert': 'false',
     });
-    if (!response.ok) {
-      throw new PitchDraftSubmissionError(`Upload of ${fileName} failed (${response.status}).`);
+    if (status < 200 || status >= 300) {
+      throw new PitchDraftSubmissionError(`Upload of ${fileName} failed (${status}).`);
     }
     const verdict = await requestMediaValidation(`${draftId}/${fileName}`);
     if (verdict === 'rejected') {

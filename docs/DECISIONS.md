@@ -270,3 +270,10 @@
 - **이유**: Official Rules는 여전히 pending이고 Updates 탭이 비어 있어, 공개 요약 페이지의 현재 상태를 절대 날짜와 함께 고정 기록해야 이후 룰 공개 시 diff가 가능하다.
 - **검토 대안**: 룰 공개까지 재확인 연기(착수 직전 정보로 전략을 짜야 하므로 기각), 상금 확정 표기 전면 유지(불일치가 실제 해소되어 과도한 보수성 — 기각).
 - **영향**: HACKATHON_RULES.md 일정·상금·자격·게이트 체크리스트·변경 기록 갱신. Pre-8/1 TestFlight 허용은 여전히 미명시라 internal-only 운영 불변. 다음 게이트는 App Store 심사 제출 전.
+
+## 2026-07-25: 정기 운영은 GitHub Actions 대신 Supabase pg_cron (사용자 결정)
+
+- **결정**: 정기 운영 실행 경로를 GitHub Actions cron에서 **hosted Supabase pg_cron**(migration 0043)으로 전환한다. 순수 SQL pass 2종만 스케줄: `expire_due_campaigns()` 15분 주기(4차 감사 H-17 창 축소), `scrub_resolved_purchase_review_payloads()` 매일 03:30 UTC. Storage API가 필요한 계정 삭제 처리·orphan 스윕은 실사용자 유입 전까지 Advisor 수동 실행으로 유지하고, 출시 하드닝(4차 Slice 9)에서 Storage 접근 가능한 스케줄 런타임(예: Supabase scheduled Edge Function)으로 승격한다. `.github/workflows/scheduled-ops.yml`은 삭제, CI 워크플로는 비활성화(파일은 보존 — 여건 변화 시 재검토).
+- **이유**: private 레포의 Actions 무료 분량 소진 + 결제 여력 부재로 매시간 잡이 시작조차 못 하고 실패 메일만 발송("recent account payments have failed or your spending limit needs to be increased"). 사용자가 GitHub Actions 불사용을 명시 결정(2026-07-25). pg_cron은 hosted DB 안에서 무료로 돌고 네트워크·시크릿 의존이 없다.
+- **검토 대안**: GitHub 결제 한도 상향(비용 — 기각), 레포 공개 전환으로 무료 분량 확보(전략 문서 노출 — 현 시점 기각, 재검토 가능), Vercel Cron(Hobby 티어 주기 제약 — 기각).
+- **영향**: 0043 마이그레이션(pg_cron 가드 — 로컬 하니스는 NOTICE 후 no-op), OPS.md 정기 운영 섹션 재작성. 로컬 게이트(lint/type/test/format + DB 하니스 4종)가 push 전 유일한 회귀 검증이 됨 — Advisor가 push 전 반드시 실행. GH Actions 시크릿 2종은 등록됐지만 미사용. 검증: 로컬 DB 하니스 base+audit 7/7+audit2 14/14+audit3 11/11 green, hosted 배포는 supabase CLI 로그인(사용자 게이트) 후 `db push`.

@@ -185,23 +185,35 @@ SELECT date_trunc('month', now()) AS month,
 
 - 긴급 차단: `UPDATE app_config SET value = 'on' WHERE key = 'provider_kill_switch';`
 
-## 정기 운영 실행 (GitHub Actions cron — 3차 감사 H-6)
+## 정기 운영 실행 (Supabase pg_cron — 2026-07-25 전환)
 
-표준 실행 경로는 GitHub Actions 워크플로 `.github/workflows/scheduled-ops.yml`입니다.
-매시(`cron: '0 * * * *'`) `node scripts/run-scheduled-ops.mjs`를 실행하고, Actions 탭에서
-`workflow_dispatch`로 수동 드릴도 가능합니다. 잡은 캠페인 만료 + 계정 삭제 처리 +
-orphan 미디어 **dry-run**만 수행하며, orphan 실제 삭제(`--apply`)는 아래의 검토형 수동
-드릴로 유지합니다.
+표준 실행 경로는 **hosted Supabase 안의 pg_cron**입니다(migration 0043). GitHub
+Actions는 사용하지 않습니다 — private 레포 무료 분량 소진과 과금 여력 부재로
+2026-07-25에 폐기했고, `.github/workflows/scheduled-ops.yml`은 삭제, CI 워크플로는
+비활성화 상태입니다(레포 공개 전환 등으로 여건이 바뀌면 재검토). push 전 로컬
+게이트(`pnpm lint && pnpm typecheck && pnpm test && pnpm format:check` + DB 하니스)가
+CI를 대신하는 유일한 회귀 검증입니다.
 
-**시크릿 게이트(사용자 입력 필요 — 등록 전까지 워크플로는 비활성):** 잡 앞단의 preflight
-스텝이 시크릿 미설정을 감지하면 명확한 메시지로 즉시 실패해 빈 DB를 향해 실행되지
-않습니다. 아래 이름의 시크릿을 저장소 Settings → Secrets and variables → Actions에
-**사용자가 직접** 등록해야 활성화됩니다(값은 이 문서·워크플로·어떤 diff에도 남기지 않습니다).
+pg_cron이 실행하는 순수 SQL pass 2종:
 
-| secret 이름                                      | 용도                                           |
-| ------------------------------------------------ | ---------------------------------------------- |
-| `SUPABASE_URL` (또는 `NEXT_PUBLIC_SUPABASE_URL`) | 대상 프로젝트 URL                              |
-| `SUPABASE_SERVICE_ROLE_KEY`                      | service-role 키 — 정기 운영은 service-only이다 |
+| job 이름                                  | 주기           | 내용                                             |
+| ----------------------------------------- | -------------- | ------------------------------------------------ |
+| `expire-due-campaigns`                    | 15분마다       | `expire_due_campaigns()` — 기한 지난 캠페인 만료 |
+| `scrub-resolved-purchase-review-payloads` | 매일 03:30 UTC | resolved 후 90일 지난 review payload PII 스크럽  |
+
+상태 확인(SQL Editor, service role):
+
+```sql
+SELECT jobname, schedule, active FROM cron.job;
+SELECT jobname, status, return_message, start_time
+  FROM cron.job_run_details ORDER BY start_time DESC LIMIT 20;
+```
+
+**Storage API가 필요한 pass는 아직 수동입니다** — 계정 삭제 처리와 orphan 미디어
+스윕은 Storage 목록/삭제 호출이 필요해 pg_cron으로 옮길 수 없고, 실사용자 유입
+전까지 Advisor가 필요 시 수동 실행합니다. 출시 하드닝(4차 감사 Slice 9)에서
+Storage 접근 가능한 스케줄 런타임(예: Supabase scheduled Edge Function)으로
+승격합니다. "account deletion automated"는 그 승격 뒤에만 주장합니다.
 
 수동/로컬 실행:
 
@@ -211,10 +223,8 @@ node scripts/run-scheduled-ops.mjs --apply  # orphan 실제 삭제 포함(검토
 node scripts/expire-campaigns.mjs           # 만료만 단독 실행
 ```
 
-- 캠페인 만료(Slice 9, 0033): `expire_due_campaigns()`는 service role 전용이며 `ends_at`이 지난 published/paused 캠페인을 `expired`로 전환한다. 공개 페이지는 `ends_at` 기준으로 이미 404이므로 잡이 늦어도 노출 사고는 없지만, inbox 상태·`campaign_expired` 이벤트·재개 차단의 일관성을 위해 최소 일 1회 실행한다. 만료된 캠페인은 재개 불가, 아카이브만 가능하다.
-- 권장 주기: 워크플로 기본 매시. cron cadence는 후보 수·실패율이 안정된 뒤 조정합니다.
-- **실패 시 확인 순서:** ① 시크릿 3종이 등록됐는지(preflight 실패 메시지) → ② 어떤 pass가 non-zero로 종료했는지 로그의 `scheduled ops: <label> exited …` → ③ 해당 스크립트를 로컬에서 같은 시크릿으로 단독 재실행해 재현 → ④ 계정 삭제는 `process-deletions.mjs`가 `processing` 1시간 lease로 자동 재claim하므로 재실행이 안전. orphan `--apply`는 dry-run의 `unknown_age=0`과 후보 수를 검토한 뒤에만.
-- "account deletion automated"는 위 시크릿이 실제로 등록되어 스케줄러가 물린 뒤에만 주장합니다. 미설정 상태에서는 워크플로가 preflight에서 실패하므로 자동화된 것이 아닙니다.
+- 캠페인 만료(Slice 9, 0033): `expire_due_campaigns()`는 service role 전용이며 `ends_at`이 지난 published/paused 캠페인을 `expired`로 전환한다. 공개 페이지는 `ends_at` 기준으로 이미 404이므로 잡이 늦어도 노출 사고는 없지만, inbox 상태·`campaign_expired` 이벤트·재개 차단의 일관성이 필요하고, 만료 지연은 다음 캠페인 발행을 막는다(4차 감사 H-17) — 15분 주기는 그 창을 좁힌다. 만료된 캠페인은 재개 불가, 아카이브만 가능하다.
+- **실패 시 확인 순서:** ① `cron.job`에 잡 2종이 active인지 → ② `cron.job_run_details`의 `return_message` → ③ 해당 RPC를 SQL Editor에서 단독 실행해 재현. 계정 삭제는 `process-deletions.mjs`가 `processing` 1시간 lease로 자동 재claim하므로 재실행이 안전. orphan `--apply`는 dry-run의 `unknown_age=0`과 후보 수를 검토한 뒤에만.
 
 ### Interest 사진 저장소 정리 (3차 감사 H-5)
 

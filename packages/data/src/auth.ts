@@ -7,6 +7,7 @@ import { DataLayerError, UnauthenticatedError } from './errors';
 
 const emailSchema = z.string().email();
 const otpTokenSchema = z.string().trim().min(1);
+const otpTokenHashSchema = z.string().trim().min(1);
 const displayNameSchema = z.string().trim().min(1);
 
 export type EnsureUserRowResult = {
@@ -57,6 +58,27 @@ export async function verifyOtp(
   });
   if (error !== null) {
     throw new DataLayerError('verifyOtp', error);
+  }
+
+  return data.session;
+}
+
+/**
+ * Verifies the `token_hash` that a magic-link email carries, without the
+ * email address. Used by the web confirmation route, where the token hash is
+ * exchanged for a session only after the person clicks — a mail scanner that
+ * merely fetches the link never reaches this call.
+ */
+export async function verifyOtpTokenHash(
+  client: BrowserSupabaseClient,
+  tokenHash: string,
+): Promise<Session | null> {
+  const { data, error } = await client.auth.verifyOtp({
+    token_hash: otpTokenHashSchema.parse(tokenHash),
+    type: 'email',
+  });
+  if (error !== null) {
+    throw new DataLayerError('verifyOtpTokenHash', error);
   }
 
   return data.session;

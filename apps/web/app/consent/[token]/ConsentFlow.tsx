@@ -11,12 +11,12 @@ import {
   DataLayerError,
   ensureUserRow,
   getDisplayNameStatus,
-  signInWithOtp,
   type BrowserSupabaseClient,
   type ConsentPreview,
   type ConsentReview,
 } from '@friendword/data';
 
+import { EmailSignIn } from '@/components/EmailSignIn';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { requestDaterPitchModeration } from '@/lib/moderateText';
 
@@ -96,7 +96,6 @@ type FlowState =
   | { readonly step: 'invalid' }
   | { readonly step: 'closed'; readonly preview: ConsentPreview }
   | { readonly step: 'signin'; readonly preview: ConsentPreview }
-  | { readonly step: 'link-sent'; readonly preview: ConsentPreview; readonly email: string }
   | { readonly step: 'claiming'; readonly preview: ConsentPreview }
   | { readonly step: 'contact-mismatch'; readonly preview: ConsentPreview }
   | ({ readonly step: 'name-confirmation' } & ReviewContext)
@@ -242,8 +241,6 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   const client = clientRef.current;
 
   const [state, setState] = useState<FlowState>({ step: 'loading' });
-  const [email, setEmail] = useState('');
-  const [sendingLink, setSendingLink] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [displayName, setDisplayName] = useState('');
   const [confirmingName, setConfirmingName] = useState(false);
@@ -385,26 +382,6 @@ export function ConsentFlow({ token }: { readonly token: string }) {
       cleanupAuthListener?.();
     };
   }, [client, token, enterReview]);
-
-  async function handleSendLink(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (client === null || (state.step !== 'signin' && state.step !== 'link-sent')) {
-      return;
-    }
-
-    setSendingLink(true);
-    try {
-      await signInWithOtp(client, email, { emailRedirectTo: window.location.href });
-      setState({ step: 'link-sent', preview: state.preview, email });
-    } catch {
-      setState({
-        step: 'error',
-        message: 'We could not send the sign-in link. Check the email address and try again.',
-      });
-    } finally {
-      setSendingLink(false);
-    }
-  }
 
   async function handleApprove() {
     if (client === null || state.step !== 'review' || approvalStartedRef.current) {
@@ -719,7 +696,6 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         throw error;
       }
       claimStartedRef.current = false;
-      setEmail('');
       setState({ step: 'signin', preview });
     } catch (error: unknown) {
       if (!(error instanceof Error)) {
@@ -915,10 +891,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
           </section>
         )}
 
-        {(state.step === 'signin' ||
-          state.step === 'link-sent' ||
-          state.step === 'claiming' ||
-          state.step === 'publishing') && (
+        {(state.step === 'signin' || state.step === 'claiming' || state.step === 'publishing') && (
           <section className={styles.card} aria-live="polite">
             <span className={styles.badge}>{relationshipLine(state.preview)}</span>
             <h1 className={styles.title}>
@@ -928,42 +901,13 @@ export function ConsentFlow({ token }: { readonly token: string }) {
               Nothing goes public until you hear it and say yes. First, confirm it’s really you.
             </p>
 
-            {state.step === 'signin' && (
-              <form className={styles.form} onSubmit={handleSendLink}>
-                <label className={styles.label} htmlFor="consent-email">
-                  Your email
-                </label>
-                <input
-                  id="consent-email"
-                  className={styles.input}
-                  type="email"
-                  required
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                />
-                <button className={styles.primary} type="submit" disabled={sendingLink}>
-                  {sendingLink ? 'Sending…' : 'Email me a sign-in link'}
-                </button>
-                <p className={styles.finePrint}>
-                  No password, no signup forms — the link brings you right back here.
-                </p>
-              </form>
-            )}
-
-            {state.step === 'link-sent' && (
-              <div className={styles.linkSent}>
-                <p className={styles.lede}>
-                  Check <strong>{state.email}</strong> — your sign-in link is on the way. Open it on
-                  this device to continue.
-                </p>
-                <form onSubmit={handleSendLink}>
-                  <button className={styles.secondary} type="submit" disabled={sendingLink}>
-                    {sendingLink ? 'Sending…' : 'Resend the link'}
-                  </button>
-                </form>
-              </div>
+            {state.step === 'signin' && client !== null && (
+              <EmailSignIn
+                client={client}
+                styles={styles}
+                reason="Only you can approve this page, so we confirm the email this invite was sent to."
+                finePrint="No password, no signup forms — the link brings you right back here."
+              />
             )}
 
             {state.step === 'claiming' && <p className={styles.muted}>Unlocking your review…</p>}

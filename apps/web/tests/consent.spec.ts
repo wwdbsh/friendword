@@ -912,3 +912,91 @@ test('lets a keyboard user confirm claims and reach an enabled approval (§8 acc
   await approve.focus();
   await expect(approve).toBeFocused();
 });
+
+/**
+ * Mail scanners consume magic links, so the signed-out consent surface has to
+ * recover on its own: the returned #error fragment must be stated, and the
+ * emailed 8-digit code must be a real way in.
+ */
+async function mockSignedOutClaimPath(page: Page): Promise<void> {
+  await mockPreview(page, [pendingPreviewRow]);
+  await mockUserBootstrap(page, { displayName: 'Blair', confirmed: true });
+  await page.route('**/rest/v1/rpc/claim_consent_request*', (route) =>
+    route.fulfill({ json: [{ pitch_draft_id: DRAFT_ID }] }),
+  );
+  await page.route('**/rest/v1/rpc/get_ai_disclosure_revision*', (route) =>
+    route.fulfill({ json: 'ai-2026-07' }),
+  );
+  await mockConsentReview(page);
+}
+
+test('states an expired sign-in link and resends a fresh one', async ({ page }) => {
+  await mockPreview(page, [pendingPreviewRow]);
+  let otpUrl = '';
+  await page.route('**/auth/v1/otp*', (route) => {
+    otpUrl = route.request().url();
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto(
+    `/consent/${CONSENT_TOKEN}#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired`,
+  );
+
+  await test.step('Then the failure is surfaced instead of silently ignored', async () => {
+    await expect(page.getByText('That sign-in link has expired or was already used')).toBeVisible();
+    // The fragment is cleaned so a refresh does not re-show a stale failure.
+    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe('');
+    await page.screenshot({ path: '/tmp/friendword-consent-expired-link.png', fullPage: true });
+  });
+
+  await test.step('When the dater asks for a fresh link it returns to this consent page', async () => {
+    await page.getByLabel('Your email').fill('dater@example.com');
+    await page.getByRole('button', { name: 'Send me a fresh link' }).click();
+    await expect(page.getByText('your sign-in link is on the way')).toBeVisible();
+    expect(decodeURIComponent(otpUrl)).toContain(`/consent/${CONSENT_TOKEN}`);
+  });
+});
+
+test('signs the dater in with the emailed code when the link is unusable', async ({ page }) => {
+  await mockSignedOutClaimPath(page);
+  await page.route('**/auth/v1/otp*', (route) => route.fulfill({ json: {} }));
+  let verifyBody: unknown;
+  await page.route('**/auth/v1/verify*', (route) => {
+    verifyBody = route.request().postDataJSON();
+    return route.fulfill({
+      json: {
+        access_token: 'playwright-access-token',
+        token_type: 'bearer',
+        expires_in: 3600,
+        expires_at: Math.floor(Date.now() / 1000) + 315_360_000,
+        refresh_token: 'playwright-refresh-token',
+        user: {
+          id: DATER_ID,
+          aud: 'authenticated',
+          role: 'authenticated',
+          email: 'dater@example.com',
+          app_metadata: {},
+          user_metadata: {},
+          created_at: '2026-07-13T00:00:00Z',
+        },
+      },
+    });
+  });
+
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+  await page.getByLabel('Your email').fill('dater@example.com');
+  await page.getByRole('button', { name: 'Email me a sign-in link' }).click();
+  await expect(page.getByText('your sign-in link is on the way')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Enter the 8-digit code instead' }).click();
+  await page.getByLabel('8-digit code').fill('12345678');
+  await page.screenshot({ path: '/tmp/friendword-consent-code-entry.png', fullPage: true });
+  await page.getByRole('button', { name: 'Sign me in' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Hear what Maya says about you.' })).toBeVisible();
+  expect(verifyBody).toMatchObject({
+    email: 'dater@example.com',
+    token: '12345678',
+    type: 'email',
+  });
+});

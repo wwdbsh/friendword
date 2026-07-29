@@ -9,13 +9,97 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { HypeButton, QuietNavAction, TrustCard } from '../../src/components';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
 import { buildIntroducerShareUrl } from '../../src/services/introducedCampaigns';
-import { hasFinalizedConsent } from '../../src/services/pitchDrafts';
+import { hasFinalizedConsent, settleWithin } from '../../src/services/pitchDrafts';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
-import type { PitchDraft } from '../../src/services/types';
+import type { PitchDraft, PitchDraftId } from '../../src/services/types';
 import { buildConsentUrl, getWebOrigin } from '../../src/services/webOrigin';
 
 export type CreatorBenefitState = 'idle' | 'loading' | 'available' | 'unavailable' | 'error';
 export type CreatorKitSurface = 'checking' | 'purchase' | 'open' | 'error';
+
+/**
+ * Outer bound on how long this screen may stay on "Loading your invite…".
+ * Deliberately longer than the draft service's own refresh timeout so the
+ * service's local-drafts fallback is what normally ends the wait; this only
+ * catches a draft source that never settles at all.
+ */
+export const SHARE_DRAFT_LOAD_TIMEOUT_MS = 12_000;
+
+/** Bound on the best-effort contact purge; never gates what is rendered. */
+export const SHARE_CONTACT_PURGE_TIMEOUT_MS = 8_000;
+
+export type ShareDraftUpdate = {
+  readonly draft: PitchDraft | null;
+  readonly loading: boolean;
+};
+
+export type ResolveShareDraftInput = {
+  readonly draftId: string | undefined;
+  readonly listDrafts: () => Promise<readonly PitchDraft[]>;
+  readonly purgeInvitationContact: (draftId: PitchDraftId) => Promise<PitchDraft>;
+  readonly publish: (update: ShareDraftUpdate) => void;
+  readonly loadTimeoutMs?: number;
+  readonly purgeTimeoutMs?: number;
+};
+
+/**
+ * A finalized draft's raw invite contact is cleared from this device once the
+ * invite has been handed to the server. Re-checked on every visit, so a purge
+ * that fails is simply retried next time.
+ */
+export function needsInvitationContactPurge(draft: PitchDraft | null): draft is PitchDraft {
+  return (
+    draft !== null &&
+    draft.server !== null &&
+    hasFinalizedConsent(draft) &&
+    draft.relationship !== null &&
+    draft.relationship.contact.kind !== 'sent'
+  );
+}
+
+/**
+ * Drives the share screen to a terminal state. The consent token is local data,
+ * so this never rejects and never waits on the network to publish it: the draft
+ * is published as soon as the list is in hand, and the invitation-contact purge
+ * runs afterwards as a bounded best effort that can only refine what is already
+ * on screen. A draft source that fails or stalls publishes `null`, which is the
+ * screen's honest "Invite not found" — never a permanent loading state.
+ */
+export async function resolveShareDraft(input: ResolveShareDraftInput): Promise<void> {
+  const {
+    draftId,
+    listDrafts,
+    purgeInvitationContact,
+    publish,
+    loadTimeoutMs = SHARE_DRAFT_LOAD_TIMEOUT_MS,
+    purgeTimeoutMs = SHARE_CONTACT_PURGE_TIMEOUT_MS,
+  } = input;
+
+  let drafts: readonly PitchDraft[] = [];
+  try {
+    drafts = await settleWithin(listDrafts(), loadTimeoutMs, () => []);
+  } catch {
+    drafts = [];
+  }
+
+  const candidate = drafts.find((draft) => draft.id === draftId) ?? null;
+  publish({ draft: candidate, loading: false });
+  if (!needsInvitationContactPurge(candidate)) {
+    return;
+  }
+
+  try {
+    const purged = await settleWithin(
+      purgeInvitationContact(candidate.id),
+      purgeTimeoutMs,
+      () => candidate,
+    );
+    publish({ draft: purged, loading: false });
+  } catch {
+    // The contact stays on this device until the next visit retries the purge;
+    // the invite itself is already rendered and must not be taken away.
+  }
+}
 
 /**
  * The free public pitch URL an introducer shares once their pitch is published.
@@ -65,36 +149,18 @@ export default function SharePitchScreen() {
 
   useEffect(() => {
     let active = true;
-    pitchDraftService
-      .getMyDrafts()
-      .then(async (drafts) => {
-        const candidate = drafts.find((draft) => draft.id === draftId);
-        if (
-          candidate === undefined ||
-          candidate.server === null ||
-          !hasFinalizedConsent(candidate) ||
-          candidate.relationship === null ||
-          candidate.relationship.contact.kind === 'sent'
-        ) {
-          return candidate ?? null;
+    void resolveShareDraft({
+      draftId,
+      listDrafts: () => pitchDraftService.getMyDrafts(),
+      purgeInvitationContact: (id) => pitchDraftService.purgeInvitationContact(id),
+      publish: (update) => {
+        if (!active) {
+          return;
         }
-        return pitchDraftService.purgeInvitationContact(candidate.id);
-      })
-      .then((candidate) => {
-        if (active) {
-          setDraft(candidate);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setDraft(null);
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
-      });
+        setDraft(update.draft);
+        setLoading(update.loading);
+      },
+    });
     return () => {
       active = false;
     };

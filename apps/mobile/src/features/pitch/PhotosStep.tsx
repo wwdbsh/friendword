@@ -4,8 +4,18 @@ import { useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { HypeButton, StickerCard } from '../../components';
+import { pickedPhotoMimeType } from '../../services/mediaFiles';
 import type { PitchPhoto } from '../../services/types';
 import { PitchStepFrame } from './PitchStepFrame';
+
+/**
+ * Named so the introducer can act on it: the picker hands back formats the
+ * server refuses (GIF, BMP, TIFF, AVIF, and any HEIC it could not transcode),
+ * and uploading those bytes anyway only fails later with a message about a
+ * file they can no longer identify.
+ */
+const UNSUPPORTED_PHOTO_MESSAGE =
+  'Friendword can publish JPEG, PNG, and WebP photos only. Pick a different one.';
 
 type PhotosStepProps = {
   readonly busy: boolean;
@@ -40,18 +50,26 @@ export function PhotosStep({
         orderedSelection: true,
         selectionLimit: 4 - photos.length,
         quality: 0.9,
+        // iPhone libraries hold HEIC, which the server refuses. Compatible mode
+        // makes the picker transcode those to JPEG; PNG/WebP screenshots come
+        // back untouched and are uploaded under their own type below.
+        preferredAssetRepresentationMode:
+          ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
       });
       if (result.canceled) {
         return;
       }
 
-      const selected = result.assets.map((asset) => ({
-        uri: asset.uri,
-        width: asset.width,
-        height: asset.height,
-      }));
+      const selected: PitchPhoto[] = [];
+      for (const asset of result.assets) {
+        const mimeType = pickedPhotoMimeType(asset);
+        if (mimeType === null) {
+          continue;
+        }
+        selected.push({ uri: asset.uri, width: asset.width, height: asset.height, mimeType });
+      }
       onPhotosChange([...photos, ...selected].slice(0, 4));
-      setErrorMessage(null);
+      setErrorMessage(selected.length < result.assets.length ? UNSUPPORTED_PHOTO_MESSAGE : null);
     } catch (error: unknown) {
       if (error instanceof Error) {
         setErrorMessage('Those photos could not be opened. Please try again.');

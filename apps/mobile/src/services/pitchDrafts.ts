@@ -49,6 +49,36 @@ export function hasFinalizedConsent(draft: PitchDraft): boolean {
   return draft.server !== null && draft.server.consentRequestId !== null;
 }
 
+/**
+ * Resolves with `value`'s result, or with `fallback()` when `value` has not
+ * settled within `timeoutMs`. Neither supabase-js nor `fetch` carries a request
+ * timeout here, so an unbounded draft call would otherwise leave a screen on its
+ * loading state forever. `value` cannot be cancelled, so it keeps running and a
+ * late result is discarded; its rejection is still observed here so it never
+ * surfaces as an unhandled rejection.
+ */
+export function settleWithin<T>(
+  value: Promise<T>,
+  timeoutMs: number,
+  fallback: () => T,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      resolve(fallback());
+    }, timeoutMs);
+    value.then(
+      (settled) => {
+        clearTimeout(timer);
+        resolve(settled);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 export class PitchDraftNotFoundError extends Error {
   constructor(readonly draftId: PitchDraftId) {
     super(`Pitch draft ${draftId} was not found.`);

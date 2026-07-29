@@ -1,43 +1,100 @@
+import { PHOTO_MIME_TYPES, type PhotoMimeType, type PitchPhoto } from './types';
+
 /**
- * Best-effort deletion of a local media file that has been purged from a draft.
- *
- * Only on-device `file://` URIs are touched — remote/server URIs are left
- * alone. Failures are swallowed on purpose: the load-bearing privacy guarantee
- * is that the caller has already dropped the URI from AsyncStorage, so deleting
- * the underlying bytes is a best-effort follow-up that must never surface an
- * error (the file may not exist, or `expo-file-system` may be unavailable in a
- * given runtime such as tests or web).
+ * A local file as this runtime can actually read it. Declared structurally
+ * because the shape is only guaranteed where the native module is installed:
+ * `expo-file-system` also resolves on web and in tests, where `File` exists but
+ * its native methods do not.
  */
+type NativeFile = {
+  readonly exists?: unknown;
+  readonly bytes?: unknown;
+  readonly delete?: unknown;
+};
+
+/**
+ * Constructs `expo-file-system`'s `File` for `uri`, or null when this runtime
+ * cannot provide one. Import success is not enough of a signal: the module
+ * resolves on web (where `File` extends a shim whose constructor only warns)
+ * and can resolve with a `File` that lacks the native methods, so the caller
+ * must fall back on the *instance*, not on the import.
+ */
+async function openNativeFile(uri: string): Promise<NativeFile | null> {
+  try {
+    const fileSystem: unknown = await import('expo-file-system');
+    if (typeof fileSystem !== 'object' || fileSystem === null || !('File' in fileSystem)) {
+      return null;
+    }
+    const fileConstructor = fileSystem.File;
+    if (typeof fileConstructor !== 'function') {
+      return null;
+    }
+    const construct = fileConstructor as new (fileUri: string) => NativeFile;
+    return new construct(uri);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Only the shape this module uses. `expo/fetch` accepts a raw byte body, which
+ * React Native's global `fetch` type does not.
+ */
+type BytesFetch = (
+  url: string,
+  init: { method: string; headers: Record<string, string>; body: Uint8Array },
+) => Promise<{ status: number }>;
+
+async function loadExpoFetch(): Promise<BytesFetch | null> {
+  try {
+    const fetchModule: unknown = await import('expo/fetch');
+    if (typeof fetchModule !== 'object' || fetchModule === null || !('fetch' in fetchModule)) {
+      return null;
+    }
+    const expoFetch = fetchModule.fetch;
+    return typeof expoFetch === 'function' ? (expoFetch as BytesFetch) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * PUT a local `file://` asset to a signed upload URL.
  *
- * On device this must stream through `expo-file-system`: React Native's Blob
- * cannot be constructed from an ArrayBuffer, so `fetch(uri).blob()` throws
- * ("Creating blobs from 'ArrayBuffer' ... are not supported"). Runtimes
- * without the native module (tests, web) fall back to fetch + blob, which
- * works there. Returns the HTTP status of the upload response.
+ * On device the bytes must be read through `expo-file-system`: React Native's
+ * Blob cannot be constructed from an ArrayBuffer, so `fetch(uri).blob()`
+ * throws ("Creating blobs from 'ArrayBuffer' ... are not supported").
+ *
+ * The request is sent with `expo/fetch`. `expo-file-system/legacy`'s
+ * `uploadAsync` is banned here: its URLSession completion runs on the main
+ * queue and releases the JSI `JavaScriptPromise` off the JS thread, which hard
+ * crashes the app with EXC_BAD_ACCESS / KERN_PROTECTION_FAILURE (device crash
+ * report Friendword-2026-07-27-162640.ips, expo-file-system@57.0.0).
+ *
+ * The body is passed as bytes rather than as the `File` (which implements
+ * `Blob`) on purpose: for blob-like bodies `expo/fetch` overrides
+ * `Content-Type` with `blob.type`, which would clobber the caller's explicit
+ * content type.
+ *
+ * Runtimes without a usable native `File`/`expo/fetch` (tests, web) fall back
+ * to fetch + blob, which works there. A native read that *starts* and then
+ * fails is a real error and propagates — only unavailability falls back, so a
+ * failure is never retried on a path that would send the bytes twice. Returns
+ * the HTTP status of the upload response.
  */
 export async function putLocalFile(
   url: string,
   fileUri: string,
   headers: Record<string, string>,
 ): Promise<number> {
-  let uploadAsync:
-    | ((
-        uploadUrl: string,
-        uri: string,
-        options?: { httpMethod?: string; headers?: Record<string, string> },
-      ) => Promise<{ status: number }>)
-    | undefined;
-  try {
-    const moduleName: string = 'expo-file-system/legacy';
-    uploadAsync = ((await import(moduleName)) as { uploadAsync?: typeof uploadAsync }).uploadAsync;
-  } catch {
-    uploadAsync = undefined;
-  }
-  if (uploadAsync !== undefined) {
-    const result = await uploadAsync(url, fileUri, { httpMethod: 'PUT', headers });
-    return result.status;
+  const file = await openNativeFile(fileUri);
+  const readBytes = file?.bytes;
+  const expoFetch = await loadExpoFetch();
+  if (file !== null && typeof readBytes === 'function' && expoFetch !== null) {
+    const read = readBytes as () => Promise<Uint8Array>;
+    const bytes = await read.call(file);
+    const nativeResponse = await expoFetch(url, { method: 'PUT', headers, body: bytes });
+    return nativeResponse.status;
   }
   const response = await fetch(url, {
     method: 'PUT',
@@ -47,20 +104,89 @@ export async function putLocalFile(
   return response.status;
 }
 
+/**
+ * Best-effort deletion of a local media file that has been purged from a draft.
+ *
+ * Only on-device `file://` URIs are touched — remote/server URIs are left
+ * alone. Failures are swallowed on purpose: the load-bearing privacy guarantee
+ * is that the caller has already dropped the URI from AsyncStorage, so deleting
+ * the underlying bytes is a best-effort follow-up that must never surface an
+ * error (the file may not exist, or `expo-file-system` may be unavailable in a
+ * given runtime such as tests or web).
+ *
+ * Uses the new `File` API rather than `expo-file-system/legacy`. Whether the
+ * legacy `deleteAsync` shares `uploadAsync`'s off-thread JSI release is not
+ * established, but this path runs on publish and there is no reason to load the
+ * banned module into the process when `File.delete()` exists. A native
+ * EXC_BAD_ACCESS would not be caught by the try/catch below either way.
+ */
 export async function deleteLocalMediaFile(uri: string): Promise<void> {
   if (!uri.startsWith('file://')) {
     return;
   }
   try {
-    // Resolve the module name through a typed `string` so the bundler/TS does
-    // not hard-require `expo-file-system` at import time; the legacy entry
-    // exposes the imperative `deleteAsync` used here.
-    const moduleName: string = 'expo-file-system/legacy';
-    const fileSystem = (await import(moduleName)) as {
-      deleteAsync?: (fileUri: string, options?: { idempotent?: boolean }) => Promise<void>;
-    };
-    await fileSystem.deleteAsync?.(uri, { idempotent: true });
+    const file = await openNativeFile(uri);
+    const remove = file?.delete;
+    if (file === null || typeof remove !== 'function' || file.exists === false) {
+      return;
+    }
+    (remove as () => void).call(file);
   } catch {
     // Best-effort only — see the doc comment above.
   }
+}
+
+const PHOTO_FILE_EXTENSIONS: Record<PhotoMimeType, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+};
+
+const PHOTO_MIME_TYPES_BY_EXTENSION: Record<string, PhotoMimeType> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+};
+
+function asPhotoMimeType(value: string): PhotoMimeType | null {
+  const normalized = value.split(';')[0]?.trim().toLowerCase() ?? '';
+  const candidate = normalized === 'image/jpg' ? 'image/jpeg' : normalized;
+  return PHOTO_MIME_TYPES.find((allowed) => allowed === candidate) ?? null;
+}
+
+function photoMimeTypeFromUri(uri: string): PhotoMimeType | null {
+  const path = uri.split('?')[0] ?? uri;
+  const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
+  return PHOTO_MIME_TYPES_BY_EXTENSION[extension] ?? null;
+}
+
+/**
+ * The publishable type of an asset the image picker returned, or null when it
+ * is one the server would refuse (HEIC that was not transcoded, GIF, BMP,
+ * TIFF, AVIF). iOS reports `mimeType` from the extension of the file it
+ * actually wrote, so it describes the real bytes; the uri extension is only a
+ * fallback for platforms that leave `mimeType` unset.
+ */
+export function pickedPhotoMimeType(asset: {
+  readonly mimeType?: string | null;
+  readonly uri: string;
+}): PhotoMimeType | null {
+  const declared = typeof asset.mimeType === 'string' ? asPhotoMimeType(asset.mimeType) : null;
+  return declared ?? photoMimeTypeFromUri(asset.uri);
+}
+
+/**
+ * The type a stored photo object must be uploaded as. Drafts saved before
+ * `mimeType` was tracked fall back to the file extension, and finally to JPEG —
+ * the server still sniffs the real bytes, so a wrong guess is reported by
+ * validation rather than silently published.
+ */
+export function photoMimeType(photo: PitchPhoto): PhotoMimeType {
+  return photo.mimeType ?? photoMimeTypeFromUri(photo.uri) ?? 'image/jpeg';
+}
+
+/** Storage object name for a draft photo, with the extension its bytes call for. */
+export function photoObjectName(photo: PitchPhoto, index: number): string {
+  return `photo-${index + 1}${PHOTO_FILE_EXTENSIONS[photoMimeType(photo)]}`;
 }

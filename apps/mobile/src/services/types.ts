@@ -34,10 +34,39 @@ const PitchRelationshipSchema = z.object({
   friendFirstName: z.string().min(1),
   contact: InvitationContactSchema,
 });
+/**
+ * Image types the server accepts for pitch photos (`ALLOWED_IMAGE_KINDS` in
+ * `@friendword/domain`, enforced by `/api/media/validate` from the real magic
+ * bytes). A picked asset outside this set is refused at pick time rather than
+ * uploaded under a name and Content-Type that do not match its bytes.
+ */
+export const PHOTO_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+
+export type PhotoMimeType = (typeof PHOTO_MIME_TYPES)[number];
+
+/**
+ * What already succeeded for one asset of a server-backed draft, recorded as
+ * soon as each step lands so a retry after a partial failure neither re-uploads
+ * (the signed URL is upsert:false) nor re-registers (which would duplicate
+ * pitch_assets rows). `validated` is true only for a server verdict of
+ * `passed`; a validation that could not run leaves it false so a later submit
+ * runs it again instead of latching a completion that never happened.
+ */
+const UploadedAssetSchema = z.object({
+  objectName: z.string().min(1),
+  registered: z.boolean(),
+  validated: z.boolean(),
+});
 const PitchPhotoSchema = z.object({
   uri: z.string().min(1),
   width: z.number().nonnegative(),
   height: z.number().nonnegative(),
+  // The real type of the picked bytes, carried through to the upload so the
+  // stored object's extension and Content-Type match what the server sniffs.
+  // Absent on drafts persisted before this was tracked — the upload path then
+  // falls back to the file extension.
+  mimeType: z.enum(PHOTO_MIME_TYPES).optional(),
+  upload: UploadedAssetSchema.optional(),
 });
 const PitchRecordingSchema = z.object({
   uri: z.string().min(1),
@@ -46,6 +75,7 @@ const PitchRecordingSchema = z.object({
   // captions from the transcript. The manual (no-AI) path re-requires a recap
   // at submission (preparePitchReview) since it is the only caption source.
   caption: z.string().max(500),
+  upload: UploadedAssetSchema.optional(),
 });
 
 /**
@@ -57,12 +87,14 @@ const PitchServerSyncSchema = z.object({
   draftId: z.uuid(),
   consentRequestId: z.uuid().nullable().default(null),
   consentToken: z.string().min(24).nullable().default(null),
-  // True once the voice/photo objects have been uploaded to Supabase storage
-  // for this server draft. The upload step (`uploadDraftMedia`) is split off
-  // from server-draft creation so AI-processing consent can be recorded in
-  // between; this flag keeps that step idempotent because the signed upload
-  // URL is created with upsert:false and re-registering assets would duplicate
-  // rows. Defaults false so drafts persisted before this field parse cleanly.
+  // True once every voice/photo object's bytes are on Supabase storage and
+  // registered for this server draft. It says nothing about media validation —
+  // that verdict is per asset (`UploadedAssetSchema.validated`) — because
+  // `purgeableMediaUris` deletes the on-device originals off this flag and must
+  // keep doing so once the server holds them. The upload step
+  // (`uploadDraftMedia`) is split off from server-draft creation so
+  // AI-processing consent can be recorded in between. Defaults false so drafts
+  // persisted before this field parse cleanly.
   mediaUploaded: z.boolean().default(false),
 });
 
@@ -113,6 +145,7 @@ export const PitchDraftSchema = z.object({
 
 export const PitchDraftListSchema = z.array(PitchDraftSchema);
 
+export type UploadedAsset = z.infer<typeof UploadedAssetSchema>;
 export type PitchServerSync = z.infer<typeof PitchServerSyncSchema>;
 export type PitchReview = z.infer<typeof PitchReviewSchema>;
 export type PitchDraftId = z.infer<typeof PitchDraftIdSchema>;

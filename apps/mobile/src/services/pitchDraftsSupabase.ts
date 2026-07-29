@@ -11,12 +11,13 @@ import type {
   RelationshipType as ServerRelationshipType,
 } from '@friendword/contracts';
 
-import { putLocalFile } from './mediaFiles';
-import { requestMediaValidation } from './mediaValidation';
+import { photoMimeType, photoObjectName, putLocalFile } from './mediaFiles';
+import { requestMediaValidation, type MediaValidationOutcome } from './mediaValidation';
 import { requestPitchTextModeration } from './textModeration';
 import {
   MockPitchDraftService,
   PitchDraftSubmissionError,
+  settleWithin,
   type PitchDraftService,
   type PurgeScope,
 } from './pitchDrafts';
@@ -32,6 +33,7 @@ import {
   type PitchReview,
   type RelationshipDuration,
   type RelationshipKind,
+  type UploadedAsset,
 } from './types';
 
 type PitchDraftRepository = Pick<
@@ -73,6 +75,16 @@ export const MANUAL_PITCH_NEEDS_AI_REVIEW_MESSAGE =
   'You wrote this pitch yourself, so its recording never went through AI safety review. ' +
   'While safety review is on, only AI-reviewed pitches can be published. ' +
   'Use AI review to submit it, or keep it saved as a draft for now.';
+
+/**
+ * Copy for the other way the 0016 gate can fail an AI-reviewed pitch: its media
+ * was uploaded but no `passed` verdict was ever recorded, because the validate
+ * call itself could not run (offline, auth, or a server error). Nothing is wrong
+ * with the pitch, so say so and let them try again.
+ */
+export const MEDIA_VALIDATION_INCOMPLETE_MESSAGE =
+  'Safety review has not finished for this pitch’s photos or recording yet. ' +
+  'Check your connection and try sending it again.';
 
 /**
  * Thrown when {@link HybridPitchDraftService.finalizeConsent} hits the 0016
@@ -138,6 +150,26 @@ const MOBILE_RELATIONSHIP_DURATION: Record<ServerRelationshipDuration, Relations
   gt10y: '10+ years',
 };
 
+/**
+ * How long the server refresh may hold up {@link HybridPitchDraftService.getMyDrafts}.
+ * Local storage already holds every draft the introducer needs to act on —
+ * including the raw consent token behind the approval link — so a stalled
+ * PostgREST call must degrade to that local truth instead of blocking a screen.
+ */
+export const SERVER_REFRESH_TIMEOUT_MS = 8_000;
+
+/**
+ * PostgREST returns `timestamptz` as an offset instant with microsecond
+ * precision ("2026-07-29T10:39:45.3091+00:00"). The local draft schema accepts
+ * only UTC "Z" instants, and `syncServerReview` compares timestamps
+ * lexicographically, which is sound only on that canonical form. An unparseable
+ * value is passed through so the schema reports it rather than this masking it.
+ */
+function toIsoInstant(value: string): string {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+}
+
 export class HybridPitchDraftService implements PitchDraftService {
   constructor(
     private readonly client: BrowserSupabaseClient | null,
@@ -145,6 +177,10 @@ export class HybridPitchDraftService implements PitchDraftService {
     private readonly repo: PitchDraftRepository | null = client === null
       ? null
       : new PitchDraftRepo(client),
+    private readonly refreshTimeoutMs = SERVER_REFRESH_TIMEOUT_MS,
+    private readonly validateMedia: (
+      objectName: string,
+    ) => Promise<MediaValidationOutcome> = requestMediaValidation,
   ) {}
 
   createDraft(): Promise<PitchDraft> {
@@ -175,50 +211,72 @@ export class HybridPitchDraftService implements PitchDraftService {
     return this.local.purgeAllConsentTokens();
   }
 
+  /**
+   * Local drafts are the answer; the server pass only enriches them. It is
+   * therefore both time-bounded and non-fatal: a stalled, unauthenticated or
+   * failing refresh returns the local list rather than rejecting, so a caller
+   * that owns a consent token can always render it. Only a local storage
+   * failure (read before the refresh) still rejects.
+   */
   async getMyDrafts(): Promise<readonly PitchDraft[]> {
     const localDrafts = await this.local.getMyDrafts();
-    if (this.repo === null) {
+    const repo = this.repo;
+    if (repo === null) {
       return localDrafts;
     }
     try {
-      const [visibleServerDrafts, requests, currentUserId] = await Promise.all([
-        this.repo.listMyDrafts(),
-        this.repo.listMyConsentRequests(),
-        this.getCurrentUserId(),
-      ]);
-      const serverDrafts =
-        currentUserId === null
-          ? visibleServerDrafts
-          : visibleServerDrafts.filter((row) => row.created_by_user_id === currentUserId);
-      for (const draft of localDrafts) {
-        const serverDraft = serverDrafts.find((row) => row.id === draft.server?.draftId);
-        if (serverDraft === undefined) {
-          continue;
-        }
-        const request = requests.find((row) => row.pitch_draft_id === serverDraft.id);
-        await this.local.syncServerReview(draft.id, {
-          status: serverDraft.status,
-          review: reviewFromServer(serverDraft, draft.review, request),
-          updatedAt: serverDraft.updated_at,
-        });
-      }
-      const knownServerIds = new Set(
-        localDrafts.flatMap((draft) => (draft.server === null ? [] : [draft.server.draftId])),
+      return await settleWithin(
+        this.refreshFromServer(repo, localDrafts),
+        this.refreshTimeoutMs,
+        () => localDrafts,
       );
-      for (const serverDraft of serverDrafts) {
-        if (knownServerIds.has(serverDraft.id)) {
-          continue;
-        }
-        const request = requests.find((row) => row.pitch_draft_id === serverDraft.id);
-        await this.local.restoreServerDraft(recoverServerDraft(serverDraft, request));
-      }
-      return this.local.getMyDrafts();
     } catch (error: unknown) {
-      if (error instanceof UnauthenticatedError) {
-        return localDrafts;
+      if (!(error instanceof UnauthenticatedError)) {
+        console.warn(
+          'Pitch draft server refresh failed; showing the drafts saved on this device:',
+          error instanceof Error ? error.message : 'Unknown refresh error.',
+        );
       }
-      throw error;
+      return localDrafts;
     }
+  }
+
+  private async refreshFromServer(
+    repo: PitchDraftRepository,
+    localDrafts: readonly PitchDraft[],
+  ): Promise<readonly PitchDraft[]> {
+    const [visibleServerDrafts, requests, currentUserId] = await Promise.all([
+      repo.listMyDrafts(),
+      repo.listMyConsentRequests(),
+      this.getCurrentUserId(),
+    ]);
+    const serverDrafts =
+      currentUserId === null
+        ? visibleServerDrafts
+        : visibleServerDrafts.filter((row) => row.created_by_user_id === currentUserId);
+    for (const draft of localDrafts) {
+      const serverDraft = serverDrafts.find((row) => row.id === draft.server?.draftId);
+      if (serverDraft === undefined) {
+        continue;
+      }
+      const request = requests.find((row) => row.pitch_draft_id === serverDraft.id);
+      await this.local.syncServerReview(draft.id, {
+        status: serverDraft.status,
+        review: reviewFromServer(serverDraft, draft.review, request),
+        updatedAt: toIsoInstant(serverDraft.updated_at),
+      });
+    }
+    const knownServerIds = new Set(
+      localDrafts.flatMap((draft) => (draft.server === null ? [] : [draft.server.draftId])),
+    );
+    for (const serverDraft of serverDrafts) {
+      if (knownServerIds.has(serverDraft.id)) {
+        continue;
+      }
+      const request = requests.find((row) => row.pitch_draft_id === serverDraft.id);
+      await this.local.restoreServerDraft(recoverServerDraft(serverDraft, request));
+    }
+    return this.local.getMyDrafts();
   }
 
   /**
@@ -256,37 +314,58 @@ export class HybridPitchDraftService implements PitchDraftService {
    * recording AI-processing consent (or deliberately choosing the manual path,
    * where the server does a structure-only check). Local-only drafts keep their
    * media on the device and no-op here.
+   *
+   * Every step is recorded per asset as it lands, so a retry after a partial
+   * failure resumes instead of re-sending bytes to an upsert:false object or
+   * re-registering a pitch_assets row. A validation that could not run leaves
+   * the asset un-validated, which is what brings the next call back here to run
+   * it again — the server contract is unchanged, `unavailable` is never treated
+   * as a pass.
    */
   async uploadDraftMedia(id: PitchDraftId): Promise<PitchDraft> {
     const draft = await findDraft(this.local, id);
-    if (this.repo === null || draft.server === null) {
+    const repo = this.repo;
+    if (repo === null || draft.server === null) {
       return draft;
     }
-    // Idempotent: the signed upload URL is created with upsert:false and
-    // registerAsset inserts a row, so a second pass (e.g. retrying after a
-    // transient transcribe failure) must not re-upload.
-    if (draft.server.mediaUploaded) {
+    const plans = planDraftMedia(draft);
+    if (plans.every((plan) => plan.record?.validated === true)) {
       return draft;
     }
     if (draft.recording === null) {
       throw new PitchDraftSubmissionError('Record a voice track before continuing.');
     }
     const serverDraftId = draft.server.draftId;
+    let recording = draft.recording;
+    let photos = [...draft.photos];
+    let unvalidated = 0;
     try {
-      await this.uploadFile(
-        this.repo,
-        serverDraftId,
-        'voice.m4a',
-        draft.recording.uri,
-        'audio/mp4',
-      );
-      await this.repo.registerAsset(serverDraftId, 'voice', 'voice.m4a');
-      for (const [index, photo] of draft.photos.entries()) {
-        const fileName = `photo-${index + 1}.jpg`;
-        await this.uploadFile(this.repo, serverDraftId, fileName, photo.uri, 'image/jpeg');
-        await this.repo.registerAsset(serverDraftId, 'photo', fileName, index);
+      for (const plan of plans) {
+        const persist = async (record: UploadedAsset): Promise<void> => {
+          if (plan.kind === 'voice') {
+            recording = { ...recording, upload: record };
+            await this.local.saveRecording(id, recording);
+            return;
+          }
+          photos = photos.map((photo, index) =>
+            index === plan.index ? { ...photo, upload: record } : photo,
+          );
+          await this.local.savePhotos(id, photos);
+        };
+        if ((await this.syncAsset(repo, serverDraftId, plan, persist)) !== 'passed') {
+          unvalidated += 1;
+        }
       }
-      return this.local.markDraftMediaUploaded(id);
+      if (unvalidated > 0) {
+        console.warn(
+          `Media validation did not complete for ${unvalidated} of ${plans.length} pitch assets; it will run again on the next attempt.`,
+        );
+      }
+      // Every asset's bytes are on the server now, which is what the local
+      // media purge keys off. Validation state stays per asset.
+      return draft.server.mediaUploaded
+        ? findDraft(this.local, id)
+        : this.local.markDraftMediaUploaded(id);
     } catch (error: unknown) {
       if (error instanceof UnauthenticatedError) {
         throw new NeedsSignInError();
@@ -322,10 +401,15 @@ export class HybridPitchDraftService implements PitchDraftService {
   }
 
   async finalizeConsent(id: PitchDraftId): Promise<PitchDraft> {
-    const draft = await findDraft(this.local, id);
     if (this.repo === null) {
       return this.local.finalizeConsent(id);
     }
+    // Validation that could not run during the upload gets its retry here, on
+    // the submit that the DB gate would otherwise fail closed. Guarded on media
+    // that is already stored, so submitting never becomes the step that first
+    // sends bytes — that stays behind the consent ordering in preparePitchReview.
+    const current = await findDraft(this.local, id);
+    const draft = hasPendingMediaValidation(current) ? await this.uploadDraftMedia(id) : current;
     if (draft.server === null) {
       throw new PitchDraftSubmissionError('Prepare this pitch before sending.');
     }
@@ -357,34 +441,75 @@ export class HybridPitchDraftService implements PitchDraftService {
       // A manual (no-AI) draft's voice is never transcribed/moderated, so the
       // 0016 gate fails its submission closed while enforcement is on. Map that
       // one server rejection to an honest product prompt; other failures keep
-      // their existing generic surfacing.
+      // their existing generic surfacing. An AI-reviewed draft that hits the
+      // same gate has a different cause — a verdict that never got recorded —
+      // and telling its author they wrote it themselves would be wrong.
       if (isPitchMediaValidationGateRejection(error)) {
-        throw new ManualPitchNeedsAiReviewError();
+        throw draft.review.generationMode === 'generated'
+          ? new PitchDraftSubmissionError(MEDIA_VALIDATION_INCOMPLETE_MESSAGE)
+          : new ManualPitchNeedsAiReviewError();
       }
       throw error;
     }
   }
 
-  private async uploadFile(
+  /**
+   * Brings one asset up to date — upload, register, validate — skipping
+   * whatever a previous attempt already completed and persisting each step
+   * before the next one runs. Returns the validation outcome; `rejected`
+   * throws, because the introducer has to replace that file.
+   */
+  private async syncAsset(
     repo: PitchDraftRepository,
     draftId: string,
-    fileName: string,
-    uri: string,
-    contentType: string,
+    plan: MediaAssetPlan,
+    persist: (record: UploadedAsset) => Promise<void>,
+  ): Promise<MediaValidationOutcome> {
+    let record = plan.record;
+    if (record === null) {
+      await this.uploadAssetBytes(repo, draftId, plan);
+      record = { objectName: plan.objectName, registered: false, validated: false };
+      await persist(record);
+    }
+    if (!record.registered) {
+      await repo.registerAsset(draftId, plan.kind, record.objectName, plan.index);
+      record = { ...record, registered: true };
+      await persist(record);
+    }
+    if (record.validated) {
+      return 'passed';
+    }
+    const outcome = await this.validateMedia(`${draftId}/${record.objectName}`);
+    if (outcome === 'rejected') {
+      throw new PitchDraftSubmissionError(
+        `${plan.label} is not a file we can publish. Pick a different one.`,
+      );
+    }
+    if (outcome === 'passed') {
+      await persist({ ...record, validated: true });
+    }
+    return outcome;
+  }
+
+  private async uploadAssetBytes(
+    repo: PitchDraftRepository,
+    draftId: string,
+    plan: MediaAssetPlan,
   ): Promise<void> {
-    const upload = await repo.requestAssetUpload(draftId, fileName);
-    const status = await putLocalFile(upload.signedUrl, uri, {
-      'Content-Type': contentType,
+    const upload = await repo.requestAssetUpload(draftId, plan.objectName);
+    const status = await putLocalFile(upload.signedUrl, plan.sourceUri, {
+      'Content-Type': plan.contentType,
       'x-upsert': 'false',
     });
-    if (status < 200 || status >= 300) {
-      throw new PitchDraftSubmissionError(`Upload of ${fileName} failed (${status}).`);
+    if (status >= 200 && status < 300) {
+      return;
     }
-    const verdict = await requestMediaValidation(`${draftId}/${fileName}`);
-    if (verdict === 'rejected') {
-      throw new PitchDraftSubmissionError(
-        `${fileName} is not a supported photo or audio file. Pick a different one.`,
-      );
+    // 409 from an upsert:false signed URL means an object already sits at this
+    // path. Only this draft's creator can write there, so those bytes are an
+    // earlier attempt of this same upload that crashed before it was recorded;
+    // the server re-reads and re-moderates whatever is actually stored.
+    if (status !== 409) {
+      throw new PitchDraftSubmissionError(`Upload of ${plan.label} failed (${status}).`);
     }
   }
 
@@ -398,6 +523,80 @@ export class HybridPitchDraftService implements PitchDraftService {
     }
     return data.session?.user.id ?? null;
   }
+}
+
+/** The voice object name is fixed: /api/transcribe reads `{draftId}/voice.m4a`. */
+const VOICE_OBJECT_NAME = 'voice.m4a';
+
+export type MediaAssetPlan = {
+  readonly kind: 'voice' | 'photo';
+  /** Photo position, also its pitch_assets sort_order. Always 0 for the voice. */
+  readonly index: number;
+  /** How this asset is named to the introducer when something goes wrong. */
+  readonly label: string;
+  readonly sourceUri: string;
+  readonly contentType: string;
+  readonly objectName: string;
+  readonly record: UploadedAsset | null;
+};
+
+/**
+ * Drafts uploaded before per-asset records existed only carry the single
+ * `mediaUploaded` flag, so their bytes are on the server under the old
+ * always-`.jpg` names. Rebuild that much rather than re-uploading (which the
+ * upsert:false URL refuses) or re-registering (which duplicates rows); the
+ * validation verdict was never persisted, so it runs again.
+ */
+function legacyRecord(objectName: string): UploadedAsset {
+  return { objectName, registered: true, validated: false };
+}
+
+/**
+ * What `uploadDraftMedia` has to do for each of a draft's assets, given what
+ * previous attempts already completed.
+ */
+export function planDraftMedia(draft: PitchDraft): readonly MediaAssetPlan[] {
+  const uploadedBeforeRecords = draft.server?.mediaUploaded === true;
+  const plans: MediaAssetPlan[] = [];
+  if (draft.recording !== null) {
+    plans.push({
+      kind: 'voice',
+      index: 0,
+      label: 'Your recording',
+      sourceUri: draft.recording.uri,
+      contentType: 'audio/mp4',
+      objectName: VOICE_OBJECT_NAME,
+      record:
+        draft.recording.upload ?? (uploadedBeforeRecords ? legacyRecord(VOICE_OBJECT_NAME) : null),
+    });
+  }
+  draft.photos.forEach((photo, index) => {
+    plans.push({
+      kind: 'photo',
+      index,
+      label: `Photo ${index + 1}`,
+      sourceUri: photo.uri,
+      contentType: photoMimeType(photo),
+      objectName: photoObjectName(photo, index),
+      record:
+        photo.upload ?? (uploadedBeforeRecords ? legacyRecord(`photo-${index + 1}.jpg`) : null),
+    });
+  });
+  return plans;
+}
+
+/**
+ * True when every asset's bytes are already on the server but at least one has
+ * no `passed` verdict — the state a submit can resolve by asking the validator
+ * again, as opposed to one that still needs an upload.
+ */
+export function hasPendingMediaValidation(draft: PitchDraft): boolean {
+  const plans = planDraftMedia(draft);
+  return (
+    plans.length > 0 &&
+    plans.every((plan) => plan.record !== null) &&
+    plans.some((plan) => plan.record?.validated === false)
+  );
 }
 
 function toDraftInputs(relationship: PitchRelationship | null): DraftInputs {
@@ -477,8 +676,8 @@ function recoverServerDraft(
       // the server; never re-upload it.
       mediaUploaded: true,
     },
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    createdAt: toIsoInstant(row.created_at),
+    updatedAt: toIsoInstant(row.updated_at),
   });
 }
 

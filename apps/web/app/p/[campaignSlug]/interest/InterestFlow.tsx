@@ -367,8 +367,13 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
       await repo.submitInterest(campaignId, trimmedNote === '' ? null : trimmedNote);
       setSubmitted(true);
     } catch (submitError: unknown) {
+      // Rethrowing here would reject this handler's promise, which React never
+      // consumes: the failure would become an unhandled rejection and the form
+      // would go silent with the button simply re-enabled. Every failure shape
+      // is reported to the user; non-Error throws are logged so the original
+      // value is not lost.
       if (!(submitError instanceof Error)) {
-        throw submitError;
+        console.error('interest submit failed with a non-Error value', submitError);
       }
       setError(errorCopy(submitError));
     } finally {

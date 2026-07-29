@@ -59,33 +59,41 @@ export function RoomView({ roomId }: RoomViewProps) {
     }
     let cancelled = false;
     const repo = new IntroRoomRepo(client);
-    void repo
-      .listMyRooms()
-      .then((rooms) => {
-        if (!cancelled) {
-          setRoom(rooms.find((candidate) => candidate.roomId === roomId) ?? null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
+
+    // Membership is re-read on every tick, not just on mount: when the other
+    // side blocks or leaves, RLS drops this room server-side and an open screen
+    // would otherwise keep showing the conversation and composer until a manual
+    // reload. A failed read is treated as transient after the first load — a
+    // dropped request must not look like a revoked room.
+    async function sync(initial: boolean): Promise<void> {
+      const rooms = await repo.listMyRooms().catch(() => null);
+      if (cancelled) {
+        return;
+      }
+      if (rooms === null) {
+        if (initial) {
           setRoom(null);
         }
-      });
+        return;
+      }
+      const match = rooms.find((candidate) => candidate.roomId === roomId) ?? null;
+      setRoom(match);
+      if (match === null) {
+        setMessages([]);
+        return;
+      }
+      await refreshMessages();
+    }
+
+    void sync(true);
+    const intervalId = window.setInterval(() => {
+      void sync(false);
+    }, POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
+      window.clearInterval(intervalId);
     };
-  }, [client, session, roomId]);
-
-  useEffect(() => {
-    if (client === null || session === null || room === null || room === undefined) {
-      return;
-    }
-    void refreshMessages();
-    const intervalId = window.setInterval(() => {
-      void refreshMessages();
-    }, POLL_INTERVAL_MS);
-    return () => window.clearInterval(intervalId);
-  }, [client, session, room, refreshMessages]);
+  }, [client, session, roomId, refreshMessages]);
 
   useEffect(() => {
     listEndRef.current?.scrollIntoView({ block: 'end' });
@@ -262,7 +270,8 @@ export function RoomView({ roomId }: RoomViewProps) {
                     </button>
                   </div>
                   <p className={flowStyles.finePrint}>
-                    Blocking hides you from each other everywhere, immediately.
+                    Blocking hides you from each other everywhere. Access is cut the moment you
+                    confirm, and an already-open room closes within seconds.
                   </p>
                 </form>
               </div>

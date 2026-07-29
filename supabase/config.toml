@@ -21,6 +21,13 @@ otp_length = 8 # mirror remote
 # Managed here: both sign-in emails must expose {{ .Token }} for the mobile
 # code path next to the web link. gotrue picks confirmation for first-time
 # emails and magic_link for returning ones — keep the two in sync.
+#
+# Neither template may link {{ .ConfirmationURL }}: that URL verifies the
+# one-time token on GET, so a mail scanner prefetching the link consumes it
+# before the recipient clicks. Both link {{ .SiteURL }}/auth/confirm with the
+# token hash instead, and the web page exchanges it only on an explicit press.
+# {{ .SiteURL }} is [auth].site_url above — a wrong value sends every recipient
+# to the wrong origin, where the token cannot be exchanged.
 [auth.email.template.magic_link]
 subject = "Your Friendword sign-in code"
 content_path = "./supabase/templates/magic_link.html"

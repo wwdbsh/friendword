@@ -54,7 +54,7 @@
             </p>
             <p style="margin: 0 0 24px; text-align: center">
               <a
-                href="{{ .ConfirmationURL }}"
+                href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email&redirect_to={{ .RedirectTo }}"
                 style="
                   display: inline-block;
                   padding: 14px 28px;

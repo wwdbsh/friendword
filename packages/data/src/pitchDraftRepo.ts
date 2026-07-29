@@ -1,10 +1,15 @@
 import { z } from 'zod';
 
-import { pitchStructureSchema, type DraftInputs, type PitchStructure } from '@friendword/contracts';
+import {
+  pitchStructureSchema,
+  type DraftInputs,
+  type PitchSceneV1,
+  type PitchStructure,
+} from '@friendword/contracts';
 import type { Session } from '@supabase/supabase-js';
 
 import type { BrowserSupabaseClient } from './client';
-import type { ConsentRequestRow, PitchAssetRow, PitchDraftRow } from './database.types';
+import type { ConsentRequestRow, Database, PitchAssetRow, PitchDraftRow } from './database.types';
 import {
   DataLayerError,
   InvalidDraftUpdateError,
@@ -24,6 +29,41 @@ export type UpdatePitchDraftInput = {
   readonly headline?: string | null;
   readonly body?: string | null;
   readonly structure?: PitchStructure | null;
+};
+
+/**
+ * Pixel dimensions of an uploaded photo, as the picker reported them. Optional
+ * end to end: the columns are nullable and every asset registered before they
+ * existed has none, so a reader must never assume a photo has dimensions.
+ */
+export type AssetDimensions = {
+  readonly width: number;
+  readonly height: number;
+};
+
+/**
+ * `width`/`height` are the nullable pitch_assets columns migration 0048 adds.
+ * Narrowed to a positive number here — this repo either measures a photo or
+ * leaves the columns out, and the DB CHECK forbids anything else.
+ */
+type PitchAssetInsert = Omit<
+  Database['public']['Tables']['pitch_assets']['Insert'],
+  'width' | 'height'
+> & {
+  readonly width?: number;
+  readonly height?: number;
+};
+
+/**
+ * `new_scene` is the 5th parameter migration 0048 adds to
+ * `submit_pitch_for_consent`. Declared as the typed scene rather than raw JSON
+ * so a caller cannot hand the RPC a shape the DB would reject.
+ */
+type SubmitPitchForConsentArgs = Omit<
+  Database['public']['Functions']['submit_pitch_for_consent']['Args'],
+  'new_scene'
+> & {
+  readonly new_scene?: PitchSceneV1 | null;
 };
 
 export type SignedAssetUpload = {
@@ -226,19 +266,24 @@ export class PitchDraftRepo {
     assetType: 'voice' | 'photo',
     fileName: string,
     sortOrder = 0,
+    dimensions?: AssetDimensions,
   ): Promise<PitchAssetRow> {
     const session = await this.getRequiredSession();
     const storagePath = buildPitchMediaPath(draftId, fileName);
     const parsedDraftId = uuidSchema.parse(draftId);
+    const payload: PitchAssetInsert = {
+      pitch_draft_id: parsedDraftId,
+      uploaded_by_user_id: session.user.id,
+      asset_type: assetType,
+      storage_path: storagePath,
+      sort_order: sortOrder,
+      // Omitted rather than sent as null when unknown: the CHECK is `> 0`, so a
+      // caller with no measurement has to leave the columns absent.
+      ...(dimensions === undefined ? {} : { width: dimensions.width, height: dimensions.height }),
+    };
     const { data, error } = await this.client
       .from('pitch_assets')
-      .insert({
-        pitch_draft_id: parsedDraftId,
-        uploaded_by_user_id: session.user.id,
-        asset_type: assetType,
-        storage_path: storagePath,
-        sort_order: sortOrder,
-      })
+      .insert(payload)
       .select()
       .single();
     if (error !== null) {
@@ -276,20 +321,28 @@ export class PitchDraftRepo {
    * Server-validated transition draft → consent_pending (0004 RPC).
    * Returns the raw consent token exactly once — only its hash is stored,
    * so the caller must hand it to the introducer's share flow immediately.
+   *
+   * `scene` is the PitchScene v1 the dater will be asked to approve. It is sent
+   * at submit because a dater who approves without editing never triggers a
+   * revision save, and their published page would then carry no motion. `null`
+   * is a real answer (no transcript segments, no photos) and leaves the revision
+   * with no scene, which the surfaces read as the legacy fallback. Passing
+   * `undefined` omits the argument entirely, for callers that predate scenes.
    */
   async submitForConsent(
     draftId: string,
     invitation?: ConsentInvitationInput,
+    scene?: PitchSceneV1 | null,
   ): Promise<ConsentSubmission> {
     await this.getRequiredSession();
     const parsedDraftId = uuidSchema.parse(draftId);
-    const args =
-      invitation === undefined
+    const args: SubmitPitchForConsentArgs = {
+      ...(invitation === undefined
         ? { draft_id: parsedDraftId }
-        : buildConsentInvitationArgs(parsedDraftId, invitation);
-    const { data, error } = await this.client.rpc('submit_pitch_for_consent', {
-      ...args,
-    });
+        : buildConsentInvitationArgs(parsedDraftId, invitation)),
+      ...(scene === undefined ? {} : { new_scene: scene }),
+    };
+    const { data, error } = await this.client.rpc('submit_pitch_for_consent', args);
     if (error !== null) {
       throw new DataLayerError('pitchDraft.submitForConsent', error);
     }

@@ -1,8 +1,19 @@
 import type { PitchStructure } from '@friendword/contracts';
 
 export type PitchPhoto = {
+  /**
+   * The pitch_assets id an approved scene refers to (migration 0048). Null for
+   * demo/placeholder imagery, which has no asset row and therefore can never be
+   * bound to a scene — those surfaces stay on the legacy runtime distribution.
+   */
+  readonly assetId: string | null;
   readonly src: string;
   readonly alt: string;
+  /**
+   * Legacy per-photo window, kept for the fixture demo. The player no longer
+   * reads these: with an approved scene it uses the scene's windows verbatim,
+   * and without one it recomputes the legacy distribution itself.
+   */
   readonly startMs: number;
   readonly endMs: number;
 };
@@ -52,18 +63,21 @@ const demoBlair = {
   isDemo: true,
   photos: [
     {
+      assetId: null,
       src: '/fixtures/blair-portrait-1.svg',
       alt: 'Illustrated portrait placeholder for Blair in a tangerine jacket',
       startMs: 0,
       endMs: 20_000,
     },
     {
+      assetId: null,
       src: '/fixtures/blair-portrait-2.svg',
       alt: 'Illustrated portrait placeholder for Blair holding a record',
       startMs: 20_000,
       endMs: 40_000,
     },
     {
+      assetId: null,
       src: '/fixtures/blair-portrait-3.svg',
       alt: 'Illustrated portrait placeholder for Blair on a sunny city walk',
       startMs: 40_000,

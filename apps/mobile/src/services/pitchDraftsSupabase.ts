@@ -2,18 +2,22 @@ import {
   buildPitchMediaPath,
   PitchDraftRepo,
   UnauthenticatedError,
+  type AssetDimensions,
   type BrowserSupabaseClient,
   type ConsentRequestRow,
   type PitchDraftRow,
 } from '@friendword/data';
-import type {
-  DraftInputs,
-  RelationshipDuration as ServerRelationshipDuration,
-  RelationshipType as ServerRelationshipType,
+import {
+  buildPitchSceneV1,
+  type DraftInputs,
+  type PitchSceneV1,
+  type RelationshipDuration as ServerRelationshipDuration,
+  type RelationshipType as ServerRelationshipType,
 } from '@friendword/contracts';
 
 import { photoMimeType, photoObjectName, putLocalFile } from './mediaFiles';
 import { requestMediaValidation, type MediaValidationOutcome } from './mediaValidation';
+import { transcriptSegmentWindows, type PitchSceneBuilder } from './pitchSceneInput';
 import { requestPitchTextModeration } from './textModeration';
 import {
   MockPitchDraftService,
@@ -227,6 +231,7 @@ export class HybridPitchDraftService implements PitchDraftService {
     private readonly validateMedia: (
       objectName: string,
     ) => Promise<MediaValidationOutcome> = requestMediaValidation,
+    private readonly buildScene: PitchSceneBuilder = buildPitchSceneV1,
   ) {}
 
   createDraft(): Promise<PitchDraft> {
@@ -496,7 +501,7 @@ export class HybridPitchDraftService implements PitchDraftService {
     if (draft.server === null) {
       throw new PitchDraftSubmissionError('Prepare this pitch before sending.');
     }
-    await this.repo.updateDraft(draft.server.draftId, {
+    const savedDraft = await this.repo.updateDraft(draft.server.draftId, {
       headline: draft.review.headline.trim(),
       body: draft.review.body.trim(),
       structure: draft.review.structure,
@@ -513,7 +518,14 @@ export class HybridPitchDraftService implements PitchDraftService {
     const invitation = invitationForFinalize(draft);
     try {
       await this.reconcileRegisteredAssets(this.repo, draft);
-      const submission = await this.repo.submitForConsent(draft.server.draftId, invitation);
+      // After the reconcile, so the scene can only reference photos the submit
+      // will actually snapshot into the revision.
+      const scene = await this.submissionScene(
+        this.repo,
+        draft.server.draftId,
+        savedDraft.transcript,
+      );
+      const submission = await this.repo.submitForConsent(draft.server.draftId, invitation, scene);
       if (draft.server.consentRequestId === null && submission.consentToken === null) {
         throw new PitchDraftSubmissionError('The approval invite was not created. Please retry.');
       }
@@ -535,6 +547,44 @@ export class HybridPitchDraftService implements PitchDraftService {
       }
       throw error;
     }
+  }
+
+  /**
+   * The PitchScene v1 to send with the consent request, or null when this pitch
+   * cannot carry one.
+   *
+   * The introducer's submit is where the scene has to be built: it is the only
+   * moment at which both the transcript and the final asset set are known, and a
+   * dater who approves without editing never saves a revision of their own — so
+   * without this their published page would have no motion at all.
+   *
+   * Null whenever the timeline cannot be derived (a manual pitch is never
+   * transcribed, and a pitch can be submitted with no photos). The consent and
+   * public surfaces then fall back to deriving windows at play time, which is
+   * what they did before scenes existed.
+   *
+   * `listAssets` failures are not swallowed: they are the same class of failure
+   * as the submit that follows, and the reconcile above already depends on that
+   * read.
+   */
+  private async submissionScene(
+    repo: PitchDraftRepository,
+    serverDraftId: string,
+    transcript: PitchDraftRow['transcript'],
+  ): Promise<PitchSceneV1 | null> {
+    const segments = transcriptSegmentWindows(transcript);
+    if (segments.length === 0) {
+      return null;
+    }
+    // listAssets orders by sort_order, which is the photo order the introducer
+    // arranged and the order the page plays them in.
+    const photoAssetIds = (await repo.listAssets(serverDraftId))
+      .filter((row) => row.asset_type === 'photo')
+      .map((row) => row.id);
+    if (photoAssetIds.length === 0) {
+      return null;
+    }
+    return this.buildScene({ photoAssetIds, segments });
   }
 
   /**
@@ -625,7 +675,13 @@ export class HybridPitchDraftService implements PitchDraftService {
       await persist(record);
     }
     if (!record.registered) {
-      await repo.registerAsset(draftId, plan.kind, record.objectName, plan.index);
+      await repo.registerAsset(
+        draftId,
+        plan.kind,
+        record.objectName,
+        plan.index,
+        plan.dimensions ?? undefined,
+      );
       record = { ...record, registered: true };
       await persist(record);
     }
@@ -696,7 +752,24 @@ export type MediaAssetPlan = {
   readonly contentType: string;
   readonly objectName: string;
   readonly record: UploadedAsset | null;
+  /**
+   * Pixel size to record with the asset, so the render worker can letterbox a
+   * photo without downloading it first. Null for the voice track, and for a
+   * photo whose picker never reported a usable size — the columns are nullable
+   * and CHECK `> 0`, so a missing measurement is left absent rather than faked.
+   */
+  readonly dimensions: AssetDimensions | null;
 };
+
+/** The picker's reported size, or null when it is not a size a photo can have. */
+function photoDimensions(photo: PitchPhoto): AssetDimensions | null {
+  const width = Math.round(photo.width);
+  const height = Math.round(photo.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  return { width, height };
+}
 
 /**
  * Drafts uploaded before per-asset records existed only carry the single
@@ -741,6 +814,7 @@ export function planDraftMedia(draft: PitchDraft): readonly MediaAssetPlan[] {
       objectName: VOICE_OBJECT_NAME,
       record:
         draft.recording.upload ?? (uploadedBeforeRecords ? legacyRecord(VOICE_OBJECT_NAME) : null),
+      dimensions: null,
     });
   }
   draft.photos.forEach((photo, index) => {
@@ -759,6 +833,7 @@ export function planDraftMedia(draft: PitchDraft): readonly MediaAssetPlan[] {
         (uploadedBeforeRecords && photo.assetKey === undefined
           ? legacyRecord(`photo-${index + 1}.jpg`)
           : null),
+      dimensions: photoDimensions(photo),
     });
   });
   return plans;

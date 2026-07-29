@@ -1,0 +1,388 @@
+'use client';
+
+import Image from 'next/image';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+
+import type { PitchSceneV1 } from '@friendword/contracts';
+
+import type { PitchCaption } from '@/fixtures/pitch';
+import {
+  activeMotionPhotoIndex,
+  legacyMotionWindows,
+  motionWindowSignature,
+  sceneDurationDriftMs,
+  sceneMotionWindows,
+  type MotionWindow,
+} from '@/pitch/motion';
+import { activeWindowIndex, type SceneWindow } from '@/pitch/scenes';
+
+import styles from './PitchPlayer.module.css';
+
+// The one player for an approved motion pitch. Both surfaces that must agree —
+// the Dater's consent preview and the published page — render THIS component, so
+// "what I approved" and "what publishes" cannot drift apart by construction.
+//
+// With an approved scene the photo windows come straight out of the scene JSON.
+// The <audio> element's metadata duration is used for the clock and the time
+// readout only; it never re-derives a window, because it differs per browser and
+// the Dater approved the scene, not the browser's measurement.
+
+export type MotionPhoto = {
+  /** pitch_assets id, or null for imagery no scene can reference (fixtures). */
+  readonly assetId: string | null;
+  readonly src: string;
+  readonly alt: string;
+};
+
+export type MotionPitchPlayerProps = {
+  readonly photos: readonly MotionPhoto[];
+  readonly scene: PitchSceneV1 | null;
+  /** Segment-level captions with the provider's real timestamps. */
+  readonly captions: readonly PitchCaption[];
+  readonly audioUrl: string | null;
+  /** Duration to show before the media reports its own; 0 when unknown. */
+  readonly fallbackDurationMs: number;
+  /** Surface-specific overlay (who is being introduced). */
+  readonly header: ReactNode;
+  readonly location: string | null;
+  /** Shown instead of the transport when there is no recording (CP-3 honesty). */
+  readonly noAudioNote: string;
+  /**
+   * 'plain' skips next/image. Required wherever the image is a signed storage URL
+   * whose host is not on the optimizer allowlist (the consent preview), since the
+   * optimizer would fail the request rather than show the Dater their own photo.
+   */
+  readonly imageMode?: 'optimized' | 'plain';
+  readonly playLabel: string;
+  readonly pauseLabel: string;
+  /** Slot rendered at the bottom of the stage (e.g. the interest CTA). */
+  readonly children?: ReactNode;
+};
+
+// The waveform is decoded from the real audio and has three honest states —
+// never a fixed fake signal.
+type WaveformState = readonly number[] | 'loading' | 'error';
+
+function formatTime(milliseconds: number): string {
+  const seconds = Math.floor(milliseconds / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function PlayIcon({ paused }: { readonly paused: boolean }) {
+  return paused ? (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m8 5 11 7L8 19z" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 5h4v14H7zm7 0h4v14h-4z" />
+    </svg>
+  );
+}
+
+export function MotionPitchPlayer({
+  photos,
+  scene,
+  captions,
+  audioUrl,
+  fallbackDurationMs,
+  header,
+  location,
+  noAudioNote,
+  imageMode = 'optimized',
+  playLabel,
+  pauseLabel,
+  children,
+}: MotionPitchPlayerProps) {
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [measuredDurationMs, setMeasuredDurationMs] = useState<number | null>(null);
+  const [waveform, setWaveform] = useState<WaveformState>(audioUrl === null ? 'error' : 'loading');
+  const [isPlaying, setIsPlaying] = useState(false);
+  const elapsedRef = useRef(0);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const hasRealAudio = audioUrl !== null;
+
+  const photoAssetIds = useMemo(() => photos.map((photo) => photo.assetId), [photos]);
+  const approvedWindows = useMemo(
+    () => sceneMotionWindows(scene, photoAssetIds),
+    [scene, photoAssetIds],
+  );
+
+  const segmentWindows: readonly SceneWindow[] = useMemo(
+    () => captions.map((caption) => ({ startMs: caption.startMs, endMs: caption.endMs })),
+    [captions],
+  );
+
+  // Display duration only. The approved scene's duration wins over the
+  // fallback, and the media's own duration wins over both for the readout.
+  const durationMs = measuredDurationMs ?? scene?.durationMs ?? fallbackDurationMs;
+
+  const legacyWindows = useMemo(
+    () => legacyMotionWindows(photos.length, durationMs, segmentWindows),
+    [photos.length, durationMs, segmentWindows],
+  );
+  // The approved scene is used verbatim; the runtime distribution only runs when
+  // there is no scene to honour (A4).
+  const windows: readonly MotionWindow[] = approvedWindows ?? legacyWindows;
+
+  // Verification only: a scene whose duration disagrees with the media is worth
+  // knowing about, but the approved windows are not adjusted for it.
+  const driftMs = sceneDurationDriftMs(scene, measuredDurationMs);
+  const reportedDriftRef = useRef(false);
+  useEffect(() => {
+    if (driftMs === null || Math.abs(driftMs) <= 1_000 || reportedDriftRef.current) {
+      return;
+    }
+    reportedDriftRef.current = true;
+    console.warn(
+      `MotionPitchPlayer: media duration differs from the approved scene by ${driftMs}ms; playing the approved windows unchanged`,
+    );
+  }, [driftMs]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!hasRealAudio || audio === null) {
+      return;
+    }
+    if (isPlaying) {
+      void audio.play().catch(() => setIsPlaying(false));
+    } else {
+      audio.pause();
+    }
+  }, [isPlaying, hasRealAudio]);
+
+  // Derive the waveform from the actual audio. On any failure we surface an
+  // accessible error state rather than silently keeping a fake placeholder.
+  useEffect(() => {
+    if (audioUrl === null) {
+      return;
+    }
+    let cancelled = false;
+    setWaveform('loading');
+    void (async () => {
+      try {
+        const response = await fetch(audioUrl);
+        if (!response.ok) {
+          if (!cancelled) setWaveform('error');
+          return;
+        }
+        const buffer = await response.arrayBuffer();
+        const context = new AudioContext();
+        try {
+          const decoded = await context.decodeAudioData(buffer);
+          const channel = decoded.getChannelData(0);
+          const barCount = 48;
+          const blockSize = Math.max(1, Math.floor(channel.length / barCount));
+          const peaks: number[] = [];
+          let maxPeak = 0;
+          for (let bar = 0; bar < barCount; bar += 1) {
+            let sum = 0;
+            const start = bar * blockSize;
+            for (
+              let index = start;
+              index < start + blockSize && index < channel.length;
+              index += 1
+            ) {
+              sum += Math.abs(channel[index] ?? 0);
+            }
+            const average = sum / blockSize;
+            peaks.push(average);
+            maxPeak = Math.max(maxPeak, average);
+          }
+          if (!cancelled) {
+            if (maxPeak > 0) {
+              setWaveform(peaks.map((peak) => Math.max(12, Math.round((peak / maxPeak) * 100))));
+            } else {
+              setWaveform('error');
+            }
+          }
+        } finally {
+          void context.close();
+        }
+      } catch {
+        if (!cancelled) setWaveform('error');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [audioUrl]);
+
+  const progress = durationMs > 0 ? Math.min(1, elapsedMs / durationMs) : 0;
+  const progressPercent = Math.round(progress * 100);
+
+  const activePhotoIndex = hasRealAudio ? activeMotionPhotoIndex(windows, elapsedMs) : 0;
+
+  // Captions are segment-level (real provider timestamps), not fabricated
+  // per-word highlights. The active segment is shown as a whole.
+  const activeCaption = hasRealAudio ? captions[activeWindowIndex(captions, elapsedMs)] : undefined;
+
+  const togglePlayback = () => {
+    if (!hasRealAudio) {
+      return;
+    }
+    if (elapsedRef.current >= durationMs && durationMs > 0) {
+      elapsedRef.current = 0;
+      setElapsedMs(0);
+      if (audioRef.current !== null) {
+        audioRef.current.currentTime = 0;
+      }
+    }
+    setIsPlaying((current) => !current);
+  };
+
+  return (
+    <div
+      className={styles.playerShell}
+      data-motion-player
+      // QA/regression hooks: which timeline is playing, and exactly which
+      // windows. The consent preview and the published page must print the same
+      // signature for the same approved scene.
+      data-motion-source={approvedWindows === null ? 'legacy' : 'scene'}
+      data-motion-windows={motionWindowSignature(windows)}
+      data-motion-active-photo={activePhotoIndex}
+    >
+      {audioUrl !== null && (
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          preload="metadata"
+          onLoadedMetadata={(event) => {
+            const seconds = event.currentTarget.duration;
+            if (Number.isFinite(seconds) && seconds > 0) {
+              setMeasuredDurationMs(seconds * 1000);
+            }
+          }}
+          onTimeUpdate={(event) => {
+            const nextElapsed = event.currentTarget.currentTime * 1000;
+            elapsedRef.current = nextElapsed;
+            setElapsedMs(nextElapsed);
+          }}
+          onEnded={() => setIsPlaying(false)}
+        />
+      )}
+      <article className={styles.stage}>
+        <div className={styles.photos}>
+          {photos.map((photo, index) =>
+            imageMode === 'plain' ? (
+              <img
+                className={`${styles.photo} ${index === activePhotoIndex ? styles.photoActive : ''}`}
+                key={photo.src}
+                src={photo.src}
+                alt={photo.alt}
+                aria-hidden={index !== activePhotoIndex}
+                data-motion-photo={photo.assetId ?? ''}
+                loading={index === 0 ? 'eager' : 'lazy'}
+                decoding="async"
+              />
+            ) : (
+              <Image
+                className={`${styles.photo} ${index === activePhotoIndex ? styles.photoActive : ''}`}
+                key={photo.src}
+                src={photo.src}
+                alt={photo.alt}
+                aria-hidden={index !== activePhotoIndex}
+                data-motion-photo={photo.assetId ?? ''}
+                fill
+                priority={index === 0}
+                sizes="(max-width: 700px) 100vw, 506px"
+              />
+            ),
+          )}
+          <div className={styles.photoWash} />
+        </div>
+
+        {header}
+
+        {location !== null && <div className={styles.location}>{location}</div>}
+
+        {hasRealAudio ? (
+          activeCaption === undefined ? (
+            // No transcript segments: don't fabricate a caption timeline.
+            <div className={styles.caption} data-testid="no-captions">
+              Captions aren’t available for this recording yet.
+            </div>
+          ) : (
+            <div className={styles.caption} aria-live="polite" data-testid="segment-caption">
+              {activeCaption.text}
+            </div>
+          )
+        ) : (
+          // CP-3 honesty: no recording here, so the whole written pitch is shown
+          // at once instead of pretending to play.
+          <div className={styles.caption} data-testid="written-pitch">
+            {captions.map((caption) => (
+              <span key={caption.startMs}>{caption.text} </span>
+            ))}
+          </div>
+        )}
+
+        {hasRealAudio ? (
+          <div className={styles.controls}>
+            <button
+              className={styles.playButton}
+              type="button"
+              onClick={togglePlayback}
+              aria-label={isPlaying ? pauseLabel : playLabel}
+            >
+              <PlayIcon paused={!isPlaying} />
+            </button>
+
+            <div className={styles.timeline}>
+              {Array.isArray(waveform) ? (
+                <svg
+                  className={`${styles.waveform} ${isPlaying ? styles.waveformPlaying : ''}`}
+                  viewBox="0 0 100 100"
+                  preserveAspectRatio="none"
+                  role="img"
+                  aria-label={`Pitch progress ${progressPercent} percent`}
+                >
+                  {waveform.map((level, index) => {
+                    const barWidth = 100 / waveform.length;
+                    const played = (index + 1) / waveform.length <= progress;
+                    return (
+                      <rect
+                        className={played ? styles.barPlayed : styles.barWaiting}
+                        key={`${level}-${index}`}
+                        x={index * barWidth}
+                        y={100 - level}
+                        width={barWidth * 0.56}
+                        height={level}
+                        rx={barWidth * 0.28}
+                      />
+                    );
+                  })}
+                </svg>
+              ) : (
+                // Accessible fallback. Progress still tracks the real audio; we
+                // never render a fabricated signal.
+                <div className={styles.waveformFallback}>
+                  <div
+                    className={styles.progressTrack}
+                    role="img"
+                    aria-label={`Pitch progress ${progressPercent} percent`}
+                  >
+                    <div className={styles.progressFill} style={{ width: `${progressPercent}%` }} />
+                  </div>
+                  <p className={styles.waveformStatus} role="status">
+                    {waveform === 'loading'
+                      ? 'Analyzing the recording…'
+                      : 'Couldn’t load the audio waveform — playback still works.'}
+                  </p>
+                </div>
+              )}
+              <div className={styles.timeRow}>
+                <span>{formatTime(elapsedMs)}</span>
+                <span>{formatTime(durationMs)}</span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className={styles.noAudioNote}>{noAudioNote}</p>
+        )}
+
+        {children}
+      </article>
+    </div>
+  );
+}

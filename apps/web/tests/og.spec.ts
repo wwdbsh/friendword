@@ -45,6 +45,7 @@ test('keeps the real campaign fallback branded and isolated from Blair fixtures'
     datingIntent: null,
     voiceUrl: null,
     photos: [],
+    scene: null,
   };
 
   const view = fromPublishedPitch(publishedPitch);

@@ -6,13 +6,13 @@ BEGIN;
 DO $$
 BEGIN
   -- 0047 replaced the 4-arg function with a 6-arg one whose new_structure and
-  -- retained_hard_claims default to NULL; the 4-arg call sites below still
-  -- resolve to it.
+  -- retained_hard_claims default to NULL; 0048 widened it again with new_scene.
+  -- The 4-arg call sites below still resolve to it.
   IF to_regprocedure(
-    'public.create_dater_revision(uuid,text,text,uuid[],jsonb,text[])'
+    'public.create_dater_revision(uuid,text,text,uuid[],jsonb,text[],jsonb)'
   ) IS NULL THEN
     RAISE EXCEPTION
-      'AUDIT2-CP-1: create_dater_revision(uuid,text,text,uuid[],jsonb,text[]) RPC missing';
+      'AUDIT2-CP-1: create_dater_revision(uuid,text,text,uuid[],jsonb,text[],jsonb) RPC missing';
   END IF;
   IF to_regprocedure('public.set_publish_preferences(uuid,jsonb,text,integer)') IS NULL THEN
     RAISE EXCEPTION 'AUDIT2-CP-1: set_publish_preferences(uuid,jsonb,text,integer) RPC missing';

@@ -639,6 +639,9 @@ describe('ConsentRepo', () => {
       transcript: { text: 'Blair is the best. ', segments: [] },
       dater_edited: false,
       structure_reviewed: true,
+      // Migration 0048 columns. NULL together: no approved motion timeline.
+      scene_definition: null,
+      scene_hash: null,
       created_at: '2026-07-13T00:00:00Z',
     };
     mocks.consentRevisionSelect.mockReturnValue({
@@ -684,11 +687,122 @@ describe('ConsentRepo', () => {
       // Fifth audit D1: the transcript the Dater must be shown at consent is
       // the revision's own frozen snapshot, not the live draft's.
       transcriptText: 'Blair is the best. ',
+      transcriptSegments: [],
+      // No segments -> no legal scene; the preview falls back (A4).
+      scene: null,
       daterEdited: false,
       structureReviewed: true,
     });
     expect(filterByDraftId).toHaveBeenCalledWith('pitch_draft_id', draftId);
     expect(filterByAssetIds).toHaveBeenCalledWith('id', [firstPhotoId, secondPhotoId]);
+  });
+
+  // MOTION PHASE 1: the Dater approves a scene, so the consent surface has to
+  // read back the scene the SERVER stored, plus the segment timings the scene
+  // and the captions are both derived from.
+  describe('scene_definition / scene_hash (migration 0048)', () => {
+    function revisionWith(overrides: Record<string, unknown>) {
+      mocks.consentRequestSelect.mockReturnValue({
+        eq: () => ({ single: async () => ({ data: { revision_id: revisionId }, error: null }) }),
+      });
+      mocks.consentRevisionSelect.mockReturnValue({
+        eq: () => ({
+          eq: () => ({
+            single: async () => ({
+              data: {
+                id: revisionId,
+                pitch_draft_id: draftId,
+                revision_number: 4,
+                headline: 'Headline',
+                body: 'Body',
+                structure: null,
+                asset_ids: [],
+                voice_asset_path: null,
+                content_hash: 'hash',
+                created_at: '2026-07-13T00:00:00Z',
+                ...overrides,
+              },
+              error: null,
+            }),
+          }),
+        }),
+      });
+      return new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+    }
+
+    const storedScene = {
+      schemaVersion: 1,
+      canvas: { width: 1080, height: 1920, fps: 30 },
+      durationMs: 24_000,
+      scenes: [
+        { assetId: firstPhotoId, startMs: 0, endMs: 12_000 },
+        { assetId: secondPhotoId, startMs: 12_000, endMs: 24_000 },
+      ],
+    };
+
+    it('exposes the stored scene, its server hash and the segment timings', async () => {
+      signedInSession();
+      const repo = revisionWith({
+        scene_definition: storedScene,
+        scene_hash: 'a'.repeat(64),
+        transcript: {
+          text: 'Blair is the best.',
+          segments: [
+            { start: 0, end: 12, text: 'Blair is the best.' },
+            { start: 12, end: 24, text: 'Truly.' },
+          ],
+        },
+      });
+
+      const review = await repo.getConsentReview(draftId);
+
+      expect(review.scene).toEqual(storedScene);
+      // The hash is the server's; the client only carries it.
+      expect(review.revision.scene_hash).toBe('a'.repeat(64));
+      expect(review.transcriptSegments).toEqual([
+        { startMs: 0, endMs: 12_000, text: 'Blair is the best.' },
+        { startMs: 12_000, endMs: 24_000, text: 'Truly.' },
+      ]);
+    });
+
+    it('reads a legacy revision with no scene columns as scene: null', async () => {
+      signedInSession();
+      const repo = revisionWith({});
+
+      await expect(repo.getConsentReview(draftId)).resolves.toMatchObject({ scene: null });
+    });
+
+    it('refuses a stored scene that breaks the 1000ms floor instead of playing a strobe', async () => {
+      signedInSession();
+      const repo = revisionWith({
+        scene_definition: {
+          ...storedScene,
+          scenes: [
+            { assetId: firstPhotoId, startMs: 0, endMs: 30 },
+            { assetId: secondPhotoId, startMs: 30, endMs: 24_000 },
+          ],
+        },
+        scene_hash: 'b'.repeat(64),
+      });
+
+      await expect(repo.getConsentReview(draftId)).resolves.toMatchObject({ scene: null });
+    });
+
+    it('refuses a stored scene with a gap in its coverage', async () => {
+      signedInSession();
+      const repo = revisionWith({
+        scene_definition: {
+          ...storedScene,
+          scenes: [
+            { assetId: firstPhotoId, startMs: 0, endMs: 10_000 },
+            { assetId: secondPhotoId, startMs: 14_000, endMs: 24_000 },
+          ],
+        },
+        scene_hash: 'c'.repeat(64),
+      });
+
+      await expect(repo.getConsentReview(draftId)).resolves.toMatchObject({ scene: null });
+    });
   });
 
   it('flags a dater-edited revision so approval demands a confirmation', async () => {
@@ -1073,6 +1187,82 @@ describe('ConsentRepo', () => {
     });
   });
 
+  // MOTION PHASE 1: a save either freezes a scene or says nothing about it.
+  // Passing `new_scene: null` would be a third meaning the RPC does not have.
+  describe('new_scene (migration 0048)', () => {
+    const scene = {
+      schemaVersion: 1 as const,
+      canvas: { width: 1080, height: 1920, fps: 30 },
+      durationMs: 24_000,
+      scenes: [
+        { assetId: firstPhotoId, startMs: 0, endMs: 12_000 },
+        { assetId: secondPhotoId, startMs: 12_000, endMs: 24_000 },
+      ],
+    };
+
+    beforeEach(() => {
+      signedInSession();
+      mocks.rpc.mockResolvedValue({
+        data: [{ revision_id: revisionId, revision_number: 6 }],
+        error: null,
+      });
+    });
+
+    it('sends the scene as the seventh argument when the Dater saves one', async () => {
+      const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+      await repo.createDaterRevision({
+        draftId,
+        headline: 'Headline',
+        body: 'Body',
+        includedAssetIds: [firstPhotoId, secondPhotoId],
+        newScene: scene,
+      });
+
+      expect(mocks.rpc).toHaveBeenCalledWith('create_dater_revision', {
+        draft_id: draftId,
+        new_headline: 'Headline',
+        new_body: 'Body',
+        included_asset_ids: [firstPhotoId, secondPhotoId],
+        new_scene: scene,
+      });
+    });
+
+    it('omits the key entirely when there is no scene, so the server forward-copies', async () => {
+      const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+      await repo.createDaterRevision({
+        draftId,
+        headline: 'Headline',
+        body: 'Body',
+        includedAssetIds: [firstPhotoId],
+      });
+
+      expect(mocks.rpc.mock.calls.at(-1)?.[1]).not.toHaveProperty('new_scene');
+    });
+
+    it('refuses to send a scene that breaks the safety floors', async () => {
+      const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+      await expect(
+        repo.createDaterRevision({
+          draftId,
+          headline: 'Headline',
+          body: 'Body',
+          includedAssetIds: [firstPhotoId, secondPhotoId],
+          newScene: {
+            ...scene,
+            scenes: [
+              { assetId: firstPhotoId, startMs: 0, endMs: 30 },
+              { assetId: secondPhotoId, startMs: 30, endMs: 24_000 },
+            ],
+          },
+        }),
+      ).rejects.toThrow();
+      expect(mocks.rpc).not.toHaveBeenCalled();
+    });
+  });
+
   it('refuses to cut a revision when the edited structure is invalid', async () => {
     signedInSession();
     const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
@@ -1211,8 +1401,90 @@ describe('ConsentRepo', () => {
       asset_type: 'photo',
       storage_path: `pitch-media/${draftId}/dater-123.jpg`,
       sort_order: 5,
+      // Migration 0048. No createImageBitmap in this environment, so the size is
+      // unknown — recorded as NULL, never guessed, and never a blocked upload.
+      width: null,
+      height: null,
     });
     expect(result).toEqual(registered);
+  });
+
+  // MOTION PHASE 1: the render worker letterboxes each photo into the 1080x1920
+  // canvas, so the Dater's own web upload has to record its source pixel size.
+  it('records the decoded pixel size of a dater web upload', async () => {
+    signedInSession();
+    const fileBody = new ArrayBuffer(8);
+    const close = vi.fn();
+    const createImageBitmap = vi.fn(async () => ({ width: 1200, height: 1600, close }));
+    const blobParts: unknown[] = [];
+    class BlobStub {
+      constructor(parts: readonly ArrayBuffer[], options?: { readonly type?: string }) {
+        blobParts.push({ parts, options });
+      }
+    }
+    vi.stubGlobal('createImageBitmap', createImageBitmap);
+    vi.stubGlobal('Blob', BlobStub);
+    try {
+      mocks.consentAssetSelect.mockReturnValue({
+        eq: () => ({
+          order: () => ({ limit: async () => ({ data: [], error: null }) }),
+        }),
+      });
+      mocks.signedUpload.mockResolvedValue({
+        data: { token: 'signed-token', signedUrl: 'https://storage.example/upload' },
+        error: null,
+      });
+      mocks.uploadSigned.mockResolvedValue({ data: { path: 'x' }, error: null });
+      mocks.draftInsert.mockReturnValue({
+        select: () => ({ single: async () => ({ data: { id: firstPhotoId }, error: null }) }),
+      });
+      const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+      await repo.uploadDaterPhoto(draftId, 'dater-123.png', fileBody, 'image/png');
+
+      expect(mocks.draftInsert).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 1200, height: 1600 }),
+      );
+      expect(blobParts).toEqual([{ parts: [fileBody], options: { type: 'image/png' } }]);
+      // The bitmap is released even on the success path.
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('registers a dater photo with a null size when the decode fails', async () => {
+    signedInSession();
+    vi.stubGlobal(
+      'createImageBitmap',
+      vi.fn(async () => {
+        throw new Error('unsupported image');
+      }),
+    );
+    vi.stubGlobal('Blob', class {});
+    try {
+      mocks.consentAssetSelect.mockReturnValue({
+        eq: () => ({ order: () => ({ limit: async () => ({ data: [], error: null }) }) }),
+      });
+      mocks.signedUpload.mockResolvedValue({
+        data: { token: 'signed-token', signedUrl: 'https://storage.example/upload' },
+        error: null,
+      });
+      mocks.uploadSigned.mockResolvedValue({ data: { path: 'x' }, error: null });
+      mocks.draftInsert.mockReturnValue({
+        select: () => ({ single: async () => ({ data: { id: firstPhotoId }, error: null }) }),
+      });
+      const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+      await expect(
+        repo.uploadDaterPhoto(draftId, 'dater-123.jpg', new ArrayBuffer(8), 'image/jpeg'),
+      ).resolves.toMatchObject({ id: firstPhotoId });
+      expect(mocks.draftInsert).toHaveBeenCalledWith(
+        expect.objectContaining({ width: null, height: null }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('sends request-changes and decline responses through the consent response RPC', async () => {
@@ -1520,10 +1792,61 @@ describe('getPublishedPitchBySlug', () => {
       voiceUrl: `https://storage.example/${draftRow.id}/voice.m4a`,
       photos: [
         {
+          assetId: '40000000-0000-0000-0000-000000000001',
           url: `https://storage.example/${draftRow.id}/photo-1.jpg`,
           sortOrder: 0,
         },
       ],
+      // draftRow has no `scene_definition`: a row published before migration
+      // 0048, so the player falls back to the legacy runtime distribution (A4).
+      scene: null,
+    });
+  });
+
+  // MOTION PHASE 1: the public page replays the scene the Dater approved, so it
+  // has to come off the published draft's projection — not be recomputed here.
+  // `draftRow` is a fixed object, not an echo of the requested keys, so reading
+  // a column migration 0048 never creates makes this fail.
+  it('projects pitch_drafts.scene_definition onto the published pitch', async () => {
+    const scene = {
+      schemaVersion: 1,
+      canvas: { width: 1080, height: 1920, fps: 30 },
+      durationMs: 18_000,
+      scenes: [{ assetId: '40000000-0000-0000-0000-000000000001', startMs: 0, endMs: 18_000 }],
+    };
+    configurePublishedPitchClient(campaignRow, {
+      draft: { ...draftRow, scene_definition: scene, scene_hash: 'd'.repeat(64) },
+    });
+    const client = createServiceClient('https://project.example', 'service-key');
+
+    const pitch = await getPublishedPitchBySlug(client, 'blair-abc123');
+
+    expect(pitch?.scene).toEqual(scene);
+    // The scene binds to an asset the page already renders.
+    expect(pitch?.photos.map((photo) => photo.assetId)).toEqual([
+      '40000000-0000-0000-0000-000000000001',
+    ]);
+  });
+
+  it('reads a published scene that breaks the safety floors as no scene', async () => {
+    configurePublishedPitchClient(campaignRow, {
+      draft: {
+        ...draftRow,
+        scene_definition: {
+          schemaVersion: 1,
+          canvas: { width: 1080, height: 1920, fps: 30 },
+          durationMs: 18_000,
+          scenes: [
+            { assetId: '40000000-0000-0000-0000-000000000001', startMs: 0, endMs: 40 },
+            { assetId: '40000000-0000-0000-0000-000000000002', startMs: 40, endMs: 18_000 },
+          ],
+        },
+      },
+    });
+    const client = createServiceClient('https://project.example', 'service-key');
+
+    await expect(getPublishedPitchBySlug(client, 'blair-abc123')).resolves.toMatchObject({
+      scene: null,
     });
   });
 

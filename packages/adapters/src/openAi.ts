@@ -18,6 +18,17 @@ const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 const TRANSCRIBE_MODEL = 'whisper-1';
 const STRUCTURE_MODEL = 'gpt-4o-mini';
 const MODERATION_MODEL = 'omni-moderation-latest';
+/**
+ * Both granularities, always. Sending 'word' alone makes the API omit
+ * `segments`, and every caption line and photo scene boundary is derived from
+ * segments — word timings are additive on top (A7).
+ *
+ * The multipart field name carries the brackets: the API reference documents the
+ * parameter as `timestamp_granularities[]` and its curl example repeats
+ * `-F "timestamp_granularities[]=word"` per element, which is how an array
+ * reaches a multipart/form-data endpoint.
+ */
+const TIMESTAMP_GRANULARITIES = ['word', 'segment'] as const;
 
 export class ProviderRequestError extends Error {
   override readonly name = 'ProviderRequestError';
@@ -45,6 +56,9 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
     // English-first MVP (Slice 8 decision): without a language hint, Whisper
     // can misdetect accented English and return a translated transcript.
     form.append('language', 'en');
+    for (const granularity of TIMESTAMP_GRANULARITIES) {
+      form.append('timestamp_granularities[]', granularity);
+    }
 
     const response = await fetch(`${OPENAI_BASE_URL}/audio/transcriptions`, {
       method: 'POST',
@@ -62,6 +76,11 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
         readonly start?: number;
         readonly end?: number;
         readonly text?: string;
+      }[];
+      readonly words?: readonly {
+        readonly start?: number;
+        readonly end?: number;
+        readonly word?: string;
       }[];
     };
     if (typeof data.text !== 'string' || data.text.trim() === '') {
@@ -82,10 +101,25 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
         text: (segment.text as string).trim(),
       }));
 
+    const words = (data.words ?? [])
+      .filter(
+        (word) =>
+          typeof word.start === 'number' &&
+          typeof word.end === 'number' &&
+          typeof word.word === 'string' &&
+          word.word.trim() !== '',
+      )
+      .map((word) => ({
+        start: word.start as number,
+        end: word.end as number,
+        word: (word.word as string).trim(),
+      }));
+
     return {
       text: data.text,
       language: typeof data.language === 'string' ? data.language : 'en',
       segments,
+      words,
     };
   }
 }

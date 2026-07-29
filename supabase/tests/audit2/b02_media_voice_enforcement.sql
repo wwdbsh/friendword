@@ -6,8 +6,11 @@ BEGIN
   IF to_regclass('public.media_validations') IS NULL THEN
     RAISE EXCEPTION 'AUDIT2-P0-2: media_validations is missing';
   END IF;
-  IF to_regprocedure('public.submit_pitch_for_consent(uuid,text,text,text)') IS NULL THEN
-    RAISE EXCEPTION 'AUDIT2-P0-2: submit_pitch_for_consent(uuid,text,text,text) RPC missing';
+  -- 0048 replaced the 4-arg function with a 5-arg one whose new_scene defaults
+  -- to NULL; the shorter call sites below still resolve to it.
+  IF to_regprocedure('public.submit_pitch_for_consent(uuid,text,text,text,jsonb)') IS NULL THEN
+    RAISE EXCEPTION
+      'AUDIT2-P0-2: submit_pitch_for_consent(uuid,text,text,text,jsonb) RPC missing';
   END IF;
 END;
 $$;

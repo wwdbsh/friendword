@@ -3,8 +3,11 @@ BEGIN;
 
 DO $$
 BEGIN
-  IF to_regprocedure('public.submit_pitch_for_consent(uuid,text,text,text)') IS NULL THEN
-    RAISE EXCEPTION 'AUDIT2-P0-7: submit_pitch_for_consent(uuid,text,text,text) RPC missing';
+  -- 0048 replaced the 4-arg function with a 5-arg one whose new_scene defaults
+  -- to NULL; the shorter call sites below still resolve to it.
+  IF to_regprocedure('public.submit_pitch_for_consent(uuid,text,text,text,jsonb)') IS NULL THEN
+    RAISE EXCEPTION
+      'AUDIT2-P0-7: submit_pitch_for_consent(uuid,text,text,text,jsonb) RPC missing';
   END IF;
   IF to_regprocedure('public.claim_consent_request(text)') IS NULL THEN
     RAISE EXCEPTION 'AUDIT2-P0-7: claim_consent_request(text) RPC missing';

@@ -120,6 +120,52 @@ describe('PitchDraftRepo.registerAsset', () => {
     ]);
   });
 
+  it('records the pixel dimensions the caller measured', async () => {
+    const insertCalls: unknown[] = [];
+    installTables({
+      insert: () => ({ data: EXISTING_ROW, error: null }),
+      select: () => ({ data: null, error: null }),
+      selectCalls: [],
+      insertCalls,
+    });
+    const repo = new PitchDraftRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await repo.registerAsset(DRAFT_ID, 'photo', 'photo-abc123.jpg', 2, {
+      width: 900,
+      height: 1600,
+    });
+
+    expect(insertCalls).toEqual([
+      {
+        pitch_draft_id: DRAFT_ID,
+        uploaded_by_user_id: USER_ID,
+        asset_type: 'photo',
+        storage_path: STORAGE_PATH,
+        sort_order: 2,
+        width: 900,
+        height: 1600,
+      },
+    ]);
+  });
+
+  it('omits the dimension columns entirely when nothing measured them', async () => {
+    // The columns are nullable with CHECK (> 0), so an unmeasured asset has to
+    // leave them absent rather than send a placeholder the CHECK would refuse.
+    const insertCalls: unknown[] = [];
+    installTables({
+      insert: () => ({ data: EXISTING_ROW, error: null }),
+      select: () => ({ data: null, error: null }),
+      selectCalls: [],
+      insertCalls,
+    });
+    const repo = new PitchDraftRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await repo.registerAsset(DRAFT_ID, 'voice', 'photo-abc123.jpg');
+
+    expect(Object.keys(insertCalls[0] as Record<string, unknown>)).not.toContain('width');
+    expect(Object.keys(insertCalls[0] as Record<string, unknown>)).not.toContain('height');
+  });
+
   it('treats a unique violation as the registration having already landed', async () => {
     // The window this closes: the insert commits but its response is lost, so
     // the caller retries. pitch_assets is UNIQUE (pitch_draft_id, storage_path),

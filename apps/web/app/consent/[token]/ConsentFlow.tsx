@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import {
+  buildPitchSceneV1,
   characterLength,
   DATER_HARD_CLAIM_ERRORS,
   DATER_PITCH_FIELD_LIMITS,
@@ -12,6 +13,7 @@ import {
   deriveDaterPitchHeadline,
   rendersBlank,
   type DaterPitchStructureEdit,
+  type PitchSceneV1,
 } from '@friendword/contracts';
 import {
   ageFromBirthDate,
@@ -28,6 +30,7 @@ import {
 } from '@friendword/data';
 
 import { EmailSignIn } from '@/components/EmailSignIn';
+import { MotionPitchPlayer } from '@/components/MotionPitchPlayer';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { requestDaterPitchModeration } from '@/lib/moderateText';
 
@@ -158,6 +161,14 @@ function claimErrorDetail(error: unknown): string {
 }
 
 function claimErrorMessage(detail: string): string {
+  // MOTION PHASE 1: approve_and_publish_pitch refuses to publish when the
+  // approved scene references a different set of photos than the ones being
+  // included — it deletes the excluded assets, so publishing would leave the
+  // timeline pointing at nothing. Name the fix instead of "something went
+  // wrong": saving rebuilds the scene around the current selection.
+  if (detail.toLowerCase().includes('scene')) {
+    return 'Your photo choice changed after your page’s motion was built. Save your edits once more, then approve.';
+  }
   const known = CLAIM_ERROR_COPY.find(([fragment]) => detail.includes(fragment));
 
   return known?.[1] ?? 'Something went wrong on our side. Refresh the page to try again.';
@@ -272,6 +283,12 @@ function structureProblems(structure: EditablePitchStructure): readonly string[]
  * has a different fix, so a single generic message would leave them stuck.
  */
 function saveErrorCopy(detail: string): string {
+  // create_dater_revision refuses a scene that does not match this revision's
+  // transcript segments or photo snapshot (migration 0048). Reloading is the
+  // honest fix: the client rebuilds the timeline from the server's own snapshot.
+  if (detail.includes('pitch scene')) {
+    return 'We couldn’t save the motion for your page. Reload this page and save again — your words and photos are untouched.';
+  }
   if (detail.includes(DATER_HARD_CLAIM_ERRORS.notFlagged)) {
     return 'Your page changed while you were working on it. Reload to see the current claims and choose again.';
   }
@@ -296,6 +313,21 @@ function retainedClaims(
   removed: ReadonlySet<number>,
 ): readonly string[] {
   return flagged.filter((_claim, index) => !removed.has(index));
+}
+
+/**
+ * Included photo ids in play order. `photos` arrives in the revision's
+ * sort_order with any new upload appended, which is the order the page plays and
+ * the order the thumbnails below show; `includedAssetIds` is a selection, so its
+ * own order (the order the Dater happened to tap) must not decide the timeline.
+ */
+function orderedIncludedPhotoIds(
+  photos: readonly { readonly assetId: string }[],
+  includedAssetIds: readonly string[],
+): readonly string[] {
+  return photos
+    .map((photo) => photo.assetId)
+    .filter((assetId) => includedAssetIds.includes(assetId));
 }
 
 function revisionAssetIds(
@@ -706,6 +738,15 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         // 'passed' or 'unavailable' (501/502/429): proceed. The DB revision gate
         // fails closed on a missing verdict while enforcement is on.
       }
+      // The motion timeline this save freezes. Built from the revision's own
+      // transcript segments and the photos still included, in play order — never
+      // from a measured audio duration, so the scene is identical on every
+      // device. Null (too short, no segments) omits the argument, and the RPC
+      // then forward-copies the previous scene against the new asset snapshot.
+      const newScene = buildPitchSceneV1({
+        photoAssetIds: orderedIncludedPhotoIds(state.photos, includedAssetIds),
+        segments: review.transcriptSegments,
+      });
       await repo.createDaterRevision({
         draftId: review.revision.pitch_draft_id,
         headline,
@@ -713,6 +754,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         includedAssetIds: revisionAssetIds(review, includedAssetIds),
         ...(editedStructure === undefined ? {} : { structure: editedStructure }),
         ...(claimsChanged ? { retainedHardClaims: retained } : {}),
+        ...(newScene === null ? {} : { newScene }),
       });
       const latestReview = await repo.getConsentReview(review.revision.pitch_draft_id);
       const context = await loadReviewContext(repo, state.preview, latestReview);
@@ -1001,6 +1043,24 @@ export function ConsentFlow({ token }: { readonly token: string }) {
     includedAssetIds.includes(photo.assetId),
   );
   const representativePhoto = previewIncludedPhotos[0] ?? null;
+  // MOTION PHASE 1. The preview plays the scene the SERVER stored on this
+  // revision — never a scene built here. Approval means "yes to that timeline",
+  // which only holds if the bytes the Dater watched came back from the server.
+  const serverScene: PitchSceneV1 | null = state.step === 'review' ? state.review.scene : null;
+  const orderedIncludedPhotos =
+    state.step === 'review' ? orderedIncludedPhotoIds(state.photos, includedAssetIds) : [];
+  // An unsaved photo change makes the stored scene describe a different set of
+  // photos. Playing it anyway would show a photo the Dater just excluded, and
+  // approve_and_publish_pitch would reject the mismatch — so the motion preview
+  // waits for the save that rebuilds the scene.
+  const previewSceneMatchesSelection =
+    serverScene !== null &&
+    sameIds(
+      serverScene.scenes.map((window) => window.assetId),
+      orderedIncludedPhotos,
+    );
+  const previewScene = previewSceneMatchesSelection ? serverScene : null;
+  const previewCaptions = state.step === 'review' ? state.review.transcriptSegments : [];
   // The page's headline is the hook whenever the structure is editable, matching
   // what the server derives and what /p/[campaignSlug] prints.
   const previewHeadline = editStructure === null ? editHeadline : editStructure.hook;
@@ -1986,11 +2046,45 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                   This is your page — exactly what people will see
                 </h2>
                 <p className={styles.muted}>
-                  A still preview built from what you approved above. On the live page,{' '}
-                  {state.preview.introducerDisplayName}’s voice plays over these photos.
+                  {previewScene === null
+                    ? `A still preview built from what you approved above. On the live page, ${state.preview.introducerDisplayName}’s voice plays over these photos.`
+                    : `Press play: this is your page moving, on the exact timeline your published page will use. ${state.preview.introducerDisplayName}’s voice, your photos, your words.`}
                 </p>
                 <div className={styles.previewFrame}>
-                  {representativePhoto === null ? (
+                  {previewScene !== null && previewIncludedPhotos.length > 0 ? (
+                    <div className={styles.previewMotion} data-consent-motion-preview>
+                      <MotionPitchPlayer
+                        photos={previewIncludedPhotos.map((photo, index) => ({
+                          assetId: photo.assetId,
+                          src: photo.url,
+                          alt: `Your photo ${index + 1}`,
+                        }))}
+                        scene={previewScene}
+                        captions={previewCaptions}
+                        audioUrl={state.voiceUrl}
+                        fallbackDurationMs={previewScene.durationMs}
+                        location={previewLocation}
+                        playLabel={`Play ${state.preview.introducerDisplayName}’s pitch over your photos`}
+                        pauseLabel="Pause the preview"
+                        noAudioNote="The voice note isn’t ready to play here, so this preview can’t move yet — your published page still plays it."
+                        // Signed storage URLs: the image optimizer only accepts
+                        // allowlisted hosts, so it must not sit between the Dater
+                        // and their own photo.
+                        imageMode="plain"
+                        header={
+                          <header className={styles.previewMotionMeta}>
+                            <span className={styles.previewName}>
+                              {displayName}
+                              {previewAge === null ? '' : `, ${previewAge}`}
+                            </span>
+                            <span className={styles.previewSub}>
+                              {relationshipLine(state.preview)}
+                            </span>
+                          </header>
+                        }
+                      />
+                    </div>
+                  ) : representativePhoto === null ? (
                     <p className={styles.muted}>Keep at least one photo to preview your cover.</p>
                   ) : (
                     <div className={styles.previewCover}>
@@ -2010,6 +2104,12 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                         <span className={styles.previewSub}>{relationshipLine(state.preview)}</span>
                       </div>
                     </div>
+                  )}
+
+                  {previewScene === null && serverScene !== null && (
+                    <p className={styles.muted} role="status" data-consent-motion-stale>
+                      Save your edits to see your page move with the photos you just chose.
+                    </p>
                   )}
 
                   {previewHeadline.trim() !== '' && (

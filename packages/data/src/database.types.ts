@@ -44,6 +44,15 @@ export type PitchDraftRow = {
    * carry no such column; readers must treat a missing value as false.
    */
   readonly structure_reviewed?: boolean | null;
+  /**
+   * PitchScene v1 projected from the approved revision at publish (migration
+   * 0048). Optional because a pre-0048 row has no such column; NULL means the
+   * page has no approved motion timeline and readers fall back to the legacy
+   * runtime distribution.
+   */
+  readonly scene_definition?: Json | null;
+  /** sha256 of the stored `scene_definition::text`, computed server-side only. */
+  readonly scene_hash?: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 };
@@ -55,6 +64,9 @@ export type PitchAssetRow = {
   readonly asset_type: string;
   readonly storage_path: string;
   readonly sort_order: number;
+  /** Intrinsic pixel size when the uploader could decode it (migration 0048). */
+  readonly width?: number | null;
+  readonly height?: number | null;
   readonly created_at: string;
   readonly updated_at: string;
 };
@@ -146,6 +158,14 @@ export type ConsentRevisionRow = {
   readonly dater_edited?: boolean | null;
   /** True when this revision came from the Dater's section editor (0047). */
   readonly structure_reviewed?: boolean | null;
+  /**
+   * The PitchScene v1 timeline this revision freezes (migration 0048). NULL
+   * together with `scene_hash` when the recording carries no scene — the
+   * surface then falls back to the legacy runtime distribution.
+   */
+  readonly scene_definition?: Json | null;
+  /** sha256 of the stored `scene_definition::text`; never computed client-side. */
+  readonly scene_hash?: string | null;
   readonly created_at: string;
 };
 
@@ -633,6 +653,10 @@ export type Database = {
           readonly asset_type: string;
           readonly storage_path: string;
           readonly sort_order?: number;
+          // Migration 0048. Null when the browser could not decode the image;
+          // the DB CHECK only forbids non-positive values.
+          readonly width?: number | null;
+          readonly height?: number | null;
         };
         Update: Record<string, never>;
         Relationships: [];
@@ -751,6 +775,8 @@ export type Database = {
           readonly invite_channel?: 'email' | 'phone' | null;
           readonly invite_contact?: string | null;
           readonly invite_friend_name?: string | null;
+          /** PitchScene v1 (0048). Callers narrow this to the typed scene. */
+          readonly new_scene?: Json | null;
         };
         Returns: readonly {
           readonly consent_request_id: string;

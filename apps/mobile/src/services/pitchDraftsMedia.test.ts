@@ -8,7 +8,12 @@ import type {
   SignedAssetUpload,
 } from '@friendword/data';
 
+import type { AssetDimensions } from '@friendword/data';
+import type { PitchSceneSegment, PitchSceneV1 } from '@friendword/contracts';
+
 import { requestMediaValidation, type MediaValidationOutcome } from './mediaValidation';
+import type { PitchSceneBuilder } from './pitchSceneInput';
+
 import {
   MockPitchDraftService,
   STORED_VOICE_REPLACEMENT_MESSAGE,
@@ -69,7 +74,18 @@ type Harness = {
   readonly id: PitchDraftId;
   readonly service: HybridPitchDraftService;
   readonly uploads: readonly string[];
-  readonly registrations: ReadonlyArray<{ readonly kind: string; readonly fileName: string }>;
+  readonly registrations: ReadonlyArray<{
+    readonly kind: string;
+    readonly fileName: string;
+    readonly dimensions: AssetDimensions | undefined;
+  }>;
+  /** The scene each submit carried, so a test can see what the dater would get. */
+  readonly submittedScenes: ReadonlyArray<PitchSceneV1 | null | undefined>;
+  /** What the scene builder was asked to build from, in call order. */
+  readonly sceneInputs: ReadonlyArray<{
+    readonly photoAssetIds: readonly string[];
+    readonly segments: readonly PitchSceneSegment[];
+  }>;
   readonly puts: readonly PutRecord[];
   readonly validated: readonly string[];
   /** The raw persisted drafts, so a test can stage what an older build wrote. */
@@ -153,10 +169,23 @@ async function createHarness(options: {
   readonly submitForConsent?: (draftId: string) => Promise<ConsentSubmission>;
   /** Makes every remove_pitch_draft_asset call fail, as an offline device would. */
   readonly removeAssetFails?: boolean;
+  /** What `pitch_drafts.transcript` holds when the submit reads the saved row. */
+  readonly serverTranscript?: unknown;
+  /** Stands in for the contracts builder, whose own timing rules are tested there. */
+  readonly buildScene?: PitchSceneBuilder;
 }): Promise<Harness> {
   const puts = installFetchMock(options.putStatus ?? (() => 200));
   const uploads: string[] = [];
-  const registrations: Array<{ kind: string; fileName: string }> = [];
+  const registrations: Array<{
+    kind: string;
+    fileName: string;
+    dimensions: AssetDimensions | undefined;
+  }> = [];
+  const submittedScenes: Array<PitchSceneV1 | null | undefined> = [];
+  const sceneInputs: Array<{
+    photoAssetIds: readonly string[];
+    segments: readonly PitchSceneSegment[];
+  }> = [];
   const assetRows: PitchAssetRow[] = [];
   const removedAssets: string[] = [];
   const validated: string[] = [];
@@ -210,8 +239,14 @@ async function createHarness(options: {
       },
       listMyConsentRequests: unexpected,
       listMyDrafts: unexpected,
-      submitForConsent: options.submitForConsent ?? unexpected,
-      updateDraft: async (): Promise<PitchDraftRow> => SERVER_ROW,
+      submitForConsent: async (draftId, _invitation, scene): Promise<ConsentSubmission> => {
+        submittedScenes.push(scene);
+        return (options.submitForConsent ?? unexpected)(draftId);
+      },
+      updateDraft: async (): Promise<PitchDraftRow> =>
+        options.serverTranscript === undefined
+          ? SERVER_ROW
+          : { ...SERVER_ROW, transcript: options.serverTranscript as PitchDraftRow['transcript'] },
       requestAssetUpload: async (draftId, fileName): Promise<SignedAssetUpload> => {
         uploads.push(fileName);
         return {
@@ -220,8 +255,14 @@ async function createHarness(options: {
           token: 'signed-token',
         };
       },
-      registerAsset: async (draftId, kind, fileName, sortOrder): Promise<PitchAssetRow> => {
-        registrations.push({ kind, fileName });
+      registerAsset: async (
+        draftId,
+        kind,
+        fileName,
+        sortOrder,
+        dimensions,
+      ): Promise<PitchAssetRow> => {
+        registrations.push({ kind, fileName, dimensions });
         const row: PitchAssetRow = {
           id: `asset-${fileName}`,
           pitch_draft_id: draftId,
@@ -241,6 +282,10 @@ async function createHarness(options: {
       validated.push(objectName);
       return options.validate(objectName);
     },
+    (input) => {
+      sceneInputs.push({ photoAssetIds: input.photoAssetIds, segments: input.segments });
+      return (options.buildScene ?? (() => null))(input);
+    },
   );
   return {
     local,
@@ -248,6 +293,8 @@ async function createHarness(options: {
     service,
     uploads,
     registrations,
+    submittedScenes,
+    sceneInputs,
     puts,
     validated,
     values,
@@ -493,8 +540,13 @@ describe('removing a photo from a draft', () => {
     // revision, and scripts/cleanup-orphan-media.mjs deletes its voice and
     // photos 48h later while the local draft still calls them stored.
     expect(harness.registrations).toEqual([
-      { kind: 'voice', fileName: 'voice.m4a' },
-      { kind: 'photo', fileName: await storedPhotoObject(harness, 0) },
+      // The voice track has no pixels, so it registers without dimensions.
+      { kind: 'voice', fileName: 'voice.m4a', dimensions: undefined },
+      {
+        kind: 'photo',
+        fileName: await storedPhotoObject(harness, 0),
+        dimensions: { width: PHOTO_A.width, height: PHOTO_A.height },
+      },
     ]);
     expect(harness.assetRows.map((row) => row.storage_path)).toEqual([
       `pitch-media/${SERVER_DRAFT_ID}/voice.m4a`,
@@ -673,5 +725,128 @@ describe('re-recording after the voice is stored', () => {
     const saved = await harness.local.saveRecording(harness.id, NEW_TAKE);
 
     expect(saved.recording?.uri).toBe('file:///take-2.m4a');
+  });
+});
+
+const STUB_SCENE: PitchSceneV1 = {
+  schemaVersion: 1,
+  canvas: { width: 1080, height: 1920, fps: 30 },
+  durationMs: 4_000,
+  scenes: [
+    { assetId: '50000000-0000-4000-8000-000000000001', startMs: 0, endMs: 2_000 },
+    { assetId: '50000000-0000-4000-8000-000000000002', startMs: 2_000, endMs: 4_000 },
+  ],
+};
+
+/** A real /api/transcribe snapshot: seconds, with the text the captions use. */
+const SERVER_TRANSCRIPT = {
+  text: 'Jordan drove four hours. Then he unpacked every box.',
+  language: 'en',
+  segments: [
+    { start: 0, end: 1.84, text: 'Jordan drove four hours.' },
+    { start: 1.84, end: 4.002, text: 'Then he unpacked every box.' },
+  ],
+};
+
+describe('the scene a submit sends for approval', () => {
+  it('builds it from the saved transcript and the photo assets the submit will snapshot', async () => {
+    const harness = await createHarness({
+      photos: [PHOTO_A, PHOTO_B],
+      validate: alwaysPassed,
+      submitForConsent: CONSENT_SUBMISSION,
+      serverTranscript: SERVER_TRANSCRIPT,
+      buildScene: () => STUB_SCENE,
+    });
+    await harness.service.uploadDraftMedia(harness.id);
+
+    const finalized = await harness.service.finalizeConsent(harness.id);
+
+    expect(finalized.status).toBe('consent_pending');
+    // Without this the dater who approves without editing gets a published page
+    // with no motion at all: nothing else in the flow writes a scene for them.
+    expect(harness.submittedScenes).toEqual([STUB_SCENE]);
+    expect(harness.sceneInputs).toEqual([
+      {
+        // Photos only, in sort order — the voice asset is not a scene.
+        photoAssetIds: [
+          `asset-${await storedPhotoObject(harness, 0)}`,
+          `asset-${await storedPhotoObject(harness, 1)}`,
+        ],
+        // Seconds → integer milliseconds, the same conversion the published
+        // player applies to this same snapshot.
+        segments: [
+          { startMs: 0, endMs: 1_840 },
+          { startMs: 1_840, endMs: 4_002 },
+        ],
+      },
+    ]);
+  });
+
+  it('sends no scene when the recording was never transcribed', async () => {
+    const harness = await createHarness({
+      photos: [PHOTO_A],
+      validate: alwaysPassed,
+      submitForConsent: CONSENT_SUBMISSION,
+      buildScene: () => STUB_SCENE,
+    });
+    await harness.service.uploadDraftMedia(harness.id);
+
+    await harness.service.finalizeConsent(harness.id);
+
+    // A manual (no-AI) pitch has no transcript, so there is no deterministic
+    // timeline to approve. NULL is the honest answer; the surfaces fall back.
+    expect(harness.submittedScenes).toEqual([null]);
+    expect(harness.sceneInputs).toEqual([]);
+  });
+
+  it('leaves a photo the introducer removed out of the scene', async () => {
+    const harness = await createHarness({
+      photos: [PHOTO_A, PHOTO_B],
+      validate: alwaysPassed,
+      submitForConsent: CONSENT_SUBMISSION,
+      serverTranscript: SERVER_TRANSCRIPT,
+      buildScene: () => STUB_SCENE,
+    });
+    await harness.service.uploadDraftMedia(harness.id);
+    const removedObject = await storedPhotoObject(harness, 0);
+    await harness.local.savePhotos(harness.id, [PHOTO_B]);
+
+    await harness.service.finalizeConsent(harness.id);
+
+    // Approval requires the scene's photo set to equal the revision's photo
+    // set, and approving deletes every asset outside that set — so a scene
+    // built before the removal was reconciled would be a broken reference.
+    const keptObject = await storedPhotoObject(harness, 0);
+    expect(harness.sceneInputs[0]?.photoAssetIds).toEqual([`asset-${keptObject}`]);
+    expect(keptObject).not.toBe(removedObject);
+  });
+
+  it('records the pixel size of each photo it registers, and none for the voice', async () => {
+    const harness = await createHarness({
+      photos: [{ uri: 'file:///tall.jpg', width: 900, height: 1_600, mimeType: 'image/jpeg' }],
+      validate: alwaysPassed,
+    });
+
+    await harness.service.uploadDraftMedia(harness.id);
+
+    // The render worker letterboxes onto a 1080x1920 canvas, so it needs the
+    // source aspect ratio without downloading every photo first.
+    expect(harness.registrations.map((call) => call.dimensions)).toEqual([
+      undefined,
+      { width: 900, height: 1_600 },
+    ]);
+  });
+
+  it('registers a photo with no usable size without inventing one', async () => {
+    const harness = await createHarness({
+      // Drafts saved before the picker reported a size persist 0x0, and the
+      // columns are CHECK (> 0) — so the measurement has to stay absent.
+      photos: [{ uri: 'file:///legacy.jpg', width: 0, height: 0, mimeType: 'image/jpeg' }],
+      validate: alwaysPassed,
+    });
+
+    await harness.service.uploadDraftMedia(harness.id);
+
+    expect(harness.registrations.map((call) => call.dimensions)).toEqual([undefined, undefined]);
   });
 });

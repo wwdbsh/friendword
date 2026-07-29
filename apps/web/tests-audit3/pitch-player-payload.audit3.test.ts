@@ -91,6 +91,9 @@ describe('[D5] the public page ships nothing the reader is not shown', () => {
       'introducerPseudonym',
       'photos',
       'relationship',
+      // MOTION PHASE 1: asset ids and integer timings. A scene carries no text
+      // by construction, so widening the projection with it cannot leak copy.
+      'scene',
     ]);
   });
 

@@ -1,4 +1,4 @@
-import type { PitchStructure } from '@friendword/contracts';
+import type { PitchSceneV1, PitchStructure } from '@friendword/contracts';
 import type { PublishedPitch } from '@friendword/data';
 
 import type { PitchCaption, PitchFixture, PitchPhoto } from '@/fixtures/pitch';
@@ -62,6 +62,14 @@ export type PitchView = {
   readonly captions: readonly PitchCaption[];
   /** Signed playback URL; when set the player drives a real audio element. */
   readonly audioUrl: string | null;
+  /**
+   * The motion timeline the Dater approved, projected onto the published draft
+   * (migration 0048). The player replays these windows verbatim — it must not
+   * recompute them, or the published page would drift from the preview the Dater
+   * said yes to. Null for a fixture and for a legacy row: the player then falls
+   * back to the runtime distribution (A4).
+   */
+  readonly scene: PitchSceneV1 | null;
 };
 
 const RELATIONSHIP_LABELS: Record<string, string> = {
@@ -80,6 +88,8 @@ const DURATION_LABELS: Record<string, string> = {
 };
 
 const ABSTRACT_PHOTO: PitchPhoto = {
+  // Not an uploaded asset, so no scene can ever reference it.
+  assetId: null,
   src: `data:image/svg+xml,${encodeURIComponent(`
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1200">
       <rect width="900" height="1200" fill="#221B15"/>
@@ -135,6 +145,7 @@ export type PitchPlayerView = Pick<
   | 'photos'
   | 'captions'
   | 'audioUrl'
+  | 'scene'
 >;
 
 /** Field-by-field on purpose — see `PitchPlayerView`. Never spread here. */
@@ -150,6 +161,9 @@ export function toPitchPlayerView(pitch: PitchView): PitchPlayerView {
     photos: pitch.photos,
     captions: pitch.captions,
     audioUrl: pitch.audioUrl,
+    // Asset ids and integer timings only — no text lives on a scene, so this
+    // cannot carry anything the reader is not shown.
+    scene: pitch.scene,
   };
 }
 
@@ -178,6 +192,8 @@ export function fromFixture(fixture: PitchFixture): PitchView {
     age: null,
     isDemo: true,
     audioUrl: null,
+    // Nobody approved a fixture, so there is no approved scene either.
+    scene: null,
   };
 }
 
@@ -198,11 +214,13 @@ function realPhotos(
   if (firstPhoto === undefined) {
     return null;
   }
-  // CP-2: distribute scenes across the REAL duration, snapping to real segment
-  // boundaries when available — never a hardcoded 60s grid.
+  // The per-photo window below is legacy metadata only — the player uses
+  // `PitchView.scene` when there is one, and recomputes the distribution itself
+  // when there is not. Kept so the fixture and the real read share one shape.
   const scenes = distributePhotoScenes(pitch.photos.length, durationMs, segments);
   return [
     {
+      assetId: firstPhoto.assetId,
       src: firstPhoto.url,
       alt: `${pitch.daterDisplayName} — approved photo 1`,
       startMs: scenes[0]?.startMs ?? 0,
@@ -212,6 +230,7 @@ function realPhotos(
       const photoIndex = index + 1;
       const scene = scenes[photoIndex];
       return {
+        assetId: photo.assetId,
         src: photo.url,
         alt: `${pitch.daterDisplayName} — approved photo ${photoIndex + 1}`,
         startMs: scene?.startMs ?? 0,
@@ -260,5 +279,9 @@ export function fromPublishedPitch(pitch: PublishedPitch): PitchView {
     photos: realPhotos(pitch, durationMs, segments) ?? [ABSTRACT_PHOTO],
     captions: realCaptions(segments, pitch),
     audioUrl: pitch.voiceUrl,
+    // `?? null` on purpose: a read path that predates the scene column yields
+    // undefined, and an undefined prop disappears from the client payload
+    // instead of arriving as an explicit "no approved motion".
+    scene: pitch.scene ?? null,
   };
 }

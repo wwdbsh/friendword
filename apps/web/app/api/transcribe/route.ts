@@ -13,6 +13,32 @@ export const dynamic = 'force-dynamic';
 const requestSchema = z.object({ draftId: z.string().uuid() });
 const PITCH_MEDIA_BUCKET = 'pitch-media';
 
+const wordTimingsSchema = z
+  .array(z.object({ start: z.number(), end: z.number(), word: z.string() }))
+  .min(1);
+
+/**
+ * A7: persist provider word timings when they are present, drop them when they
+ * are malformed. Returns a spreadable fragment so an absent `words` key stays
+ * absent in the stored JSONB rather than becoming an empty array that later
+ * readers could mistake for "this recording has no words".
+ *
+ * Read structurally rather than off the adapter type: the values come from the
+ * provider, and a stored transcript is what the consent revision freezes, so a
+ * malformed entry must be dropped here instead of published.
+ */
+function wordTimings(transcript: unknown): {
+  readonly words?: readonly {
+    readonly start: number;
+    readonly end: number;
+    readonly word: string;
+  }[];
+} {
+  const candidate = (transcript as { readonly words?: unknown }).words;
+  const parsed = wordTimingsSchema.safeParse(candidate);
+  return parsed.success ? { words: parsed.data } : {};
+}
+
 /**
  * Turns the introducer's uploaded voice note into the structured draft
  * (Flow A step 5): transcription → PitchStructure → headline/body on the
@@ -171,6 +197,12 @@ export async function POST(request: Request): Promise<NextResponse> {
       text: transcript.text,
       language: transcript.language,
       segments: transcript.segments ?? [],
+      // A7: word-level timings, additive and optional. The request and the
+      // adapter type are owned by the mobile/adapters side, so this reads the
+      // field structurally and simply omits it when the provider (or an older
+      // adapter build) returns none. Nothing downstream depends on it yet:
+      // captions and scene timing are both driven by `segments`.
+      ...wordTimings(transcript),
     };
     const { data: updatedDraft, error: updateError } = await serviceClient
       .from('pitch_drafts')

@@ -549,6 +549,11 @@ test('uploads and validates a dater photo before saving it in the full revision 
     asset_type: 'photo',
     storage_path: `pitch-media/${DRAFT_ID}/${uploadedObjectName.split('/').at(-1)}`,
     sort_order: 2,
+    // Migration 0048: the browser records the source pixel size for the renderer.
+    // This fixture is not a decodable image, so the size is honestly NULL and the
+    // upload still succeeds — /api/media/validate owns rejecting a bad file.
+    width: null,
+    height: null,
   });
   await page.getByRole('button', { name: 'Save my edits' }).click();
   await expect(page.getByText('Your edits are saved in a new review version.')).toBeVisible();

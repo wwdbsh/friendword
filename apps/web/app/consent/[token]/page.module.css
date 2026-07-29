@@ -682,6 +682,28 @@
   box-shadow: var(--shadow-trust);
 }
 
+/* The shared motion player sizes its own 9:16 stage; this only centres it and
+   caps it so the preview still reads as a phone-sized page. */
+.previewMotion {
+  display: flex;
+  width: 100%;
+  max-width: 17rem;
+  margin-inline: auto;
+  justify-content: center;
+}
+
+.previewMotionMeta {
+  position: absolute;
+  z-index: 3;
+  inset-inline: 0;
+  top: 0;
+  display: grid;
+  gap: 2px;
+  padding: var(--space-md) var(--space-sm);
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
 .previewCover {
   position: relative;
   width: 100%;

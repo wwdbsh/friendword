@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
 import {
+  pitchSceneV1Schema,
   pitchStructureSchema,
+  type PitchSceneV1,
   type PitchStructure,
   type RelationshipDuration,
   type RelationshipType,
@@ -56,6 +58,12 @@ export async function isCampaignPubliclyVisible(
 }
 
 export type PublishedPitchPhoto = {
+  /**
+   * The asset id the approved scene refers to. Published so the player can bind
+   * a scene window to the right image; it identifies an asset the reader is
+   * already being shown, so it carries nothing the page does not render.
+   */
+  readonly assetId: string;
   readonly url: string;
   readonly sortOrder: number;
 };
@@ -117,6 +125,14 @@ export type PublishedPitch = {
   readonly approximateLocation: string | null;
   readonly voiceUrl: string | null;
   readonly photos: readonly PublishedPitchPhoto[];
+  /**
+   * The approved motion timeline, projected onto the published draft by
+   * approve_and_publish_pitch (migration 0048). Null for a legacy row, for a
+   * recording with no transcript segments, or when the stored JSON fails the
+   * shared safety floors — the player then falls back to the legacy runtime
+   * distribution (A4) instead of playing an illegal timeline.
+   */
+  readonly scene: PitchSceneV1 | null;
 };
 
 /**
@@ -260,7 +276,7 @@ export async function getPublishedPitchBySlug(
       .from(PITCH_MEDIA_BUCKET)
       .createSignedUrl(asset.storage_path.slice(bucketPrefix.length), SIGNED_URL_TTL_SECONDS);
     if (photoSigned !== null) {
-      photos.push({ url: photoSigned.signedUrl, sortOrder: asset.sort_order });
+      photos.push({ assetId: asset.id, url: photoSigned.signedUrl, sortOrder: asset.sort_order });
     }
   }
 
@@ -322,6 +338,13 @@ export async function getPublishedPitchBySlug(
   const parsedStructure = pitchStructureSchema.safeParse(draft.structure);
   const structure = parsedStructure.success ? parsedStructure.data : null;
 
+  // Migration 0048: the scene the Dater approved, copied onto the draft at
+  // publish. Read structurally so a pre-0048 row (no such column) reads as null.
+  const parsedScene = pitchSceneV1Schema.safeParse(
+    (draft as { readonly scene_definition?: unknown }).scene_definition ?? null,
+  );
+  const scene = parsedScene.success ? parsedScene.data : null;
+
   return {
     campaignId: campaign.id,
     campaignSlug: parsedSlug.data,
@@ -340,5 +363,6 @@ export async function getPublishedPitchBySlug(
     approximateLocation,
     voiceUrl: signed?.signedUrl ?? null,
     photos,
+    scene,
   };
 }

@@ -4,8 +4,10 @@ import {
   daterPitchStructureEditSchema,
   deriveDaterPitchBody,
   deriveDaterPitchHeadline,
+  pitchSceneV1Schema,
   pitchStructureSchema,
   type DaterPitchStructureEdit,
+  type PitchSceneV1,
 } from '@friendword/contracts';
 
 import type { RelationshipDuration, RelationshipType } from '@friendword/contracts';
@@ -51,6 +53,9 @@ const daterRevisionInputSchema = z.object({
   // The server rejects any entry that was not already flagged, so this can only
   // ever shrink the list.
   retainedHardClaims: z.array(z.string().trim().min(1)).optional(),
+  // The motion timeline this save freezes (migration 0048). Validated here so a
+  // scene that would fail the DB's safety floors never leaves the client.
+  newScene: pitchSceneV1Schema.optional(),
 });
 
 const daterProfileSchema = z
@@ -110,6 +115,14 @@ export type ConsentRevision = {
   readonly asset_ids: readonly string[];
   readonly voice_asset_path: string | null;
   readonly content_hash: string;
+  /**
+   * The raw PitchScene v1 JSONB frozen into this revision (migration 0048), and
+   * the server's sha256 of its stored `::text` serialization. Both are exposed
+   * for provenance — the hash is never recomputed on the client, and the parsed
+   * scene the UI plays is `ConsentReview.scene`.
+   */
+  readonly scene_definition?: unknown;
+  readonly scene_hash?: string | null;
   readonly created_at: string;
 };
 
@@ -135,6 +148,24 @@ export type ConsentReview = {
    */
   readonly transcriptText: string | null;
   /**
+   * The revision transcript's segment timings, in provider order. These are the
+   * only legitimate input to the scene builder and to the caption timeline: the
+   * approved motion must be derived from the words the Dater was shown, never
+   * from a client-measured audio duration (which differs per device).
+   * Empty when the snapshot has no segments — the scene is then NULL and the
+   * player falls back to the legacy runtime distribution.
+   */
+  readonly transcriptSegments: readonly TranscriptSegmentWindow[];
+  /**
+   * The motion timeline the Dater is approving, exactly as the server stored it
+   * (migration 0048). Null on a legacy revision, on a recording with no
+   * segments, or when the stored JSON fails the safety floors — the preview then
+   * falls back instead of playing an illegal timeline. The consent UI MUST
+   * render this value and never a locally built scene: "what I saw" only equals
+   * "what was approved" if the bytes came back from the server.
+   */
+  readonly scene: PitchSceneV1 | null;
+  /**
    * True when the current revision was cut by the Dater editing the copy
    * (third audit P0-NEW-3). The approve gate then requires an explicit
    * hard-claims confirmation, so the UI always surfaces the confirmation.
@@ -148,6 +179,25 @@ export type ConsentReview = {
    * so the moderation ledger keys stay in step (see createDaterRevision).
    */
   readonly structureReviewed: boolean;
+};
+
+type ImageSize = { readonly width: number | null; readonly height: number | null };
+
+const UNKNOWN_IMAGE_SIZE: ImageSize = { width: null, height: null };
+
+type ImageBitmapLike = { readonly width: number; readonly height: number; close(): void };
+
+type ImageDecoder = (source: unknown) => Promise<ImageBitmapLike>;
+
+type BlobConstructorLike = new (
+  parts: readonly ArrayBuffer[],
+  options?: { readonly type?: string },
+) => unknown;
+
+export type TranscriptSegmentWindow = {
+  readonly startMs: number;
+  readonly endMs: number;
+  readonly text: string;
 };
 
 export type ConsentApproval = {
@@ -174,6 +224,13 @@ export type DaterRevisionInput = {
    * Omit to keep every flagged claim. An empty array publishes none of them.
    */
   readonly retainedHardClaims?: readonly string[];
+  /**
+   * The motion timeline to freeze with this revision. Omit (do not pass null) to
+   * let the server forward-copy the previous revision's scene against the new
+   * asset snapshot. Build it with `buildPitchSceneV1` from the revision's own
+   * transcript segments and the included photo ids, in play order.
+   */
+  readonly newScene?: PitchSceneV1;
 };
 
 export type DaterRevisionResult = {
@@ -248,10 +305,45 @@ export type EditablePitchStructure = z.infer<typeof editablePitchStructureSchema
  * cut from this same text, so showing the text covers both surfaces.
  */
 const revisionTranscriptSchema = z
-  .object({ text: z.string() })
+  .object({
+    text: z.string(),
+    // Provider segment timings in seconds. Anything malformed is dropped rather
+    // than coerced, so a bad segment cannot invent a caption or a scene window.
+    segments: z
+      .array(
+        z
+          .object({ start: z.number(), end: z.number(), text: z.string() })
+          .passthrough()
+          .nullable()
+          .catch(null),
+      )
+      .catch([])
+      .default([]),
+  })
   .passthrough()
   .nullable()
   .catch(null);
+
+/** Seconds -> whole milliseconds, matching the public page's caption windows. */
+function segmentWindows(
+  segments: readonly ({
+    readonly start: number;
+    readonly end: number;
+    readonly text: string;
+  } | null)[],
+): readonly TranscriptSegmentWindow[] {
+  return segments.flatMap((segment) =>
+    segment === null
+      ? []
+      : [
+          {
+            startMs: Math.max(0, Math.round(segment.start * 1000)),
+            endMs: Math.max(1, Math.round(segment.end * 1000)),
+            text: segment.text,
+          },
+        ],
+  );
+}
 
 const responseNoteSchema = z.string().trim().min(1);
 
@@ -381,6 +473,14 @@ export class ConsentRepo {
     );
     const transcriptText =
       transcript === null || transcript.text.trim() === '' ? null : transcript.text;
+    const transcriptSegments = transcript === null ? [] : segmentWindows(transcript.segments);
+
+    // The scene is read back as stored (migration 0048). A stored scene that
+    // fails the shared safety floors reads as absent, so the surface falls back
+    // to the legacy runtime distribution rather than playing a strobe.
+    const parsedScene = pitchSceneV1Schema.safeParse(
+      (revision as { readonly scene_definition?: unknown }).scene_definition ?? null,
+    );
 
     // Fail closed on the editable half too: a structure that doesn't match the
     // shape is reported as absent (legacy fallback), never coerced into blanks.
@@ -392,6 +492,8 @@ export class ConsentRepo {
       hardClaims: parsedStructure.data?.hard_claims_requiring_confirmation ?? [],
       editableStructure: parsedEditable.success ? parsedEditable.data : null,
       transcriptText,
+      transcriptSegments,
+      scene: parsedScene.success ? parsedScene.data : null,
       daterEdited,
       structureReviewed,
     };
@@ -453,6 +555,38 @@ export class ConsentRepo {
     return data.signedUrl;
   }
 
+  /**
+   * Intrinsic pixel size of an image the browser can decode (migration 0048).
+   * Null on any failure — a corrupt or unsupported file is /api/media/validate's
+   * problem, and a missing size must never block the upload.
+   */
+  private async decodeImageSize(fileBody: ArrayBuffer, contentType: string): Promise<ImageSize> {
+    // Reached through globalThis rather than the DOM lib: this package is also
+    // consumed by the React Native app, where neither API exists and the size
+    // must simply come back unknown.
+    const host = globalThis as {
+      readonly createImageBitmap?: unknown;
+      readonly Blob?: unknown;
+    };
+    if (typeof host.createImageBitmap !== 'function' || typeof host.Blob !== 'function') {
+      return UNKNOWN_IMAGE_SIZE;
+    }
+    const decode = host.createImageBitmap as ImageDecoder;
+    const blobConstructor = host.Blob as BlobConstructorLike;
+    try {
+      const bitmap = await decode(new blobConstructor([fileBody], { type: contentType }));
+      try {
+        return bitmap.width > 0 && bitmap.height > 0
+          ? { width: bitmap.width, height: bitmap.height }
+          : UNKNOWN_IMAGE_SIZE;
+      } finally {
+        bitmap.close();
+      }
+    } catch {
+      return UNKNOWN_IMAGE_SIZE;
+    }
+  }
+
   /** Uploads and registers a dater-owned photo; validation remains the caller's next step. */
   async uploadDaterPhoto(
     draftId: string,
@@ -496,6 +630,11 @@ export class ConsentRepo {
       throw new DataLayerError('consent.uploadDaterPhoto.upload', uploadError);
     }
 
+    // The renderer needs the source pixel size to letterbox a photo into the
+    // 1080x1920 canvas. This is the Dater's own web upload path — the mobile
+    // path measures its own asset in registerAsset.
+    const { width, height } = await this.decodeImageSize(fileBody, parsedContentType);
+
     const { data: asset, error: assetError } = await this.client
       .from('pitch_assets')
       .insert({
@@ -504,6 +643,8 @@ export class ConsentRepo {
         asset_type: 'photo',
         storage_path: storagePath,
         sort_order: sortOrder,
+        width,
+        height,
       })
       .select()
       .single();
@@ -532,6 +673,10 @@ export class ConsentRepo {
       ...(parsed.retainedHardClaims === undefined
         ? {}
         : { retained_hard_claims: parsed.retainedHardClaims }),
+      // Omitted (not null) when there is no scene to freeze: the RPC then
+      // forward-copies the previous revision's scene against the new asset
+      // snapshot, and a pre-0048 function still resolves its old signature.
+      ...(parsed.newScene === undefined ? {} : { new_scene: parsed.newScene }),
     });
     if (error !== null) {
       throw new DataLayerError('consent.createDaterRevision', error);

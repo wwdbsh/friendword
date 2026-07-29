@@ -11,11 +11,23 @@ export type TranscriptSegment = {
   readonly text: string;
 };
 
+export type TranscriptWord = {
+  readonly start: number;
+  readonly end: number;
+  readonly word: string;
+};
+
 export type TranscriptionResult = {
   readonly text: string;
   readonly language: string;
   /** Segment-level timestamps when the provider supplies them (CP-2). */
   readonly segments?: readonly TranscriptSegment[];
+  /**
+   * Word-level timestamps when the provider supplies them (A7). Additive: every
+   * caption and scene boundary is still derived from `segments`, so a provider
+   * that returns no words changes nothing.
+   */
+  readonly words?: readonly TranscriptWord[];
 };
 
 export interface TranscriptionProvider {

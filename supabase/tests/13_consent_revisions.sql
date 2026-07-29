@@ -119,7 +119,11 @@ BEGIN
         'body', revision.body,
         'structure', revision.structure,
         'asset_ids', to_jsonb(revision.asset_ids),
-        'voice_asset_path', revision.voice_asset_path
+        'voice_asset_path', revision.voice_asset_path,
+        -- 0048: the reviewed motion timeline is part of what was consented to,
+        -- so it is part of the content hash. NULL here, because this submit
+        -- carried no scene.
+        'scene', revision.scene_definition
       )::TEXT,
       'sha256'
     ),

@@ -186,7 +186,34 @@ export function photoMimeType(photo: PitchPhoto): PhotoMimeType {
   return photo.mimeType ?? photoMimeTypeFromUri(photo.uri) ?? 'image/jpeg';
 }
 
-/** Storage object name for a draft photo, with the extension its bytes call for. */
+/**
+ * A fresh photo identity.
+ *
+ * It is embedded in `photo-<key>.<ext>`, which must match
+ * `[A-Za-z0-9][A-Za-z0-9._-]{0,254}` end to end to satisfy both the storage
+ * policy's object-name pattern (0003:63, matched case-insensitively) and the
+ * data layer's file-name schema. Lowercase alphanumerics stay well inside that
+ * set; the key never sits at the start of the name, so its first character is
+ * not itself constrained.
+ */
+export function createPhotoAssetKey(): string {
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Storage object name for a draft photo, with the extension its bytes call for.
+ *
+ * Named after the photo's own identity rather than its position, because a
+ * position is not stable: removing a photo shifts every later one down, and a
+ * position-named upload would then write to — or worse, silently reuse — the
+ * removed photo's object. `upsert:false` makes that reuse a 409 the upload path
+ * reads as "already stored", which is how a removed photo's bytes end up
+ * published under a different photo's slot. Photos saved before identities
+ * existed keep the position-derived name their object already has.
+ */
 export function photoObjectName(photo: PitchPhoto, index: number): string {
-  return `photo-${index + 1}${PHOTO_FILE_EXTENSIONS[photoMimeType(photo)]}`;
+  const extension = PHOTO_FILE_EXTENSIONS[photoMimeType(photo)];
+  return photo.assetKey === undefined
+    ? `photo-${index + 1}${extension}`
+    : `photo-${photo.assetKey}${extension}`;
 }

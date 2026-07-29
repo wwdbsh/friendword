@@ -52,6 +52,13 @@ const consentSubmissionRowSchema = z.array(
   }),
 );
 
+/** Postgres unique_violation, as PostgREST reports it. */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    error !== null && typeof error === 'object' && (error as { code?: unknown }).code === '23505'
+  );
+}
+
 export function buildPitchMediaPath(draftId: string, fileName: string): string {
   const parsedDraftId = uuidSchema.safeParse(draftId);
   const parsedFileName = fileNameSchema.safeParse(fileName);
@@ -166,8 +173,53 @@ export class PitchDraftRepo {
   }
 
   /**
+   * The pitch_assets rows a draft currently carries. `submit_pitch_for_consent`
+   * snapshots all of them into the consent revision, so this is how a caller
+   * can see what a submit would actually send before sending it.
+   */
+  async listAssets(draftId: string): Promise<readonly PitchAssetRow[]> {
+    await this.getRequiredSession();
+    const { data, error } = await this.client
+      .from('pitch_assets')
+      .select()
+      .eq('pitch_draft_id', uuidSchema.parse(draftId))
+      .order('sort_order', { ascending: true });
+    if (error !== null) {
+      throw new DataLayerError('pitchDraft.listAssets', error);
+    }
+
+    return data;
+  }
+
+  /**
+   * Detaches a photo the caller uploaded from their own still-editable draft
+   * (0046). Deletes the pitch_assets row only — the storage object is left to
+   * the 48h orphan sweep, which reclaims bytes through the Storage API.
+   *
+   * The RPC refuses a voice asset, a draft past `changes_requested`, and an
+   * asset someone else uploaded, so a caller cannot use it to publish a pitch
+   * without the introducer's voice or to edit media the subject has consented
+   * to.
+   */
+  async removeAsset(assetId: string): Promise<void> {
+    await this.getRequiredSession();
+    const { error } = await this.client.rpc('remove_pitch_draft_asset', {
+      p_asset_id: uuidSchema.parse(assetId),
+    });
+    if (error !== null) {
+      throw new DataLayerError('pitchDraft.removeAsset', error);
+    }
+  }
+
+  /**
    * Records an uploaded object in pitch_assets so other surfaces (consent
    * review, public page) can discover it without guessing storage paths.
+   *
+   * Idempotent by (pitch_draft_id, storage_path), which the table declares
+   * UNIQUE (0001:93). A caller that never learned its insert committed — a lost
+   * response, an app kill between the insert and its own bookkeeping — retries
+   * with the same path, and surfacing that as a failure would leave the draft
+   * permanently unsubmittable from that device.
    */
   async registerAsset(
     draftId: string,
@@ -177,10 +229,11 @@ export class PitchDraftRepo {
   ): Promise<PitchAssetRow> {
     const session = await this.getRequiredSession();
     const storagePath = buildPitchMediaPath(draftId, fileName);
+    const parsedDraftId = uuidSchema.parse(draftId);
     const { data, error } = await this.client
       .from('pitch_assets')
       .insert({
-        pitch_draft_id: uuidSchema.parse(draftId),
+        pitch_draft_id: parsedDraftId,
         uploaded_by_user_id: session.user.id,
         asset_type: assetType,
         storage_path: storagePath,
@@ -189,7 +242,31 @@ export class PitchDraftRepo {
       .select()
       .single();
     if (error !== null) {
+      if (isUniqueViolation(error)) {
+        return this.findRegisteredAsset(parsedDraftId, storagePath);
+      }
       throw new DataLayerError('pitchDraft.registerAsset', error);
+    }
+
+    return data;
+  }
+
+  /** The row a duplicate registration collided with; its absence is a real failure. */
+  private async findRegisteredAsset(draftId: string, storagePath: string): Promise<PitchAssetRow> {
+    const { data, error } = await this.client
+      .from('pitch_assets')
+      .select()
+      .eq('pitch_draft_id', draftId)
+      .eq('storage_path', storagePath)
+      .maybeSingle();
+    if (error !== null) {
+      throw new DataLayerError('pitchDraft.registerAsset', error);
+    }
+    if (data === null) {
+      throw new DataLayerError(
+        'pitchDraft.registerAsset',
+        new Error('pitch asset already exists but is not readable'),
+      );
     }
 
     return data;

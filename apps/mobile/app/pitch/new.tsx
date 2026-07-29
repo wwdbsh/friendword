@@ -22,6 +22,7 @@ import { trackEvent } from '@friendword/data';
 
 import { SignInSheet } from '../../src/features/auth/SignInSheet';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
+import { StoredVoiceReplacementError } from '../../src/services/pitchDrafts';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 import type {
   PitchDraftId,
@@ -161,6 +162,14 @@ export default function NewPitchScreen() {
       setErrorMessage(null);
       setTrack(5);
     } catch (error: unknown) {
+      // The take already sent for this pitch cannot be replaced, so the screen
+      // goes back to it rather than carrying a recording the dater will never
+      // hear. Not a dead end: continuing from here sends the stored take.
+      if (error instanceof StoredVoiceReplacementError) {
+        setRecording(error.keptRecording);
+        setErrorMessage(error.message);
+        return;
+      }
       handleFlowError(error, setErrorMessage);
     } finally {
       savingRef.current = false;

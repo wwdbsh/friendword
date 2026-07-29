@@ -61,6 +61,22 @@ const PitchPhotoSchema = z.object({
   uri: z.string().min(1),
   width: z.number().nonnegative(),
   height: z.number().nonnegative(),
+  // Stable identity for one picked photo, assigned when it is first saved and
+  // kept for as long as that photo stays in the draft. The stored object is
+  // named after it, so a removal can never hand a photo's object — and its
+  // bytes — to whichever photo later takes its position. The object it names,
+  // `photo-<assetKey>.<ext>`, has to match `[A-Za-z0-9][A-Za-z0-9._-]{0,254}`
+  // end to end — the storage policy's pattern (0003:63, matched
+  // case-insensitively) and the data layer's file-name schema. Lowercase
+  // alphanumerics is a subset of that with room to spare, not a requirement of
+  // its own; the leading character is always the `p` of the prefix.
+  // Absent on photos saved before this was tracked; those keep position-derived
+  // object names, which stay correct only while no earlier photo is removed.
+  assetKey: z
+    .string()
+    .max(32)
+    .regex(/^[a-z0-9]+$/)
+    .optional(),
   // The real type of the picked bytes, carried through to the upload so the
   // stored object's extension and Content-Type match what the server sniffs.
   // Absent on drafts persisted before this was tracked — the upload path then

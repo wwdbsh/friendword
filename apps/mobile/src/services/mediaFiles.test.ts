@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { photoMimeType, photoObjectName, pickedPhotoMimeType } from './mediaFiles';
+import {
+  createPhotoAssetKey,
+  photoMimeType,
+  photoObjectName,
+  pickedPhotoMimeType,
+} from './mediaFiles';
 
 describe('pickedPhotoMimeType', () => {
   it('keeps the type the picker reports for publishable formats', () => {
@@ -44,5 +49,35 @@ describe('photo object naming', () => {
 
   it('assumes JPEG only when neither the draft nor the uri says otherwise', () => {
     expect(photoMimeType({ uri: 'file:///no-extension', width: 1, height: 1 })).toBe('image/jpeg');
+  });
+
+  it('names the object after the photo, not its position, once it has an identity', () => {
+    const photo = {
+      uri: 'file:///a.jpg',
+      width: 1,
+      height: 1,
+      mimeType: 'image/jpeg' as const,
+      assetKey: 'abc123',
+    };
+
+    expect(photoObjectName(photo, 0)).toBe('photo-abc123.jpg');
+    // Position changes when an earlier photo is removed; the object must not.
+    expect(photoObjectName(photo, 2)).toBe('photo-abc123.jpg');
+  });
+
+  it('mints identities the storage object-name pattern accepts', () => {
+    const keys = Array.from({ length: 50 }, () => createPhotoAssetKey());
+
+    // The whole object name has to match the storage policy's pattern; these
+    // keys sit inside `photo-<key>.<ext>`, so check the name it produces.
+    expect(
+      keys.every((key) =>
+        /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/.test(
+          photoObjectName({ uri: 'file:///a.jpg', width: 1, height: 1, assetKey: key }, 0),
+        ),
+      ),
+    ).toBe(true);
+    expect(keys.every((key) => /^[a-z0-9]{1,32}$/.test(key))).toBe(true);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });

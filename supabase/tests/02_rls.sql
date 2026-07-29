@@ -13,11 +13,18 @@ INSERT INTO interests (
 )
 VALUES (
   '30000000-0000-0000-0000-000000000002',
-  '20000000-0000-0000-0000-000000000002',
-  '00000000-0000-0000-0000-000000000003',
+  '20000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000001',
   'submitted',
   now()
 );
+-- The probe used to sit on the DRAFT campaign 20000000-...-0002. submit_interest
+-- can never produce that shape (it requires a published campaign inside its
+-- window), and since 0044 the accept invariant is a trigger rather than an RPC
+-- check, so accepting into a draft is refused for every caller. The probe moves
+-- to the published seed campaign — owner Blair (0002), sender Alex (0001), who
+-- has a seeded dating profile — which is what the RLS assertions below actually
+-- mean to exercise.
 
 BEGIN;
 SET LOCAL ROLE authenticated;
@@ -110,14 +117,6 @@ BEGIN
     RAISE EXCEPTION 'user can update another user preferences';
   END IF;
 
-  UPDATE interests
-     SET status = 'accepted', decided_at = now()
-   WHERE id = '30000000-0000-0000-0000-000000000002';
-  GET DIAGNOSTICS updated_count = ROW_COUNT;
-  IF updated_count <> 1 THEN
-    RAISE EXCEPTION 'campaign owner cannot accept a submitted interest';
-  END IF;
-
   BEGIN
     UPDATE users
        SET phone_verified_at = '2099-01-01'
@@ -188,6 +187,28 @@ BEGIN
   EXCEPTION
     WHEN insufficient_privilege THEN NULL;
   END;
+END;
+$$;
+ROLLBACK;
+
+-- The campaign owner may accept a submitted interest with a plain table UPDATE:
+-- the column grant and interests_update_owners still permit it, and the 0044
+-- accept-invariant trigger passes because the campaign is published and the
+-- sender is eligible. Blair (0002) owns the seed campaign.
+BEGIN;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000002';
+DO $$
+DECLARE
+  updated_count INTEGER;
+BEGIN
+  UPDATE interests
+     SET status = 'accepted', decided_at = now()
+   WHERE id = '30000000-0000-0000-0000-000000000002';
+  GET DIAGNOSTICS updated_count = ROW_COUNT;
+  IF updated_count <> 1 THEN
+    RAISE EXCEPTION 'campaign owner cannot accept a submitted interest';
+  END IF;
 END;
 $$;
 ROLLBACK;

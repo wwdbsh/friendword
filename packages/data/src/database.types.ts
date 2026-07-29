@@ -727,6 +727,12 @@ export type Database = {
         };
         Returns: undefined;
       };
+      remove_pitch_draft_asset: {
+        Args: {
+          readonly p_asset_id: string;
+        };
+        Returns: undefined;
+      };
       submit_pitch_for_consent: {
         Args: {
           readonly draft_id: string;

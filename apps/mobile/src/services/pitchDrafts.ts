@@ -17,7 +17,7 @@ import {
   purgeableMediaUris,
   purgeInvitationContact,
 } from './draftStorage';
-import { deleteLocalMediaFile } from './mediaFiles';
+import { createPhotoAssetKey, deleteLocalMediaFile } from './mediaFiles';
 
 const STORAGE_KEY = '@friendword/pitch-drafts';
 
@@ -51,6 +51,7 @@ export interface PitchDraftService {
   createDraft(): Promise<PitchDraft>;
   saveRelationship(id: PitchDraftId, relationship: PitchRelationship): Promise<PitchDraft>;
   savePhotos(id: PitchDraftId, photos: readonly PitchPhoto[]): Promise<PitchDraft>;
+  /** Rejects with {@link StoredVoiceReplacementError} for a take that would replace stored bytes. */
   saveRecording(id: PitchDraftId, recording: PitchRecording): Promise<PitchDraft>;
   prepareForReview(id: PitchDraftId): Promise<PitchDraft>;
   uploadDraftMedia(id: PitchDraftId): Promise<PitchDraft>;
@@ -146,6 +147,88 @@ export class PitchDraftSubmissionError extends Error {
   }
 }
 
+export const STORED_VOICE_REPLACEMENT_MESSAGE =
+  'The recording for this pitch has already been sent to Friendword and cannot be replaced ' +
+  'yet, so this new take was not saved. Continue with the take you already sent, or start a ' +
+  'new pitch to use the new one.';
+
+/**
+ * Raised when this device's upload ledger says the draft's voice bytes are
+ * already stored and a different take is saved over them locally.
+ *
+ * The voice object name is fixed (`{draftId}/voice.m4a`: /api/transcribe and
+ * the published pitch both read that exact path) and it is written once —
+ * signed uploads are `upsert:false` and the storage policies grant creators
+ * INSERT only. Nothing this app can do replaces those bytes, so accepting the
+ * new take would leave the draft claiming a recording the dater will never
+ * hear. `keptRecording` is the take the server actually holds, so the caller
+ * can put the screen back on it instead of dead-ending.
+ */
+export class StoredVoiceReplacementError extends Error {
+  constructor(readonly keptRecording: PitchRecording) {
+    super(STORED_VOICE_REPLACEMENT_MESSAGE);
+    this.name = 'StoredVoiceReplacementError';
+  }
+}
+
+/**
+ * True when this device recorded that the draft's voice object was uploaded.
+ *
+ * Not an invariant about the server: both fields are written *after* the PUT
+ * returns, so an app kill in that window loses the record while the object
+ * stands. A later take is then accepted and published as the earlier one. The
+ * check is deliberately local — the record screen has to work offline, and a
+ * server probe that fails open when there is no network reopens exactly this
+ * window. Closing it needs a per-take voice object name, which /api/transcribe
+ * and the published pitch both read as a fixed path today.
+ */
+function hasStoredVoiceObject(draft: PitchDraft): boolean {
+  return draft.recording?.upload !== undefined || draft.server?.mediaUploaded === true;
+}
+
+/**
+ * Reconciles a photo save against what the draft already holds.
+ *
+ * The photos screen hands back freshly picked values, so each surviving photo's
+ * identity and upload record are carried across by uri. Without that, a save
+ * after a removal strips them, and the next upload renames the survivors into
+ * the removed photo's object — publishing bytes the introducer took out. A
+ * photo missing from `next` is genuinely gone and its record leaves with it;
+ * the pitch_assets row registered at upload time does not, which is why
+ * `HybridPitchDraftService.reconcileRegisteredAssets` detaches that row before
+ * the submit, rather than letting the consent revision snapshot it.
+ *
+ * A fresh identity goes to a photo that is new to this draft, and to a survivor
+ * of a removal that has no upload record: the latter is stored (if at all) under
+ * a position-derived name from an older build, and that name stops describing it
+ * the moment an earlier photo is dropped.
+ */
+function mergePhotoIdentities(
+  current: readonly PitchPhoto[],
+  next: readonly PitchPhoto[],
+): PitchPhoto[] {
+  const unclaimed = [...current];
+  const matched = next.map((photo) => {
+    const position = unclaimed.findIndex((stored) => stored.uri === photo.uri);
+    return { photo, stored: position < 0 ? undefined : unclaimed.splice(position, 1)[0] };
+  });
+  const removedAny = unclaimed.length > 0;
+  return matched.map(({ photo, stored }) => {
+    const upload = photo.upload ?? stored?.upload;
+    const assetKey =
+      photo.assetKey ??
+      stored?.assetKey ??
+      (stored === undefined || (removedAny && upload === undefined)
+        ? createPhotoAssetKey()
+        : undefined);
+    return {
+      ...photo,
+      ...(assetKey === undefined ? {} : { assetKey }),
+      ...(upload === undefined ? {} : { upload }),
+    };
+  });
+}
+
 export class MockPitchDraftService implements PitchDraftService {
   private pending: Promise<void> = Promise.resolve();
 
@@ -180,11 +263,34 @@ export class MockPitchDraftService implements PitchDraftService {
   }
 
   async savePhotos(id: PitchDraftId, photos: readonly PitchPhoto[]): Promise<PitchDraft> {
-    return this.updateDraft(id, (draft) => ({ ...draft, photos: [...photos] }));
+    return this.updateDraft(id, (draft) => ({
+      ...draft,
+      photos: mergePhotoIdentities(draft.photos, photos),
+    }));
   }
 
+  /**
+   * Saves a recording, refusing to swap in a different take once this device
+   * has recorded that the draft's voice object was uploaded
+   * ({@link StoredVoiceReplacementError}) — that object cannot be rewritten, so
+   * the local draft must keep pointing at the take the dater will actually
+   * hear. Edits that keep the same take (the text recap) and the upload
+   * bookkeeping still go through. See {@link hasStoredVoiceObject} for what
+   * this does not cover.
+   */
   async saveRecording(id: PitchDraftId, recording: PitchRecording): Promise<PitchDraft> {
-    return this.updateDraft(id, (draft) => ({ ...draft, recording }));
+    return this.updateDraft(id, (draft) => {
+      const stored = draft.recording;
+      if (stored !== null && stored.uri !== recording.uri && hasStoredVoiceObject(draft)) {
+        throw new StoredVoiceReplacementError(stored);
+      }
+      const upload =
+        recording.upload ?? (stored?.uri === recording.uri ? stored.upload : undefined);
+      return {
+        ...draft,
+        recording: { ...recording, ...(upload === undefined ? {} : { upload }) },
+      };
+    });
   }
 
   async prepareForReview(id: PitchDraftId): Promise<PitchDraft> {

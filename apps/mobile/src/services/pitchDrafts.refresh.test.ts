@@ -125,6 +125,8 @@ describe('draft list resilience to a slow or failing server refresh', () => {
       {
         createDraft: unexpected,
         getDraft: unexpected,
+        listAssets: unexpected,
+        removeAsset: unexpected,
         listMyConsentRequests: async () => [CONSENT_REQUEST],
         listMyDrafts: () => new Promise<readonly PitchDraftRow[]>(() => undefined),
         registerAsset: unexpected,
@@ -149,6 +151,8 @@ describe('draft list resilience to a slow or failing server refresh', () => {
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
       getDraft: unexpected,
+      listAssets: unexpected,
+      removeAsset: unexpected,
       listMyConsentRequests: async () => [CONSENT_REQUEST],
       listMyDrafts: async () => {
         throw new DataLayerError('pitchDraft.listMine', { message: 'network request failed' });
@@ -172,6 +176,8 @@ describe('draft list resilience to a slow or failing server refresh', () => {
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
       getDraft: unexpected,
+      listAssets: unexpected,
+      removeAsset: unexpected,
       listMyConsentRequests: async () => [CONSENT_REQUEST],
       listMyDrafts: async () => {
         throw new UnauthenticatedError();
@@ -194,6 +200,8 @@ describe('draft list resilience to a slow or failing server refresh', () => {
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
       getDraft: unexpected,
+      listAssets: unexpected,
+      removeAsset: unexpected,
       listMyConsentRequests: async () => [CONSENT_REQUEST],
       listMyDrafts: async () => [SERVER_ROW],
       registerAsset: unexpected,
@@ -225,6 +233,8 @@ describe('draft list resilience to a slow or failing server refresh', () => {
       {
         createDraft: unexpected,
         getDraft: unexpected,
+        listAssets: unexpected,
+        removeAsset: unexpected,
         listMyConsentRequests: async () => [CONSENT_REQUEST],
         listMyDrafts: () => pendingServerDrafts,
         registerAsset: unexpected,
@@ -258,6 +268,8 @@ describe('draft list resilience to a slow or failing server refresh', () => {
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
       getDraft: unexpected,
+      listAssets: unexpected,
+      removeAsset: unexpected,
       listMyConsentRequests: async () => [CONSENT_REQUEST],
       listMyDrafts: async () => [SERVER_ROW],
       registerAsset: unexpected,

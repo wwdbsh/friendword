@@ -1,4 +1,5 @@
 import {
+  buildPitchMediaPath,
   PitchDraftRepo,
   UnauthenticatedError,
   type BrowserSupabaseClient,
@@ -41,9 +42,11 @@ type PitchDraftRepository = Pick<
   PitchDraftRepo,
   | 'createDraft'
   | 'getDraft'
+  | 'listAssets'
   | 'listMyConsentRequests'
   | 'listMyDrafts'
   | 'registerAsset'
+  | 'removeAsset'
   | 'requestAssetUpload'
   | 'submitForConsent'
   | 'updateDraft'
@@ -85,6 +88,16 @@ export const MANUAL_PITCH_NEEDS_AI_REVIEW_MESSAGE =
  */
 export const MEDIA_VALIDATION_INCOMPLETE_MESSAGE =
   'Safety review has not finished for this pitch’s photos or recording yet. ' +
+  'Check your connection and try sending it again.';
+
+/**
+ * Copy for the one media state a submit cannot resolve on its own: a photo the
+ * introducer removed is still attached to the pitch on the server and could not
+ * be detached. Retryable — the usual cause is the network — so it does not send
+ * anyone back to the start.
+ */
+export const STALE_PITCH_ASSETS_MESSAGE =
+  'A photo you removed is still attached to this pitch, and we could not take it off. ' +
   'Check your connection and try sending it again.';
 
 /**
@@ -382,6 +395,15 @@ export class HybridPitchDraftService implements PitchDraftService {
    * the asset un-validated, which is what brings the next call back here to run
    * it again — the server contract is unchanged, `unavailable` is never treated
    * as a pass.
+   *
+   * Registration happens here rather than at submit because a pitch_assets row
+   * is the only thing that marks an uploaded object as in use:
+   * `scripts/cleanup-orphan-media.mjs` deletes any pitch-media object older than
+   * 48h that no pitch_assets row names and whose draft has no consent revision.
+   * A draft uploaded but not yet sent for approval has neither, so deferring
+   * registration would let the routine sweep (docs/OPS.md) delete the
+   * introducer's voice track and photos while the local draft still claims they
+   * are stored and validated.
    */
   async uploadDraftMedia(id: PitchDraftId): Promise<PitchDraft> {
     const draft = await findDraft(this.local, id);
@@ -490,6 +512,7 @@ export class HybridPitchDraftService implements PitchDraftService {
     }
     const invitation = invitationForFinalize(draft);
     try {
+      await this.reconcileRegisteredAssets(this.repo, draft);
       const submission = await this.repo.submitForConsent(draft.server.draftId, invitation);
       if (draft.server.consentRequestId === null && submission.consentToken === null) {
         throw new PitchDraftSubmissionError('The approval invite was not created. Please retry.');
@@ -511,6 +534,75 @@ export class HybridPitchDraftService implements PitchDraftService {
           : new ManualPitchNeedsAiReviewError();
       }
       throw error;
+    }
+  }
+
+  /**
+   * Brings this draft's pitch_assets rows back in line with the photos the
+   * introducer is actually looking at, before the submit snapshots them.
+   *
+   * `submit_pitch_for_consent` snapshots *every* pitch_assets row of the draft
+   * into the consent revision (0013:198-206), so a row left over from a photo
+   * the introducer removed would be sent to the dater and could be published.
+   * Registration happens at upload time (it is what keeps the orphan sweep off
+   * an in-flight draft), so those leftovers are expected and are detached here
+   * through `remove_pitch_draft_asset` (0046). Only the row is deleted; the
+   * bytes go to the 48h sweep, which is the only path that can actually reclaim
+   * them.
+   *
+   * A leftover that is not a removable photo, or a removal the server refuses,
+   * stops the submit: sending a pitch that carries a photo the introducer took
+   * out is the failure this exists to prevent, so it fails closed rather than
+   * proceeding.
+   *
+   * Scoped to rows this account registered and to drafts this device uploaded:
+   * a server-recovered draft carries no local photos, and the dater's own
+   * consent-time uploads (0032:84) are not the introducer's to reconcile.
+   */
+  private async reconcileRegisteredAssets(
+    repo: PitchDraftRepository,
+    draft: PitchDraft,
+  ): Promise<void> {
+    if (draft.server === null || hasNoAssetRecords(draft)) {
+      return;
+    }
+    const userId = await this.getCurrentUserId();
+    if (userId === null) {
+      // No session to attribute rows to. Not a way past this check: the submit
+      // that follows needs the same session and rejects without one.
+      return;
+    }
+    const serverDraftId = draft.server.draftId;
+    const expected = new Set(
+      planDraftMedia(draft).map((plan) =>
+        buildPitchMediaPath(serverDraftId, plan.record?.objectName ?? plan.objectName),
+      ),
+    );
+    const orphaned = (await repo.listAssets(serverDraftId)).filter(
+      (row) => row.uploaded_by_user_id === userId && !expected.has(row.storage_path),
+    );
+    if (orphaned.length === 0) {
+      return;
+    }
+    // 0046 removes photos only, by design: the introducer's voice is a server
+    // invariant. A stray voice row means the local draft lost its recording
+    // rather than that a photo was removed, and detaching it is not the fix.
+    if (orphaned.some((row) => row.asset_type !== 'photo')) {
+      throw new PitchDraftSubmissionError(STALE_PITCH_ASSETS_MESSAGE);
+    }
+    try {
+      for (const row of orphaned) {
+        await repo.removeAsset(row.id);
+      }
+    } catch (error: unknown) {
+      if (error instanceof UnauthenticatedError) {
+        throw error;
+      }
+      console.warn(
+        'Could not detach a removed photo from this pitch; refusing to send it:',
+        error instanceof Error ? error.message : 'Unknown removal error.',
+      );
+      throw new PitchDraftSubmissionError(STALE_PITCH_ASSETS_MESSAGE);
     }
   }
 
@@ -566,9 +658,14 @@ export class HybridPitchDraftService implements PitchDraftService {
       return;
     }
     // 409 from an upsert:false signed URL means an object already sits at this
-    // path. Only this draft's creator can write there, so those bytes are an
-    // earlier attempt of this same upload that crashed before it was recorded;
-    // the server re-reads and re-moderates whatever is actually stored.
+    // path. For a photo the path carries the photo's own identity, so those
+    // bytes are an earlier attempt of this same upload that crashed before it
+    // was recorded. The voice path is fixed, so a 409 there can also be a
+    // different take this device stored and then lost the record of; the guard
+    // in {@link StoredVoiceReplacementError} only covers the case where that
+    // record survived. Either way the server re-reads and re-moderates whatever
+    // is actually stored, and the local draft may name a take the dater will
+    // not hear.
     if (status !== 409) {
       throw new PitchDraftSubmissionError(`Upload of ${plan.label} failed (${status}).`);
     }
@@ -613,11 +710,26 @@ function legacyRecord(objectName: string): UploadedAsset {
 }
 
 /**
+ * True when this draft was uploaded by a build that kept no per-asset records —
+ * the only state in which `mediaUploaded` alone may be read as "every asset is
+ * already stored". A draft that carries even one record is tracked per asset,
+ * where an asset without a record is one whose bytes have never been sent (a
+ * photo added after the upload), and inventing a record for it would publish
+ * some other photo's object in its place.
+ */
+function hasNoAssetRecords(draft: PitchDraft): boolean {
+  return (
+    draft.recording?.upload === undefined &&
+    draft.photos.every((photo) => photo.upload === undefined)
+  );
+}
+
+/**
  * What `uploadDraftMedia` has to do for each of a draft's assets, given what
  * previous attempts already completed.
  */
 export function planDraftMedia(draft: PitchDraft): readonly MediaAssetPlan[] {
-  const uploadedBeforeRecords = draft.server?.mediaUploaded === true;
+  const uploadedBeforeRecords = draft.server?.mediaUploaded === true && hasNoAssetRecords(draft);
   const plans: MediaAssetPlan[] = [];
   if (draft.recording !== null) {
     plans.push({
@@ -639,8 +751,14 @@ export function planDraftMedia(draft: PitchDraft): readonly MediaAssetPlan[] {
       sourceUri: photo.uri,
       contentType: photoMimeType(photo),
       objectName: photoObjectName(photo, index),
+      // A photo that carries its own identity was picked by a build that names
+      // its object after that identity, so the pre-identity name below would
+      // point at a different photo's bytes.
       record:
-        photo.upload ?? (uploadedBeforeRecords ? legacyRecord(`photo-${index + 1}.jpg`) : null),
+        photo.upload ??
+        (uploadedBeforeRecords && photo.assetKey === undefined
+          ? legacyRecord(`photo-${index + 1}.jpg`)
+          : null),
     });
   });
   return plans;

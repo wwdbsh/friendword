@@ -84,6 +84,30 @@ async function createCompleteDraft(service: MockPitchDraftService): Promise<Pitc
   return draft.id;
 }
 
+/**
+ * Puts a draft in the state a pitch is in once it has been sent at least once:
+ * every asset's bytes are on the server and its pitch_assets row exists, so
+ * finalizing registers nothing new.
+ */
+async function markMediaStored(service: MockPitchDraftService, id: PitchDraftId): Promise<void> {
+  const draft = (await service.getMyDrafts()).find((candidate) => candidate.id === id);
+  if (draft === undefined || draft.recording === null) {
+    throw new Error('Expected a complete draft');
+  }
+  await service.savePhotos(
+    id,
+    draft.photos.map((photo, index) => ({
+      ...photo,
+      upload: { objectName: `photo-${index + 1}.jpg`, registered: true, validated: true },
+    })),
+  );
+  await service.saveRecording(id, {
+    ...draft.recording,
+    upload: { objectName: 'voice.m4a', registered: true, validated: true },
+  });
+  await service.markDraftMediaUploaded(id);
+}
+
 describe('pitch draft AI review flow', () => {
   it('keeps the draft editable through generation and finalizes only after review', async () => {
     const service = createService();
@@ -166,6 +190,7 @@ describe('pitch draft AI review flow', () => {
       consentRequestId: '30000000-0000-4000-8000-000000000001',
       consentToken: 'a'.repeat(32),
     });
+    await markMediaStored(local, id);
     await local.purgeInvitationContact(id);
     await local.syncServerReview(id, {
       status: 'changes_requested',
@@ -177,6 +202,8 @@ describe('pitch draft AI review flow', () => {
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unused,
       getDraft: unused,
+      listAssets: unused,
+      removeAsset: unused,
       listMyConsentRequests: unused,
       listMyDrafts: unused,
       registerAsset: unused,
@@ -207,6 +234,8 @@ describe('pitch draft AI review flow', () => {
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
       getDraft: unexpected,
+      listAssets: unexpected,
+      removeAsset: unexpected,
       listMyConsentRequests: async () => [CONSENT_REQUEST],
       listMyDrafts: async () => [SERVER_ROW],
       registerAsset: unexpected,
@@ -258,6 +287,8 @@ describe('pitch draft AI review flow', () => {
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
       getDraft: unexpected,
+      listAssets: unexpected,
+      removeAsset: unexpected,
       listMyConsentRequests: async () => [CONSENT_REQUEST],
       listMyDrafts: async () => [SERVER_ROW],
       registerAsset: unexpected,
@@ -295,6 +326,8 @@ describe('pitch draft AI review flow', () => {
       const service = new HybridPitchDraftService(null, local, {
         createDraft: async () => SERVER_ROW,
         getDraft: unexpected,
+        listAssets: unexpected,
+        removeAsset: unexpected,
         listMyConsentRequests: unexpected,
         listMyDrafts: unexpected,
         registerAsset: async (draftId, kind, fileName, sortOrder) => {
@@ -329,19 +362,23 @@ describe('pitch draft AI review flow', () => {
       expect(assetUploads).toEqual([]);
       expect(registeredAssets).toEqual([]);
 
-      // The explicit second step performs the uploads and registrations.
+      // The explicit second step performs the uploads and registrations. The
+      // pitch_assets row lands with the bytes: it is what keeps the orphan
+      // sweep from deleting them while the draft waits to be sent.
       await service.uploadDraftMedia(id);
-      expect(assetUploads).toEqual(['voice.m4a', 'photo-1.jpg']);
+      const uploadedObjects = [...assetUploads];
+      expect(uploadedObjects[0]).toBe('voice.m4a');
+      expect(uploadedObjects[1]).toMatch(/^photo-[a-z0-9]+\.jpg$/);
       expect(registeredAssets).toEqual([
         { kind: 'voice', fileName: 'voice.m4a' },
-        { kind: 'photo', fileName: 'photo-1.jpg' },
+        { kind: 'photo', fileName: uploadedObjects[1] },
       ]);
 
       // Idempotent: retrying (e.g. after a transient transcribe failure) must
       // not re-upload — the signed URL is upsert:false and registerAsset would
       // duplicate rows.
       await service.uploadDraftMedia(id);
-      expect(assetUploads).toEqual(['voice.m4a', 'photo-1.jpg']);
+      expect(assetUploads).toEqual(uploadedObjects);
       expect(registeredAssets).toHaveLength(2);
     } finally {
       globalThis.fetch = originalFetch;
@@ -362,6 +399,8 @@ describe('pitch draft AI review flow', () => {
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
       getDraft: unexpected,
+      listAssets: unexpected,
+      removeAsset: unexpected,
       listMyConsentRequests: async () => [CONSENT_REQUEST],
       listMyDrafts: async () => [olderServerRow, SERVER_ROW],
       registerAsset: unexpected,
@@ -382,6 +421,7 @@ describe('pitch draft AI review flow', () => {
     const id = await createCompleteDraft(local);
     await local.saveReview(id, { ...REVIEW, generationMode: 'manual' });
     await local.attachServerDraft(id, SERVER_ROW.id);
+    await markMediaStored(local, id);
     const unexpected = async (): Promise<never> => {
       throw new Error('Unexpected repository method');
     };
@@ -395,6 +435,8 @@ describe('pitch draft AI review flow', () => {
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
       getDraft: unexpected,
+      listAssets: unexpected,
+      removeAsset: unexpected,
       listMyConsentRequests: unexpected,
       listMyDrafts: unexpected,
       registerAsset: unexpected,
@@ -413,6 +455,7 @@ describe('pitch draft AI review flow', () => {
     const id = await createCompleteDraft(local);
     await local.saveReview(id, { ...REVIEW, generationMode: 'manual' });
     await local.attachServerDraft(id, SERVER_ROW.id);
+    await markMediaStored(local, id);
     const unexpected = async (): Promise<never> => {
       throw new Error('Unexpected repository method');
     };
@@ -423,6 +466,8 @@ describe('pitch draft AI review flow', () => {
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
       getDraft: unexpected,
+      listAssets: unexpected,
+      removeAsset: unexpected,
       listMyConsentRequests: unexpected,
       listMyDrafts: unexpected,
       registerAsset: unexpected,

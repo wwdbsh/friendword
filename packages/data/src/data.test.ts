@@ -633,6 +633,12 @@ describe('ConsentRepo', () => {
       asset_ids: [firstPhotoId, secondPhotoId],
       voice_asset_path: null,
       content_hash: 'hash',
+      // Column names below are the ones migrations 0032/0036/0047 actually
+      // create. A repo that reads a different key must go red here, not pass
+      // because the fake echoed back whatever it was asked for.
+      transcript: { text: 'Blair is the best. ', segments: [] },
+      dater_edited: false,
+      structure_reviewed: true,
       created_at: '2026-07-13T00:00:00Z',
     };
     mocks.consentRevisionSelect.mockReturnValue({
@@ -673,7 +679,13 @@ describe('ConsentRepo', () => {
       revision,
       assets,
       hardClaims: ['Owns a home'],
+      // Legacy snapshot: hard claims only, so there is nothing to edit.
+      editableStructure: null,
+      // Fifth audit D1: the transcript the Dater must be shown at consent is
+      // the revision's own frozen snapshot, not the live draft's.
+      transcriptText: 'Blair is the best. ',
       daterEdited: false,
+      structureReviewed: true,
     });
     expect(filterByDraftId).toHaveBeenCalledWith('pitch_draft_id', draftId);
     expect(filterByAssetIds).toHaveBeenCalledWith('id', [firstPhotoId, secondPhotoId]);
@@ -711,6 +723,101 @@ describe('ConsentRepo', () => {
     const review = await repo.getConsentReview(draftId);
     expect(review.daterEdited).toBe(true);
     expect(review.hardClaims).toEqual([]);
+  });
+
+  // FIFTH-AUDIT REGRESSION — P0: the public page renders `structure`, so the
+  // Dater must see and edit those five fields, not just headline/body.
+  it('exposes the five editable structure fields the public page renders', async () => {
+    signedInSession();
+    mocks.consentRequestSelect.mockReturnValue({
+      eq: () => ({ single: async () => ({ data: { revision_id: revisionId }, error: null }) }),
+    });
+    const structure = {
+      hook: 'Blair turns ordinary Tuesdays into stories.',
+      relationship_context: 'Roommates for four years.',
+      three_specific_qualities: ['Remembers every birthday', 'Cooks for a crowd', 'Never gossips'],
+      evidence_or_anecdote: 'Blair drove three hours to sit with me after surgery.',
+      good_match_for: 'Someone who likes long walks.',
+      hard_claims_requiring_confirmation: ['Owns a home'],
+    };
+    mocks.consentRevisionSelect.mockReturnValue({
+      eq: () => ({
+        eq: () => ({
+          single: async () => ({
+            data: {
+              id: revisionId,
+              pitch_draft_id: draftId,
+              revision_number: 2,
+              headline: 'Blair turns ordinary Tuesdays into stories.',
+              body: 'Roommates for four years.',
+              structure,
+              asset_ids: [],
+              voice_asset_path: null,
+              content_hash: 'hash',
+              created_at: '2026-07-13T00:00:00Z',
+            },
+            error: null,
+          }),
+        }),
+      }),
+    });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    const review = await repo.getConsentReview(draftId);
+
+    expect(review.editableStructure).toEqual({
+      hook: structure.hook,
+      relationship_context: structure.relationship_context,
+      three_specific_qualities: structure.three_specific_qualities,
+      evidence_or_anecdote: structure.evidence_or_anecdote,
+      good_match_for: structure.good_match_for,
+    });
+    // The AI safety flag is never handed to the editor.
+    expect(review.editableStructure).not.toHaveProperty('hard_claims_requiring_confirmation');
+    expect(review.hardClaims).toEqual(['Owns a home']);
+  });
+
+  it('reports a structurally broken legacy snapshot as not editable', async () => {
+    signedInSession();
+    mocks.consentRequestSelect.mockReturnValue({
+      eq: () => ({ single: async () => ({ data: { revision_id: revisionId }, error: null }) }),
+    });
+    mocks.consentRevisionSelect.mockReturnValue({
+      eq: () => ({
+        eq: () => ({
+          single: async () => ({
+            data: {
+              id: revisionId,
+              pitch_draft_id: draftId,
+              revision_number: 2,
+              headline: 'Legacy headline',
+              body: 'Legacy body',
+              // Only two qualities: the page contract needs three, so this is
+              // not editable — the UI must fall back, never invent a blank.
+              structure: {
+                hook: 'A hook',
+                relationship_context: 'Context',
+                three_specific_qualities: ['one', 'two'],
+                evidence_or_anecdote: 'Anecdote',
+                good_match_for: 'Someone kind',
+                hard_claims_requiring_confirmation: [],
+              },
+              asset_ids: [],
+              voice_asset_path: null,
+              content_hash: 'hash',
+              created_at: '2026-07-13T00:00:00Z',
+            },
+            error: null,
+          }),
+        }),
+      }),
+    });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    const review = await repo.getConsentReview(draftId);
+
+    expect(review.editableStructure).toBeNull();
+    expect(review.revision.headline).toBe('Legacy headline');
   });
 
   it('reads the AI disclosure revision through the C1 RPC', async () => {
@@ -885,6 +992,107 @@ describe('ConsentRepo', () => {
       included_asset_ids: [secondPhotoId, voiceAssetId],
     });
     expect(revision).toEqual({ revisionId, revisionNumber: 3 });
+  });
+
+  it('sends the edited structure and derives headline/body with the RPC formula', async () => {
+    signedInSession();
+    mocks.rpc.mockResolvedValue({
+      data: [{ revision_id: revisionId, revision_number: 4 }],
+      error: null,
+    });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await repo.createDaterRevision({
+      draftId,
+      // Stale client-side copies: the repo must ignore them and re-derive.
+      headline: 'Whatever the client had cached',
+      body: 'Stale body',
+      includedAssetIds: [secondPhotoId, voiceAssetId],
+      structure: {
+        hook: '  My own opening line.  ',
+        relationship_context: 'We were roommates for four years.',
+        three_specific_qualities: ['Remembers birthdays', 'Cooks for a crowd', 'Never gossips'],
+        evidence_or_anecdote: 'They drove three hours to sit with me.',
+        good_match_for: 'Someone who likes long walks.',
+      },
+    });
+
+    expect(mocks.rpc).toHaveBeenCalledWith('create_dater_revision', {
+      draft_id: draftId,
+      new_headline: 'My own opening line.',
+      new_body:
+        'We were roommates for four years.\n\nThey drove three hours to sit with me.\n\nA good match: Someone who likes long walks.',
+      included_asset_ids: [secondPhotoId, voiceAssetId],
+      new_structure: {
+        hook: 'My own opening line.',
+        relationship_context: 'We were roommates for four years.',
+        three_specific_qualities: ['Remembers birthdays', 'Cooks for a crowd', 'Never gossips'],
+        evidence_or_anecdote: 'They drove three hours to sit with me.',
+        good_match_for: 'Someone who likes long walks.',
+      },
+    });
+  });
+
+  // FIFTH-AUDIT REGRESSION (decision D2). NULL and [] are different answers to
+  // the RPC: absent keeps every flagged claim, an empty array publishes none.
+  // Collapsing them would silently re-publish a claim the Dater removed.
+  it('distinguishes "no disposition" from "I removed every flagged claim"', async () => {
+    signedInSession();
+    mocks.rpc.mockResolvedValue({
+      data: [{ revision_id: revisionId, revision_number: 5 }],
+      error: null,
+    });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await repo.createDaterRevision({
+      draftId,
+      headline: 'Headline',
+      body: 'Body',
+      includedAssetIds: [],
+    });
+    expect(mocks.rpc.mock.calls.at(-1)?.[1]).not.toHaveProperty('retained_hard_claims');
+
+    await repo.createDaterRevision({
+      draftId,
+      headline: 'Headline',
+      body: 'Body',
+      includedAssetIds: [],
+      retainedHardClaims: [],
+    });
+    expect(mocks.rpc.mock.calls.at(-1)?.[1]).toMatchObject({ retained_hard_claims: [] });
+
+    await repo.createDaterRevision({
+      draftId,
+      headline: 'Headline',
+      body: 'Body',
+      includedAssetIds: [],
+      retainedHardClaims: ['Owns a home'],
+    });
+    expect(mocks.rpc.mock.calls.at(-1)?.[1]).toMatchObject({
+      retained_hard_claims: ['Owns a home'],
+    });
+  });
+
+  it('refuses to cut a revision when the edited structure is invalid', async () => {
+    signedInSession();
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await expect(
+      repo.createDaterRevision({
+        draftId,
+        headline: 'Headline',
+        body: 'Body',
+        includedAssetIds: [],
+        structure: {
+          hook: 'My own opening line.',
+          relationship_context: 'We were roommates for four years.',
+          three_specific_qualities: ['Remembers birthdays', '   ', 'Never gossips'],
+          evidence_or_anecdote: 'They drove three hours to sit with me.',
+          good_match_for: 'Someone who likes long walks.',
+        },
+      }),
+    ).rejects.toThrow('pitch structure requires all five fields');
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it('sets a 7-day publish preference and omits an empty intent filter', async () => {
@@ -1303,6 +1511,9 @@ describe('getPublishedPitchBySlug', () => {
       body: null,
       transcript: null,
       structure: null,
+      // draftRow carries no `structure_reviewed`, i.e. a row published before
+      // migration 0047 added the column: fails closed.
+      daterReviewedStructure: false,
       age: 32,
       datingIntent: 'long-term',
       approximateLocation: 'Seattle, Puget Sound',
@@ -1314,6 +1525,29 @@ describe('getPublishedPitchBySlug', () => {
         },
       ],
     });
+  });
+
+  // FIFTH-AUDIT REGRESSION (verdict 4 / decision D6). The public page's copy
+  // branches on this flag, so reading the wrong column silently downgrades
+  // every page to the weaker sentence. `draftRow` is a fixed object, not an
+  // echo of the requested keys, so renaming the column the repo reads makes
+  // the `true` case fail — which is exactly what did NOT happen when the repo
+  // was briefly wired to a `dater_reviewed_structure` column that 0047 never
+  // creates.
+  it('carries pitch_drafts.structure_reviewed through as daterReviewedStructure', async () => {
+    configurePublishedPitchClient(campaignRow, {
+      draft: { ...draftRow, structure_reviewed: true },
+    });
+    const client = createServiceClient('https://project.example', 'service-key');
+
+    const reviewed = await getPublishedPitchBySlug(client, 'blair-abc123');
+    expect(reviewed?.daterReviewedStructure).toBe(true);
+
+    configurePublishedPitchClient(campaignRow, {
+      draft: { ...draftRow, structure_reviewed: false },
+    });
+    const notReviewed = await getPublishedPitchBySlug(client, 'blair-abc123');
+    expect(notReviewed?.daterReviewedStructure).toBe(false);
   });
 
   it('canonicalizes region precision to the region without the city (CP-1)', async () => {

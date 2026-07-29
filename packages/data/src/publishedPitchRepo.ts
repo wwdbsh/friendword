@@ -89,6 +89,19 @@ export type PublishedPitch = {
    */
   readonly structure: PitchStructure | null;
   /**
+   * True when the published `structure` came from the Dater's own section
+   * editor. Read from `pitch_drafts.structure_reviewed`, which migration 0047's
+   * approve_and_publish_pitch copies from the approved revision's
+   * `structure_reviewed`. The DTO name differs from the column on purpose: on
+   * the draft the flag is about the Dater, not about the draft's own edits.
+   * False for everything published before that editor existed — those Daters
+   * approved a headline/body pair and never saw the sections the page renders.
+   * Reader-facing copy MUST branch on this: "reviewed and approved this page"
+   * on a false row is a false statement. Fails closed to false on a pre-0047
+   * row that has no such column.
+   */
+  readonly daterReviewedStructure: boolean;
+  /**
    * Dater's age in whole years, derived server-side from `profiles.birth_date`
    * (CP-1). The raw birth date is never exposed. Null when no birth date is on
    * file yet.
@@ -321,6 +334,7 @@ export async function getPublishedPitchBySlug(
     body: draft.body,
     transcript,
     structure,
+    daterReviewedStructure: draft.structure_reviewed === true,
     age,
     datingIntent,
     approximateLocation,

@@ -19,6 +19,9 @@ const pendingPreviewRow = {
   request_status: 'pending',
 };
 
+const TRANSCRIPT_TEXT =
+  'Okay so, Blair. Blair is the person who turns an ordinary Tuesday into the story you tell all year. She owns a place off Pike and the door is always open.';
+
 const revisionRow = {
   id: REVISION_ID,
   pitch_draft_id: DRAFT_ID,
@@ -29,6 +32,11 @@ const revisionRow = {
   asset_ids: [FIRST_PHOTO_ID, SECOND_PHOTO_ID, VOICE_ASSET_ID],
   voice_asset_path: `${DRAFT_ID}/voice.m4a`,
   content_hash: 'revision-content-hash',
+  // Frozen at revision time (migration 0032) and copied verbatim onto the
+  // published draft at approval, so this is the exact text the public page
+  // prints and the captions are cut from.
+  transcript: { text: TRANSCRIPT_TEXT, segments: [] },
+  structure_reviewed: false,
   created_at: '2026-07-13T00:00:00Z',
 };
 
@@ -298,7 +306,7 @@ test('claims, reviews the voice pitch, and publishes when signed in', async ({ p
   });
 
   await test.step('The dater must confirm their own age, location, and intent (CP-1)', async () => {
-    await page.getByLabel('I confirm all of these claims are true.').check();
+    await page.getByLabel('I confirm the claims above are true.').check();
     // Missing profile inputs keep approval disabled.
     await expect(page.getByRole('button', { name: 'Approve & publish my page' })).toBeDisabled();
     await fillDaterProfile(page);
@@ -316,7 +324,7 @@ test('claims, reviews the voice pitch, and publishes when signed in', async ({ p
   });
 
   await test.step('When the dater confirms claims and approves with the defaults', async () => {
-    await page.getByLabel('I confirm all of these claims are true.').check();
+    await page.getByLabel('I confirm the claims above are true.').check();
     await page.getByRole('button', { name: 'Approve & publish my page' }).click();
     await page.waitForURL('**/p/blair-mix123');
     expect(profileBody).toEqual({
@@ -418,7 +426,7 @@ test('saves dater edits with voice retained, reloads the revision, and publishes
   // Hidden precision keeps the location out of the real preview snapshot.
   await expect(page.locator('dd', { hasText: 'Hidden' })).toBeVisible();
   await expect(page.getByText('Blair, 32')).toBeVisible();
-  await page.getByLabel('I confirm all of these claims are true.').check();
+  await page.getByLabel('I confirm the claims above are true.').check();
   await page.getByRole('button', { name: 'Approve & publish my page' }).click();
   await page.waitForURL('**/p/blair-edited');
 
@@ -446,6 +454,7 @@ test('uploads and validates a dater photo before saving it in the full revision 
   let revisionBody: unknown;
   let assetInsertBody: unknown;
   let uploadedObjectName = '';
+  const moderatedTexts: Record<string, unknown>[] = [];
 
   await page.route('**/rest/v1/consent_requests*', (route) =>
     route.fulfill({ json: { revision_id: activeRevision.id } }),
@@ -494,6 +503,14 @@ test('uploads and validates a dater photo before saving it in the full revision 
   await page.route('**/api/media/validate', (route) =>
     route.fulfill({ json: { ok: true, moderationStatus: 'passed' } }),
   );
+  // Every save registers a verdict for the exact words it is about to freeze,
+  // photo-only included: create_dater_revision checks the ledger on every call
+  // (0047), so skipping the call when the text is unchanged locked the Dater
+  // out as soon as media_validation_enforcement was switched on.
+  await page.route('**/api/moderate-text', (route) => {
+    moderatedTexts.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({ json: { ok: true, moderationStatus: 'passed' } });
+  });
   await page.route('**/storage/v1/object/sign/pitch-media/**dater-*.*', (route) =>
     route.fulfill({
       json: {
@@ -541,6 +558,373 @@ test('uploads and validates a dater photo before saving it in the full revision 
     new_body: revisionRow.body,
     included_asset_ids: [FIRST_PHOTO_ID, SECOND_PHOTO_ID, VOICE_ASSET_ID, DATER_PHOTO_ID],
   });
+  // The photo-only save still registers the verdict for the words it freezes.
+  expect(moderatedTexts).toContainEqual({
+    kind: 'dater_pitch_content',
+    draftId: DRAFT_ID,
+    headline: revisionRow.headline,
+    body: revisionRow.body,
+  });
+});
+
+// FIFTH-AUDIT REGRESSION — P0 (the Dater approves the words that publish).
+// The public page renders the five `structure` fields and ignores the approved
+// body, so editing headline/body alone published the AI's original sentences.
+// The Dater now edits the structure itself, under the same labels the public
+// page prints.
+//
+// Reach: this spec mocks Supabase at the browser boundary, and /p/[slug] is
+// server-rendered from the service client, so the final "the sentence is on the
+// public page" hop is covered by tests-audit3/dater-structure-edit.audit3.test.ts
+// (fromPublishedPitch) and supabase/tests/23_dater_structure_edit.sql instead.
+const structuredRevisionRow = {
+  ...revisionRow,
+  structure: {
+    hook: 'Blair turns ordinary Tuesdays into stories.',
+    relationship_context: 'We shared a wall in a Capitol Hill apartment for four years.',
+    three_specific_qualities: ['Remembers every birthday', 'Cooks for a crowd', 'Never gossips'],
+    evidence_or_anecdote: 'Blair drove three hours to sit with me after my surgery.',
+    good_match_for: 'Someone who likes long walks and longer conversations.',
+    hard_claims_requiring_confirmation: ['Blair owns a home.'],
+  },
+};
+
+const EDITED_QUALITY = 'Turns a bad week into a dinner party';
+// No hard_claims_requiring_confirmation: the client must never send the AI's
+// safety flag back, so it cannot be edited away.
+const EDITED_STRUCTURE = {
+  hook: structuredRevisionRow.structure.hook,
+  relationship_context: structuredRevisionRow.structure.relationship_context,
+  three_specific_qualities: ['Remembers every birthday', EDITED_QUALITY, 'Never gossips'],
+  evidence_or_anecdote: structuredRevisionRow.structure.evidence_or_anecdote,
+  good_match_for: structuredRevisionRow.structure.good_match_for,
+};
+const DERIVED_HEADLINE = EDITED_STRUCTURE.hook;
+const DERIVED_BODY = `${EDITED_STRUCTURE.relationship_context}\n\n${EDITED_STRUCTURE.evidence_or_anecdote}\n\nA good match: ${EDITED_STRUCTURE.good_match_for}`;
+
+test('lets the dater edit the five published fields and publishes those exact words', async ({
+  page,
+}) => {
+  await mockClaimedReview(page);
+  let activeRevision = structuredRevisionRow;
+  let revisionBody: unknown;
+  let moderateBody: unknown;
+  let approveBody: unknown;
+
+  await page.route('**/rest/v1/consent_requests*', (route) =>
+    route.fulfill({ json: { revision_id: activeRevision.id } }),
+  );
+  await page.route('**/rest/v1/consent_revisions*', (route) =>
+    route.fulfill({ json: activeRevision }),
+  );
+  await page.route('**/api/moderate-text', (route) => {
+    moderateBody = route.request().postDataJSON();
+    return route.fulfill({ json: { ok: true, moderationStatus: 'passed' } });
+  });
+  await page.route('**/rest/v1/rpc/create_dater_revision*', (route) => {
+    revisionBody = route.request().postDataJSON();
+    activeRevision = {
+      ...structuredRevisionRow,
+      id: DATER_REVISION_ID,
+      revision_number: 3,
+      headline: DERIVED_HEADLINE,
+      body: DERIVED_BODY,
+      structure: {
+        ...EDITED_STRUCTURE,
+        // The RPC preserves the AI's hard claims; the client never sends them.
+        hard_claims_requiring_confirmation: ['Blair owns a home.'],
+      },
+    };
+    return route.fulfill({ json: [{ revision_id: DATER_REVISION_ID, revision_number: 3 }] });
+  });
+  await page.route('**/rest/v1/rpc/approve_and_publish_pitch*', (route) => {
+    approveBody = route.request().postDataJSON();
+    return route.fulfill({
+      json: [
+        { campaign_id: '20000000-0000-0000-0000-000000000001', campaign_slug: 'blair-structure' },
+      ],
+    });
+  });
+
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+
+  await test.step('Then every published field is editable under the public page’s own labels', async () => {
+    await expect(page.getByLabel('The hook')).toHaveValue(structuredRevisionRow.structure.hook);
+    await expect(page.getByLabel('How they know each other')).toHaveValue(
+      structuredRevisionRow.structure.relationship_context,
+    );
+    await expect(page.getByLabel('Thing 1')).toHaveValue('Remembers every birthday');
+    await expect(page.getByLabel('Thing 2')).toHaveValue('Cooks for a crowd');
+    await expect(page.getByLabel('Thing 3')).toHaveValue('Never gossips');
+    await expect(page.getByLabel('A moment that shows it')).toHaveValue(
+      structuredRevisionRow.structure.evidence_or_anecdote,
+    );
+    await expect(page.getByLabel('A good match for')).toHaveValue(
+      structuredRevisionRow.structure.good_match_for,
+    );
+    // The claims flow is untouched: hard claims stay AI-owned and confirmable.
+    await expect(page.getByText('Blair owns a home.')).toBeVisible();
+    // The extra fields must not push the review sideways on a small phone.
+    await page.setViewportSize({ width: 320, height: 720 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+    ).toBe(false);
+    await page.setViewportSize({ width: 390, height: 844 });
+  });
+
+  await test.step('When the dater rewrites one of the three specific things', async () => {
+    await page.getByRole('button', { name: 'Agree to the AI safety review' }).click();
+    await page.getByLabel('Thing 2').fill(EDITED_QUALITY);
+    await page.getByRole('button', { name: 'Save my edits' }).click();
+    await expect(page.getByText('Your edits are saved in a new review version.')).toBeVisible();
+  });
+
+  await test.step('Then the edited sentence — not the AI’s — is what gets frozen', async () => {
+    expect(revisionBody).toEqual({
+      draft_id: DRAFT_ID,
+      new_headline: DERIVED_HEADLINE,
+      new_body: DERIVED_BODY,
+      included_asset_ids: [FIRST_PHOTO_ID, SECOND_PHOTO_ID, VOICE_ASSET_ID],
+      new_structure: EDITED_STRUCTURE,
+    });
+    // hard_claims_requiring_confirmation is never client-editable.
+    expect(revisionBody).not.toHaveProperty('new_structure.hard_claims_requiring_confirmation');
+    // The published qualities are inside the moderated text.
+    expect(moderateBody).toEqual({
+      kind: 'dater_pitch_content',
+      draftId: DRAFT_ID,
+      headline: DERIVED_HEADLINE,
+      body: DERIVED_BODY,
+      qualities: EDITED_STRUCTURE.three_specific_qualities,
+    });
+  });
+
+  await test.step('And the page preview shows the edited line while untouched lines stay', async () => {
+    await expect(page.getByLabel('Thing 2')).toHaveValue(EDITED_QUALITY);
+    const previewList = page.locator('ul li');
+    await expect(previewList.filter({ hasText: EDITED_QUALITY })).toBeVisible();
+    await expect(previewList.filter({ hasText: 'Cooks for a crowd' })).toHaveCount(0);
+    await expect(previewList.filter({ hasText: 'Never gossips' })).toBeVisible();
+    await expect(page.getByText('Three specific things').first()).toBeVisible();
+  });
+
+  await test.step('And approval publishes that revision', async () => {
+    await fillDaterProfile(page);
+    await page.getByLabel('I confirm the claims above are true.').check();
+    await page.getByRole('button', { name: 'Approve & publish my page' }).click();
+    await page.waitForURL('**/p/blair-structure');
+    expect(approveBody).toMatchObject({
+      draft_id: DRAFT_ID,
+      revision_id: DATER_REVISION_ID,
+      hard_claims_confirmed: true,
+    });
+  });
+});
+
+test('keeps the AI wording when the dater changes nothing', async ({ page }) => {
+  await mockClaimedReview(page);
+  let revisionCalls = 0;
+  await page.route('**/rest/v1/consent_revisions*', (route) =>
+    route.fulfill({ json: structuredRevisionRow }),
+  );
+  await page.route('**/rest/v1/rpc/create_dater_revision*', (route) => {
+    revisionCalls += 1;
+    return route.fulfill({ json: [{ revision_id: DATER_REVISION_ID, revision_number: 3 }] });
+  });
+
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+
+  await expect(page.getByLabel('Thing 2')).toHaveValue('Cooks for a crowd');
+  await expect(page.locator('ul li').filter({ hasText: 'Cooks for a crowd' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save my edits' })).toBeDisabled();
+  expect(revisionCalls).toBe(0);
+});
+
+// FIFTH-AUDIT REGRESSION — the save lockout (verdicts 4 and 6, decision D3).
+// create_dater_revision derives headline/body from the published structure on
+// every path and checks the verdict for THAT string on every save, so a save
+// that moderated `headline\n\nbody` — or moderated nothing at all — left the
+// Dater permanently unable to save again once enforcement was switched on.
+// This pins the exact bytes: the second save re-registers the same five-part
+// string as the first, from the structure alone.
+test('a photo-only save after a structure edit still saves, and re-registers the same words', async ({
+  page,
+}) => {
+  await mockClaimedReview(page);
+  let activeRevision = structuredRevisionRow;
+  const moderatedTexts: Record<string, unknown>[] = [];
+  const revisionBodies: Record<string, unknown>[] = [];
+
+  await page.route('**/rest/v1/consent_requests*', (route) =>
+    route.fulfill({ json: { revision_id: activeRevision.id } }),
+  );
+  await page.route('**/rest/v1/consent_revisions*', (route) =>
+    route.fulfill({ json: activeRevision }),
+  );
+  await page.route('**/api/moderate-text', (route) => {
+    moderatedTexts.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({ json: { ok: true, moderationStatus: 'passed' } });
+  });
+  await page.route('**/rest/v1/rpc/create_dater_revision*', (route) => {
+    revisionBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+    activeRevision = {
+      ...structuredRevisionRow,
+      id: DATER_REVISION_ID,
+      revision_number: 3,
+      headline: DERIVED_HEADLINE,
+      body: DERIVED_BODY,
+      structure: {
+        ...EDITED_STRUCTURE,
+        hard_claims_requiring_confirmation: ['Blair owns a home.'],
+      },
+      // The server sets this once the Dater submits the five fields, and keeps
+      // it set for the rest of the review.
+      structure_reviewed: true,
+    };
+    return route.fulfill({ json: [{ revision_id: DATER_REVISION_ID, revision_number: 3 }] });
+  });
+
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+
+  await test.step('Given a structure edit that was saved', async () => {
+    await page.getByRole('button', { name: 'Agree to the AI safety review' }).click();
+    await page.getByLabel('Thing 2').fill(EDITED_QUALITY);
+    await page.getByRole('button', { name: 'Save my edits' }).click();
+    await expect(page.getByText('Your edits are saved in a new review version.')).toBeVisible();
+  });
+
+  await test.step('When the dater then changes only which photos are included', async () => {
+    await page.getByRole('button', { name: 'Exclude suggested photo 2' }).click();
+    await page.getByRole('button', { name: 'Save my edits' }).click();
+    await expect(page.getByText('Your edits are saved in a new review version.')).toBeVisible();
+  });
+
+  await test.step('Then it saved, and both saves registered the identical string', async () => {
+    expect(revisionBodies).toHaveLength(2);
+    // The structure travels with the photo-only save too: without it the RPC
+    // would still hash the five-part string but the client would have vouched
+    // for something else.
+    expect(revisionBodies[1]).toMatchObject({ new_structure: EDITED_STRUCTURE });
+    expect(moderatedTexts).toHaveLength(2);
+    expect(moderatedTexts[1]).toEqual(moderatedTexts[0]);
+    // Byte-for-byte: private.dater_revision_moderation_text's structure form is
+    // hook \n\n derived body \n\n q1 \n\n q2 \n\n q3.
+    expect(moderatedTexts[1]).toEqual({
+      kind: 'dater_pitch_content',
+      draftId: DRAFT_ID,
+      headline: DERIVED_HEADLINE,
+      body: DERIVED_BODY,
+      qualities: EDITED_STRUCTURE.three_specific_qualities,
+    });
+  });
+});
+
+// FIFTH-AUDIT REGRESSION — P0, decision D1 (the transcript is published text
+// the Dater could neither see nor reject). It is printed in full under the
+// pitch AND runs as the captions over the photos, yet the word "transcript"
+// did not appear once in this flow. It stays read-only on purpose — it is what
+// the Introducer actually said — so the escape hatch is "Request changes".
+test('shows the Dater the transcript that will publish, read-only', async ({ page }) => {
+  await mockClaimedReview(page);
+
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+
+  await test.step('The exact published text is on screen inside the Listen step', async () => {
+    const transcript = page.locator('[data-consent-transcript-text]');
+    await expect(transcript).toHaveText(TRANSCRIPT_TEXT);
+    await expect(
+      page.locator('[data-consent-step="listen"] [data-consent-transcript]'),
+    ).toHaveCount(1);
+  });
+
+  await test.step('It says where it publishes, and that it cannot be edited', async () => {
+    const block = page.locator('[data-consent-transcript]');
+    await expect(block).toContainText('runs as the captions over your photos');
+    await expect(block).toContainText('printed in full underneath');
+    await expect(block).toContainText('You can’t edit it');
+    await expect(block).toContainText('Request changes');
+    // Read-only means read-only: no input of any kind inside the block.
+    await expect(block.locator('input, textarea, [contenteditable="true"]')).toHaveCount(0);
+  });
+
+  await test.step('And the request-changes escape hatch it points at is really there', async () => {
+    await expect(page.getByRole('button', { name: 'Request changes' })).toBeVisible();
+  });
+});
+
+test('says so honestly when the recording has no transcript', async ({ page }) => {
+  await mockClaimedReview(page);
+  await page.route('**/rest/v1/consent_revisions*', (route) =>
+    route.fulfill({ json: { ...revisionRow, transcript: null } }),
+  );
+
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+
+  const block = page.locator('[data-consent-transcript]');
+  await expect(block).toContainText('We don’t have a written transcript');
+  await expect(block).toContainText('no transcript and no captions');
+  await expect(page.locator('[data-consent-transcript-text]')).toHaveCount(0);
+});
+
+// FIFTH-AUDIT REGRESSION — P0, decision D2 (verdicts 2 and 4). The old screen
+// listed the flagged claims and demanded "I confirm all of these claims are
+// true" — for a claim the Dater may have deleted from their page precisely
+// because it was false. Each claim now gets its own disposition, the removed
+// ones leave the published structure, and the attestation covers only the rest.
+test('lets the dater remove a flagged claim instead of attesting to it', async ({ page }) => {
+  await mockClaimedReview(page);
+  let revisionBody: Record<string, unknown> | undefined;
+  await page.route('**/api/moderate-text', (route) =>
+    route.fulfill({ json: { ok: true, moderationStatus: 'passed' } }),
+  );
+  await page.route('**/rest/v1/rpc/create_dater_revision*', (route) => {
+    revisionBody = route.request().postDataJSON() as Record<string, unknown>;
+    return route.fulfill({ json: [{ revision_id: DATER_REVISION_ID, revision_number: 3 }] });
+  });
+
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+
+  await test.step('Given a flagged claim, both answers are offered', async () => {
+    const claim = page.locator('[data-hard-claim]').filter({ hasText: 'Blair owns a home.' });
+    await expect(claim).toHaveCount(1);
+    await expect(claim.getByLabel('Still true — keep it on my page')).toBeChecked();
+    await expect(claim.getByLabel('I took that out of my page')).not.toBeChecked();
+    // The old blanket wording must be gone.
+    await expect(page.getByText('I confirm all of these claims are true.')).toHaveCount(0);
+  });
+
+  await test.step('When the dater says they took it out, approval is blocked until saved', async () => {
+    await page.getByLabel('I took that out of my page').check();
+    await expect(page.getByText('Save your edits before approving this page.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Approve & publish my page' })).toBeDisabled();
+    // The attestation no longer covers a claim that is leaving the page.
+    await expect(
+      page.getByLabel('I confirm the introduction on my page is truthful and accurate.'),
+    ).toBeVisible();
+  });
+
+  await test.step('Then saving sends the retained list, not the flagged one', async () => {
+    await page.getByRole('button', { name: 'Save my choices' }).click();
+    await expect(page.getByText('The claims you took off your page are gone from it.')).toBeVisible(
+      { timeout: 10_000 },
+    );
+    // An empty array is the whole point: NULL would keep every flagged claim.
+    expect(revisionBody?.retained_hard_claims).toEqual([]);
+  });
+});
+
+test('falls back to headline and body when the snapshot has no editable structure', async ({
+  page,
+}) => {
+  await mockClaimedReview(page);
+
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+
+  // revisionRow carries hard claims only — an honest fallback, not blank fields.
+  await expect(page.getByLabel('Headline')).toHaveValue(revisionRow.headline);
+  await expect(page.getByLabel('Introduction')).toHaveValue(revisionRow.body);
+  await expect(page.getByText('drafted before the section-by-section editor')).toBeVisible();
+  await expect(page.getByLabel('The hook')).toHaveCount(0);
 });
 
 test('gates photo upload behind the dater AI-processing consent', async ({ page }) => {
@@ -667,7 +1051,7 @@ test('requires the dater to reload when approval targets a stale revision', asyn
   );
 
   await page.goto(`/consent/${CONSENT_TOKEN}`);
-  await page.getByLabel('I confirm all of these claims are true.').check();
+  await page.getByLabel('I confirm the claims above are true.').check();
   await fillDaterProfile(page);
   await page.getByRole('button', { name: 'Approve & publish my page' }).click();
 
@@ -901,7 +1285,7 @@ test('lets a keyboard user confirm claims and reach an enabled approval (§8 acc
   await expect(approve).toBeDisabled();
 
   await fillDaterProfile(page);
-  const confirmClaims = page.getByLabel('I confirm all of these claims are true.');
+  const confirmClaims = page.getByLabel('I confirm the claims above are true.');
   await confirmClaims.focus();
   await expect(confirmClaims).toBeFocused();
   await page.keyboard.press('Space');

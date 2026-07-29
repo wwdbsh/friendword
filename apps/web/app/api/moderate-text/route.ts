@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { createProviders, ProviderNotImplementedError } from '@friendword/adapters';
+import { DATER_PITCH_FIELD_LIMITS, DATER_PITCH_QUALITY_COUNT } from '@friendword/contracts';
 import { createBrowserClient } from '@friendword/data';
 
 import { isActiveAccount } from '@/lib/accountStatus';
@@ -23,6 +24,14 @@ const requestSchema = z.discriminatedUnion('kind', [
     draftId: z.string().uuid(),
     headline: z.string().trim().min(1).max(120),
     body: z.string().trim().min(1).max(2000),
+    // Fifth audit P0: on a structure edit the three qualities publish verbatim
+    // but appear nowhere in the derived headline/body. They join the moderated
+    // string so the ledger hash matches private.dater_revision_moderation_text
+    // (migration 0047) and unmoderated text cannot ride along.
+    qualities: z
+      .array(z.string().trim().min(1).max(DATER_PITCH_FIELD_LIMITS.quality))
+      .length(DATER_PITCH_QUALITY_COUNT)
+      .optional(),
   }),
   z.object({ kind: z.literal('profile_bio'), text: z.string().min(1).max(500) }),
   z.object({ kind: z.literal('interest_note'), text: z.string().min(1).max(500) }),
@@ -109,7 +118,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
     // zod already trimmed headline/body, so this is byte-identical to the copy
     // create_dater_revision stores (ConsentRepo trims with the same schema).
-    content = `${input.headline}\n\n${input.body}`;
+    content =
+      input.qualities === undefined
+        ? `${input.headline}\n\n${input.body}`
+        : `${input.headline}\n\n${input.body}\n\n${input.qualities.join('\n\n')}`;
     draftId = input.draftId;
   } else {
     content = input.text;

@@ -10,15 +10,18 @@ export type DaterPitchModerationOutcome = 'passed' | 'flagged' | 'unavailable' |
 
 /**
  * Moderates the Dater's about-to-be-frozen revision copy. headline/body must be
- * the exact (trimmed) strings passed to create_dater_revision so the verdict is
- * recorded against the hash the DB gate checks. Returns before any revision is
- * cut so flagged copy blocks with an honest message.
+ * the exact (trimmed) strings create_dater_revision will store — on a structure
+ * edit that means the SERVER-DERIVED pair, with `qualities` carrying the three
+ * published qualities — so the verdict is recorded against the hash the DB gate
+ * checks. Returns before any revision is cut so flagged copy blocks with an
+ * honest message.
  */
 export async function requestDaterPitchModeration(
   draftId: string,
   headline: string,
   body: string,
   accessToken: string,
+  qualities?: readonly string[],
 ): Promise<DaterPitchModerationOutcome> {
   try {
     const response = await fetch('/api/moderate-text', {
@@ -27,7 +30,13 @@ export async function requestDaterPitchModeration(
         'content-type': 'application/json',
         authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({ kind: 'dater_pitch_content', draftId, headline, body }),
+      body: JSON.stringify({
+        kind: 'dater_pitch_content',
+        draftId,
+        headline,
+        body,
+        ...(qualities === undefined ? {} : { qualities }),
+      }),
     });
     if (response.status === 409) {
       return 'consent-required';

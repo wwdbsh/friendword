@@ -4,6 +4,16 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import {
+  characterLength,
+  DATER_HARD_CLAIM_ERRORS,
+  DATER_PITCH_FIELD_LIMITS,
+  daterPitchStructureEditSchema,
+  deriveDaterPitchBody,
+  deriveDaterPitchHeadline,
+  rendersBlank,
+  type DaterPitchStructureEdit,
+} from '@friendword/contracts';
+import {
   ageFromBirthDate,
   canonicalApproximateLocation,
   confirmDisplayName,
@@ -14,6 +24,7 @@ import {
   type BrowserSupabaseClient,
   type ConsentPreview,
   type ConsentReview,
+  type EditablePitchStructure,
 } from '@friendword/data';
 
 import { EmailSignIn } from '@/components/EmailSignIn';
@@ -33,6 +44,27 @@ const DATER_AI_UNAVAILABLE_COPY =
   'The AI safety review needed for new photos and text edits is unavailable right now. You can still choose from the current photos, approve, or request changes.';
 const DATER_TEXT_FLAGGED_COPY =
   'That wording didn’t pass our safety review. Edit it and try saving again.';
+const LEGACY_STRUCTURE_COPY =
+  'This pitch was drafted before the section-by-section editor, so you edit the headline and introduction here. Everything published comes from these two fields.';
+
+// Fifth audit P0: the public page prints these exact labels above each field
+// (apps/web/app/p/[campaignSlug]/page.tsx), so what the Dater edits is visibly
+// the same thing their readers see.
+const STRUCTURE_LABELS = {
+  hook: 'The hook',
+  relationship_context: 'How they know each other',
+  three_specific_qualities: 'Three specific things',
+  evidence_or_anecdote: 'A moment that shows it',
+  good_match_for: 'A good match for',
+} as const;
+
+const STRUCTURE_HINTS = {
+  hook: 'The opening line at the top of your page.',
+  relationship_context: 'How you and your friend know each other.',
+  three_specific_qualities: 'Three things your page lists about you, in this order.',
+  evidence_or_anecdote: 'The moment your friend told to show it.',
+  good_match_for: 'Who your friend thinks you’d click with.',
+} as const;
 
 const RELATIONSHIP_LABELS: Record<string, string> = {
   friend: 'Friend',
@@ -167,6 +199,105 @@ function sameIds(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((id) => right.includes(id));
 }
 
+function sameStructure(
+  left: EditablePitchStructure | null,
+  right: EditablePitchStructure | null,
+): boolean {
+  if (left === null || right === null) {
+    return left === right;
+  }
+  return (
+    left.hook === right.hook &&
+    left.relationship_context === right.relationship_context &&
+    left.evidence_or_anecdote === right.evidence_or_anecdote &&
+    left.good_match_for === right.good_match_for &&
+    left.three_specific_qualities.length === right.three_specific_qualities.length &&
+    left.three_specific_qualities.every(
+      (quality, index) => quality === right.three_specific_qualities[index],
+    )
+  );
+}
+
+/**
+ * Client-side mirror of private.normalized_dater_pitch_structure, phrased for
+ * the person editing. The RPC re-checks all of it; this only saves the Dater a
+ * round trip and names the field that needs attention.
+ *
+ * `rendersBlank` and `characterLength` come from the contract on purpose: a
+ * field of zero-width spaces passes both `.trim()` and the server's `btrim`,
+ * and `.length` counts UTF-16 units while the server counts characters. Using
+ * the shared helpers keeps this check and the save schema in step.
+ */
+function structureFieldProblem(value: string, label: string, limit: number): string | null {
+  if (rendersBlank(value)) {
+    return `“${label}” can’t be empty — write it in your own words, or ask your friend for changes.`;
+  }
+  const length = characterLength(value.trim());
+  if (length > limit) {
+    return `“${label}” is ${length} characters — trim it to ${limit} or fewer.`;
+  }
+  return null;
+}
+
+/** Every problem, not just the first: an over-long AI draft can hit several. */
+function structureProblems(structure: EditablePitchStructure): readonly string[] {
+  const { hook, relationshipContext, quality, evidenceOrAnecdote, goodMatchFor } =
+    DATER_PITCH_FIELD_LIMITS;
+  return [
+    structureFieldProblem(structure.hook, STRUCTURE_LABELS.hook, hook),
+    structureFieldProblem(
+      structure.relationship_context,
+      STRUCTURE_LABELS.relationship_context,
+      relationshipContext,
+    ),
+    ...structure.three_specific_qualities.map((value, index) =>
+      structureFieldProblem(
+        value,
+        `${STRUCTURE_LABELS.three_specific_qualities} ${index + 1}`,
+        quality,
+      ),
+    ),
+    structureFieldProblem(
+      structure.evidence_or_anecdote,
+      STRUCTURE_LABELS.evidence_or_anecdote,
+      evidenceOrAnecdote,
+    ),
+    structureFieldProblem(structure.good_match_for, STRUCTURE_LABELS.good_match_for, goodMatchFor),
+  ].filter((problem): problem is string => problem !== null);
+}
+
+/**
+ * Turns the RPC's rejection into something the Dater can act on. The matched
+ * substrings are the verbatim strings raised by create_dater_revision; each one
+ * has a different fix, so a single generic message would leave them stuck.
+ */
+function saveErrorCopy(detail: string): string {
+  if (detail.includes(DATER_HARD_CLAIM_ERRORS.notFlagged)) {
+    return 'Your page changed while you were working on it. Reload to see the current claims and choose again.';
+  }
+  if (detail.includes('moderation verdict')) {
+    return 'Our safety review hasn’t cleared this wording yet. Change something and save again, or request changes from your friend.';
+  }
+  if (detail.includes('pitch structure')) {
+    return 'We couldn’t save that — every part has to be filled in and within its length limit.';
+  }
+  if (detail.includes('too long')) {
+    return 'Keep the headline under 120 characters and the introduction under 2,000.';
+  }
+  return 'We could not save your edits. Please try again.';
+}
+
+/**
+ * The claims the Dater says are still true. Order follows the flagged list so
+ * the array the RPC receives is a stable subset of what it flagged.
+ */
+function retainedClaims(
+  flagged: readonly string[],
+  removed: ReadonlySet<number>,
+): readonly string[] {
+  return flagged.filter((_claim, index) => !removed.has(index));
+}
+
 function revisionAssetIds(
   review: ConsentReview,
   includedPhotoAssetIds: readonly string[],
@@ -248,6 +379,9 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   const [includedAssetIds, setIncludedAssetIds] = useState<readonly string[]>([]);
   const [editHeadline, setEditHeadline] = useState('');
   const [editBody, setEditBody] = useState('');
+  // The five published fields. Null on a legacy snapshot the editor can't
+  // parse — the flow then falls back to headline/body and says so.
+  const [editStructure, setEditStructure] = useState<EditablePitchStructure | null>(null);
   const [savingEdits, setSavingEdits] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [daterAiConsent, setDaterAiConsent] = useState<'pending' | 'granted'>('pending');
@@ -268,6 +402,13 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   const [ownIntent, setOwnIntent] = useState<DatingIntent | ''>('');
   const [profileError, setProfileError] = useState<string | null>(null);
   const [hardClaimsConfirmed, setHardClaimsConfirmed] = useState(false);
+  // Fifth audit P0 (decision D2): the Dater disposes of each flagged claim.
+  // Indices into `review.hardClaims` that they marked as taken off the page —
+  // those are dropped from the published structure, and the confirmation they
+  // sign covers only what is left.
+  const [removedClaimIndexes, setRemovedClaimIndexes] = useState<ReadonlySet<number>>(
+    () => new Set(),
+  );
   const [requestingChanges, setRequestingChanges] = useState(false);
   const [responseNote, setResponseNote] = useState('');
   const [responding, setResponding] = useState(false);
@@ -297,9 +438,11 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         setIncludedAssetIds(context.photos.map((photo) => photo.assetId));
         setEditHeadline(review.revision.headline);
         setEditBody(review.revision.body);
+        setEditStructure(review.editableStructure);
         setEditStatus(null);
         setEditError(null);
         setHardClaimsConfirmed(false);
+        setRemovedClaimIndexes(new Set());
         setBirthDate('');
         setRegion('');
         setCity('');
@@ -466,43 +609,90 @@ export function ConsentFlow({ token }: { readonly token: string }) {
     if (client === null || state.step !== 'review') {
       return;
     }
-    const headline = editHeadline.trim();
-    const body = editBody.trim();
-    if (headline.length === 0 || body.length === 0) {
-      setEditError('Headline and introduction are required.');
-      return;
-    }
-    if (headline.length > 120 || body.length > 2000) {
-      setEditError('Keep the headline under 120 characters and the introduction under 2,000.');
-      return;
+    const review = state.review;
+    // Fifth audit P0: on the structure path the five published fields are the
+    // approved content and headline/body are derived with the RPC's formula, so
+    // the page can never show sentences the Dater didn't approve.
+    let editedStructure: DaterPitchStructureEdit | undefined;
+    let headline: string;
+    let body: string;
+    let textChanged: boolean;
+    if (editStructure !== null) {
+      // Lockout fix (fifth audit, verdicts 4 and 6). create_dater_revision
+      // derives headline/body from the published structure on EVERY path, so a
+      // photo-only save that omitted the structure would still be gated on the
+      // five-part moderation string. The structure therefore goes with every
+      // save, which also keeps what we moderate byte-identical to what the RPC
+      // hashes: it normalizes with btrim, and these values are already trimmed.
+      const problems = structureProblems(editStructure);
+      if (problems.length > 0) {
+        setEditError(problems.join(' '));
+        return;
+      }
+      const parsedStructure = daterPitchStructureEditSchema.safeParse(editStructure);
+      if (!parsedStructure.success) {
+        setEditError('Check each part of your pitch before saving.');
+        return;
+      }
+      editedStructure = parsedStructure.data;
+      headline = deriveDaterPitchHeadline(parsedStructure.data);
+      body = deriveDaterPitchBody(parsedStructure.data);
+      textChanged = !sameStructure(editStructure, review.editableStructure);
+    } else {
+      headline = editHeadline.trim();
+      body = editBody.trim();
+      if (rendersBlank(editHeadline) || rendersBlank(editBody)) {
+        setEditError('Headline and introduction are required.');
+        return;
+      }
+      if (characterLength(headline) > 120 || characterLength(body) > 2000) {
+        setEditError('Keep the headline under 120 characters and the introduction under 2,000.');
+        return;
+      }
+      textChanged = headline !== review.revision.headline || body !== review.revision.body;
     }
 
-    // Text edits run an external AI safety review before the revision is cut, so
-    // the moderation verdict exists for the DB gate and flagged copy never gets
-    // frozen. Photo-only changes carry no new text and skip this.
-    const textChanged =
-      headline !== state.review.revision.headline || body !== state.review.revision.body;
+    // A real text edit needs the Dater's AI-processing consent before the copy
+    // leaves for the external safety review. An unchanged save still registers
+    // its verdict below, but /api/moderate-text answers that from its
+    // content-addressed ledger without calling the provider, so it needs no
+    // consent — and skipping the check here is what keeps a photo-only save
+    // possible while the AI review is unavailable.
     if (textChanged && daterAiConsent !== 'granted') {
       setEditError(DATER_AI_CONSENT_REQUIRED_COPY);
       return;
     }
+
+    // Per-claim disposition (decision D2). Omitted when nothing was removed:
+    // absent means "keep them all", which is also what a pre-0047 function does
+    // with no such parameter. An empty array is NOT the same thing — it means
+    // the Dater took every flagged claim off the page.
+    const retained = retainedClaims(review.hardClaims, removedClaimIndexes);
+    const claimsChanged = retained.length !== review.hardClaims.length;
 
     setSavingEdits(true);
     setEditError(null);
     setEditStatus(null);
     try {
       const repo = new ConsentRepo(client);
-      if (textChanged) {
+      // Every save, not only a text edit: create_dater_revision checks the
+      // verdict for the words it is about to freeze on every call, so the
+      // client has to register that exact string every time. Repeats are
+      // answered from the ledger and cost no provider call.
+      {
         const { data: sessionData, error: sessionError } = await client.auth.getSession();
         const accessToken = sessionData.session?.access_token;
         if (sessionError !== null || accessToken === undefined) {
           throw new Error('text moderation requires a session');
         }
         const outcome = await requestDaterPitchModeration(
-          state.review.revision.pitch_draft_id,
+          review.revision.pitch_draft_id,
           headline,
           body,
           accessToken,
+          // The three qualities publish verbatim but are absent from the
+          // derived body, so they must be inside the moderated text.
+          editedStructure?.three_specific_qualities,
         );
         if (outcome === 'flagged') {
           setEditError(DATER_TEXT_FLAGGED_COPY);
@@ -517,32 +707,79 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         // fails closed on a missing verdict while enforcement is on.
       }
       await repo.createDaterRevision({
-        draftId: state.review.revision.pitch_draft_id,
+        draftId: review.revision.pitch_draft_id,
         headline,
         body,
-        includedAssetIds: revisionAssetIds(state.review, includedAssetIds),
+        includedAssetIds: revisionAssetIds(review, includedAssetIds),
+        ...(editedStructure === undefined ? {} : { structure: editedStructure }),
+        ...(claimsChanged ? { retainedHardClaims: retained } : {}),
       });
-      const latestReview = await repo.getConsentReview(state.review.revision.pitch_draft_id);
+      const latestReview = await repo.getConsentReview(review.revision.pitch_draft_id);
       const context = await loadReviewContext(repo, state.preview, latestReview);
       setState({ step: 'review', ...context });
       setIncludedAssetIds(context.photos.map((photo) => photo.assetId));
       setEditHeadline(latestReview.revision.headline);
       setEditBody(latestReview.revision.body);
+      setEditStructure(latestReview.editableStructure);
       setHardClaimsConfirmed(false);
-      setEditStatus('Your edits are saved in a new review version.');
+      setRemovedClaimIndexes(new Set());
+      setEditStatus(
+        claimsChanged
+          ? 'Saved. The claims you took off your page are gone from it.'
+          : 'Your edits are saved in a new review version.',
+      );
     } catch (error: unknown) {
       if (!(error instanceof Error)) {
         throw error;
       }
       const detail = claimErrorDetail(error);
-      setEditError(
-        detail.includes('too long')
-          ? 'Keep the headline under 120 characters and the introduction under 2,000.'
-          : 'We could not save your edits. Please try again.',
-      );
+      setEditError(saveErrorCopy(detail));
     } finally {
       setSavingEdits(false);
     }
+  }
+
+  function updateStructureField(
+    field: 'hook' | 'relationship_context' | 'evidence_or_anecdote' | 'good_match_for',
+    value: string,
+  ) {
+    setEditStructure((current) => (current === null ? current : { ...current, [field]: value }));
+    setEditStatus(null);
+    setEditError(null);
+  }
+
+  /**
+   * Records one claim's disposition. The confirmation checkbox resets: it
+   * covers "the claims I kept", and that set just changed.
+   */
+  function setClaimRemoved(index: number, removed: boolean) {
+    setRemovedClaimIndexes((current) => {
+      const next = new Set(current);
+      if (removed) {
+        next.add(index);
+      } else {
+        next.delete(index);
+      }
+      return next;
+    });
+    setHardClaimsConfirmed(false);
+    setEditStatus(null);
+    setEditError(null);
+  }
+
+  function updateQuality(index: number, value: string) {
+    setEditStructure((current) =>
+      current === null
+        ? current
+        : {
+            ...current,
+            three_specific_qualities: current.three_specific_qualities.map((quality, position) =>
+              position === index ? value : quality,
+            ),
+          },
+    );
+    setEditStatus(null);
+    setEditError(null);
   }
 
   async function handlePhotoUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -737,10 +974,22 @@ export function ConsentFlow({ token }: { readonly token: string }) {
     state.step === 'review'
       ? state.review.assets.filter((asset) => asset.asset_type === 'photo').map((asset) => asset.id)
       : [];
+  // Every section that would fail the save right now. Surfaced in the editor,
+  // not just after a rejected save, because the AI draft can arrive over the
+  // limit and the Dater has to know which section to shorten.
+  const structureBlockers = editStructure === null ? [] : structureProblems(editStructure);
+  const flaggedClaims = state.step === 'review' ? state.review.hardClaims : [];
+  const claimsToKeep = retainedClaims(flaggedClaims, removedClaimIndexes);
+  // A claim marked "I took that out" is only actually gone once the new revision
+  // is written, so an undisposed choice counts as an unsaved edit.
+  const claimsDirty = claimsToKeep.length !== flaggedClaims.length;
   const editsDirty =
     state.step === 'review' &&
-    (editHeadline !== state.review.revision.headline ||
-      editBody !== state.review.revision.body ||
+    ((editStructure !== null
+      ? !sameStructure(editStructure, state.review.editableStructure)
+      : editHeadline !== state.review.revision.headline ||
+        editBody !== state.review.revision.body) ||
+      claimsDirty ||
       !sameIds(includedAssetIds, currentRevisionPhotoIds));
   const currentAudienceError = audienceError(minimumAge, maximumAge);
   const currentProfileError = daterProfileError(birthDate, region, ownIntent);
@@ -752,6 +1001,9 @@ export function ConsentFlow({ token }: { readonly token: string }) {
     includedAssetIds.includes(photo.assetId),
   );
   const representativePhoto = previewIncludedPhotos[0] ?? null;
+  // The page's headline is the hook whenever the structure is editable, matching
+  // what the server derives and what /p/[campaignSlug] prints.
+  const previewHeadline = editStructure === null ? editHeadline : editStructure.hook;
   const previewAge = birthDate === '' ? null : ageFromBirthDate(birthDate, new Date());
   const previewLocation =
     locationPrecision === 'hidden'
@@ -1009,6 +1261,44 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                   </audio>
                 )}
               </div>
+
+              {/* Fifth audit P0 (decision D1): the transcript is published — in
+                  full under the pitch AND as the captions that run over the
+                  photos — so "approve" cannot mean anything unless the Dater has
+                  seen it. It is read-only on purpose: it is what their friend
+                  actually said, and letting anyone rewrite it would end the one
+                  guarantee the product makes about the recording. The way to
+                  reject it is "Request changes" at the bottom of this page. */}
+              <div className={styles.transcriptBlock} data-consent-transcript>
+                {/* NOT "word for word": this is a speech-to-text transcription and
+                    nothing guarantees it matches the recording exactly — the same
+                    reason apps/web/src/pitch/copy.ts refuses that phrase on the
+                    public page. What the code does guarantee is that this exact
+                    text is what publishes, unedited. Say only that. */}
+                <h3 className={styles.transcriptHeading}>
+                  The transcript that will publish, in full
+                </h3>
+                {state.review.transcriptText === null ? (
+                  <p className={styles.muted}>
+                    We don’t have a written transcript of this recording, so your page will publish
+                    no transcript and no captions — just the recording itself. Listen to the whole
+                    thing before you approve.
+                  </p>
+                ) : (
+                  <>
+                    <p className={styles.muted}>
+                      This text publishes on your page: it runs as the captions over your photos and
+                      is printed in full underneath. You can’t edit it — it’s{' '}
+                      {state.preview.introducerDisplayName}’s own words, transcribed. If any of it
+                      is wrong or you don’t want it public, use <strong>Request changes</strong> at
+                      the bottom instead of approving.
+                    </p>
+                    <blockquote className={styles.transcriptText} data-consent-transcript-text>
+                      {state.review.transcriptText}
+                    </blockquote>
+                  </>
+                )}
+              </div>
             </section>
 
             <section
@@ -1056,40 +1346,182 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                 </div>
               )}
 
-              <div className={styles.editFields}>
-                <label className={styles.label} htmlFor="dater-headline">
-                  Headline
-                </label>
-                <input
-                  id="dater-headline"
-                  className={styles.input}
-                  type="text"
-                  required
-                  maxLength={120}
-                  value={editHeadline}
-                  onChange={(event) => {
-                    setEditHeadline(event.target.value);
-                    setEditStatus(null);
-                    setEditError(null);
-                  }}
-                />
-                <label className={styles.label} htmlFor="dater-body">
-                  Introduction
-                </label>
-                <textarea
-                  id="dater-body"
-                  className={styles.textarea}
-                  required
-                  maxLength={2000}
-                  rows={7}
-                  value={editBody}
-                  onChange={(event) => {
-                    setEditBody(event.target.value);
-                    setEditStatus(null);
-                    setEditError(null);
-                  }}
-                />
-              </div>
+              {editStructure === null ? (
+                <div className={styles.editFields}>
+                  <p className={styles.muted} role="status">
+                    {LEGACY_STRUCTURE_COPY}
+                  </p>
+                  <label className={styles.label} htmlFor="dater-headline">
+                    Headline
+                  </label>
+                  <input
+                    id="dater-headline"
+                    className={styles.input}
+                    type="text"
+                    required
+                    maxLength={120}
+                    value={editHeadline}
+                    onChange={(event) => {
+                      setEditHeadline(event.target.value);
+                      setEditStatus(null);
+                      setEditError(null);
+                    }}
+                  />
+                  <label className={styles.label} htmlFor="dater-body">
+                    Introduction
+                  </label>
+                  <textarea
+                    id="dater-body"
+                    className={styles.textarea}
+                    required
+                    maxLength={2000}
+                    rows={7}
+                    value={editBody}
+                    onChange={(event) => {
+                      setEditBody(event.target.value);
+                      setEditStatus(null);
+                      setEditError(null);
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className={styles.editFields}>
+                  <p className={styles.muted}>
+                    Your page shows these five parts, in this order. Change any of them — what you
+                    leave here is exactly what publishes.
+                  </p>
+
+                  {/* The AI draft is not bound by the edit limits, so a section
+                      can arrive longer than the Dater is allowed to save. Say so
+                      here rather than only on a failed save, and name every
+                      section that needs trimming (fifth audit, verdict 5). */}
+                  {structureBlockers.length > 0 && (
+                    <div className={styles.error} role="status" data-structure-blockers>
+                      <p>
+                        Your friend’s draft is over the limit in{' '}
+                        {structureBlockers.length === 1
+                          ? 'one section'
+                          : `${structureBlockers.length} sections`}
+                        . Shorten {structureBlockers.length === 1 ? 'it' : 'them'} to save any
+                        change here — or ask for a rewrite with “Request changes” below.
+                      </p>
+                      <ul>
+                        {structureBlockers.map((problem) => (
+                          <li key={problem}>{problem}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className={styles.fieldGroup}>
+                    <label className={styles.label} htmlFor="dater-structure-hook">
+                      {STRUCTURE_LABELS.hook}
+                    </label>
+                    <p className={styles.fieldHint} id="dater-structure-hook-hint">
+                      {STRUCTURE_HINTS.hook}
+                    </p>
+                    <input
+                      id="dater-structure-hook"
+                      className={styles.input}
+                      type="text"
+                      required
+                      aria-describedby="dater-structure-hook-hint"
+                      maxLength={DATER_PITCH_FIELD_LIMITS.hook}
+                      value={editStructure.hook}
+                      onChange={(event) => updateStructureField('hook', event.target.value)}
+                    />
+                  </div>
+
+                  <div className={styles.fieldGroup}>
+                    <label className={styles.label} htmlFor="dater-structure-relationship">
+                      {STRUCTURE_LABELS.relationship_context}
+                    </label>
+                    <p className={styles.fieldHint} id="dater-structure-relationship-hint">
+                      {STRUCTURE_HINTS.relationship_context}
+                    </p>
+                    <textarea
+                      id="dater-structure-relationship"
+                      className={styles.textarea}
+                      required
+                      rows={3}
+                      aria-describedby="dater-structure-relationship-hint"
+                      maxLength={DATER_PITCH_FIELD_LIMITS.relationshipContext}
+                      value={editStructure.relationship_context}
+                      onChange={(event) =>
+                        updateStructureField('relationship_context', event.target.value)
+                      }
+                    />
+                  </div>
+
+                  <fieldset className={styles.qualityFields}>
+                    <legend className={styles.label}>
+                      {STRUCTURE_LABELS.three_specific_qualities}
+                    </legend>
+                    <p className={styles.fieldHint}>{STRUCTURE_HINTS.three_specific_qualities}</p>
+                    {editStructure.three_specific_qualities.map((quality, index) => (
+                      <div className={styles.fieldGroup} key={`quality-${index}`}>
+                        <label
+                          className={styles.label}
+                          htmlFor={`dater-structure-quality-${index}`}
+                        >
+                          Thing {index + 1}
+                        </label>
+                        <input
+                          id={`dater-structure-quality-${index}`}
+                          className={styles.input}
+                          type="text"
+                          required
+                          maxLength={DATER_PITCH_FIELD_LIMITS.quality}
+                          value={quality}
+                          onChange={(event) => updateQuality(index, event.target.value)}
+                        />
+                      </div>
+                    ))}
+                  </fieldset>
+
+                  <div className={styles.fieldGroup}>
+                    <label className={styles.label} htmlFor="dater-structure-anecdote">
+                      {STRUCTURE_LABELS.evidence_or_anecdote}
+                    </label>
+                    <p className={styles.fieldHint} id="dater-structure-anecdote-hint">
+                      {STRUCTURE_HINTS.evidence_or_anecdote}
+                    </p>
+                    <textarea
+                      id="dater-structure-anecdote"
+                      className={styles.textarea}
+                      required
+                      rows={4}
+                      aria-describedby="dater-structure-anecdote-hint"
+                      maxLength={DATER_PITCH_FIELD_LIMITS.evidenceOrAnecdote}
+                      value={editStructure.evidence_or_anecdote}
+                      onChange={(event) =>
+                        updateStructureField('evidence_or_anecdote', event.target.value)
+                      }
+                    />
+                  </div>
+
+                  <div className={styles.fieldGroup}>
+                    <label className={styles.label} htmlFor="dater-structure-good-match">
+                      {STRUCTURE_LABELS.good_match_for}
+                    </label>
+                    <p className={styles.fieldHint} id="dater-structure-good-match-hint">
+                      {STRUCTURE_HINTS.good_match_for}
+                    </p>
+                    <textarea
+                      id="dater-structure-good-match"
+                      className={styles.textarea}
+                      required
+                      rows={3}
+                      aria-describedby="dater-structure-good-match-hint"
+                      maxLength={DATER_PITCH_FIELD_LIMITS.goodMatchFor}
+                      value={editStructure.good_match_for}
+                      onChange={(event) =>
+                        updateStructureField('good_match_for', event.target.value)
+                      }
+                    />
+                  </div>
+                </div>
+              )}
 
               {state.photos.length > 0 && (
                 <div className={styles.photoBlock}>
@@ -1438,9 +1870,9 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                   data-step-heading
                   tabIndex={-1}
                 >
-                  {state.review.daterEdited && state.review.hardClaims.length === 0
+                  {flaggedClaims.length === 0
                     ? 'Confirm your edits are accurate'
-                    : 'Claims that need your confirmation'}
+                    : 'Claims that need your decision'}
                 </h2>
                 {state.review.daterEdited && (
                   <p className={styles.muted}>
@@ -1448,12 +1880,75 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                     it goes live.
                   </p>
                 )}
-                {state.review.hardClaims.length > 0 && (
-                  <ul className={styles.claimList}>
-                    {state.review.hardClaims.map((claim) => (
-                      <li key={claim}>{claim}</li>
-                    ))}
-                  </ul>
+                {/* Fifth audit P0 (decision D2): the old screen listed the
+                    flagged claims and made the Dater attest that ALL of them
+                    were true — including a claim they had just deleted from
+                    their page, possibly because it was false. Each claim now
+                    gets its own answer, and only the kept ones are covered by
+                    the confirmation below. Marking one "I took that out"
+                    removes it from the published page when you save. */}
+                {flaggedClaims.length > 0 && (
+                  <>
+                    <p className={styles.muted}>
+                      Our AI flagged these as specific claims about you. For each one, say whether
+                      it’s still true and staying on your page, or that you’ve taken it out.
+                    </p>
+                    <ul className={styles.claimList}>
+                      {flaggedClaims.map((claim, index) => {
+                        const removed = removedClaimIndexes.has(index);
+                        const groupName = `hard-claim-${index}`;
+                        return (
+                          <li
+                            className={removed ? styles.claimRemoved : undefined}
+                            key={groupName}
+                            data-hard-claim
+                            data-hard-claim-removed={removed ? 'true' : 'false'}
+                          >
+                            <p className={styles.claimText}>{claim}</p>
+                            <div className={styles.claimChoices} role="group" aria-label={claim}>
+                              <label className={styles.claimChoice}>
+                                <input
+                                  type="radio"
+                                  name={groupName}
+                                  checked={!removed}
+                                  onChange={() => setClaimRemoved(index, false)}
+                                />
+                                <span>Still true — keep it on my page</span>
+                              </label>
+                              <label className={styles.claimChoice}>
+                                <input
+                                  type="radio"
+                                  name={groupName}
+                                  checked={removed}
+                                  onChange={() => setClaimRemoved(index, true)}
+                                />
+                                <span>I took that out of my page</span>
+                              </label>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </>
+                )}
+                {claimsDirty && (
+                  <div className={styles.claimSaveRow}>
+                    <p className={styles.muted} role="status">
+                      {claimsToKeep.length === 0
+                        ? 'Save to take every flagged claim off your page.'
+                        : `Save to take ${flaggedClaims.length - claimsToKeep.length} of these off your page.`}
+                    </p>
+                    <button
+                      className={styles.secondary}
+                      type="button"
+                      disabled={savingEdits || uploadingPhoto}
+                      onClick={() => {
+                        void handleSaveEdits();
+                      }}
+                    >
+                      {savingEdits ? 'Saving…' : 'Save my choices'}
+                    </button>
+                  </div>
                 )}
                 <label className={styles.confirmationRow}>
                   <input
@@ -1462,9 +1957,11 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                     onChange={(event) => setHardClaimsConfirmed(event.target.checked)}
                   />
                   <span>
-                    {state.review.daterEdited && state.review.hardClaims.length === 0
-                      ? 'I confirm the introduction I edited is truthful and accurate.'
-                      : 'I confirm all of these claims are true.'}
+                    {claimsToKeep.length === 0
+                      ? 'I confirm the introduction on my page is truthful and accurate.'
+                      : claimsToKeep.length === flaggedClaims.length
+                        ? 'I confirm the claims above are true.'
+                        : 'I confirm the claims I kept are true.'}
                   </span>
                 </label>
               </section>
@@ -1515,8 +2012,8 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                     </div>
                   )}
 
-                  {editHeadline.trim() !== '' && (
-                    <p className={styles.previewHeadline}>{editHeadline}</p>
+                  {previewHeadline.trim() !== '' && (
+                    <p className={styles.previewHeadline}>{previewHeadline}</p>
                   )}
 
                   {previewIncludedPhotos.length > 1 && (
@@ -1530,7 +2027,40 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                     </div>
                   )}
 
-                  {editBody.trim() !== '' && <p className={styles.previewBody}>{editBody}</p>}
+                  {editStructure === null ? (
+                    editBody.trim() !== '' && <p className={styles.previewBody}>{editBody}</p>
+                  ) : (
+                    <div className={styles.previewStructure}>
+                      <div>
+                        <span className={styles.previewLabel}>
+                          {STRUCTURE_LABELS.relationship_context}
+                        </span>
+                        <p className={styles.previewBody}>{editStructure.relationship_context}</p>
+                      </div>
+                      <div>
+                        <span className={styles.previewLabel}>
+                          {STRUCTURE_LABELS.three_specific_qualities}
+                        </span>
+                        <ul className={styles.previewList}>
+                          {editStructure.three_specific_qualities.map((quality, index) => (
+                            <li key={`preview-quality-${index}`}>{quality}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <span className={styles.previewLabel}>
+                          {STRUCTURE_LABELS.evidence_or_anecdote}
+                        </span>
+                        <p className={styles.previewBody}>{editStructure.evidence_or_anecdote}</p>
+                      </div>
+                      <div>
+                        <span className={styles.previewLabel}>
+                          {STRUCTURE_LABELS.good_match_for}
+                        </span>
+                        <p className={styles.previewBody}>{editStructure.good_match_for}</p>
+                      </div>
+                    </div>
+                  )}
 
                   <dl className={styles.summaryList}>
                     <div>

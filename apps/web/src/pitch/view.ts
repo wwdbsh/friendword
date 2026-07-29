@@ -5,6 +5,17 @@ import type { PitchCaption, PitchFixture, PitchPhoto } from '@/fixtures/pitch';
 
 import { distributePhotoScenes, type SceneWindow } from './scenes';
 
+/**
+ * The structure the public page is allowed to print.
+ *
+ * `hard_claims_requiring_confirmation` is deliberately absent (fifth audit,
+ * verdict 4): it is the AI's internal safety flag, it is never rendered, and a
+ * claim the Dater disposed of as removed must not survive anywhere in the
+ * published page — including the RSC flight payload. Dropping it at the read
+ * boundary means no downstream component can leak it back.
+ */
+export type PublicPitchStructure = Omit<PitchStructure, 'hard_claims_requiring_confirmation'>;
+
 export type PitchView = {
   readonly campaignSlug: string;
   readonly daterName: string;
@@ -17,7 +28,17 @@ export type PitchView = {
    * hook / qualities / anecdote / good-match scenes instead of one generic
    * body blob. Null when the published draft carries no structure snapshot.
    */
-  readonly structure: PitchStructure | null;
+  readonly structure: PublicPitchStructure | null;
+  /**
+   * True when the published `structure` is the one the Dater edited and
+   * approved section by section (`consent_revisions.structure_reviewed`,
+   * migration 0047, copied onto the published draft by
+   * approve_and_publish_pitch). Copy that says the Dater reviewed the words on
+   * this page MUST branch on this: rows published before the section editor
+   * existed carry sections their Dater never saw, so the unconditional claim
+   * was false (fifth audit, verdict 4).
+   */
+  readonly daterReviewedStructure: boolean;
   /**
    * Dater's age in whole years, surfaced ONLY from the server-derived
    * `PublishedPitch.age` (a value the dater confirmed at consent). Null → the
@@ -72,6 +93,66 @@ const ABSTRACT_PHOTO: PitchPhoto = {
   endMs: 1,
 };
 
+/**
+ * Drops `hard_claims_requiring_confirmation` at the read boundary. Written out
+ * field by field rather than with a rest spread so a future addition to
+ * `PitchStructure` has to be admitted here on purpose before it can reach a
+ * rendered page or a client component's props.
+ */
+function publicStructure(structure: PitchStructure | null): PublicPitchStructure | null {
+  if (structure === null) {
+    return null;
+  }
+  return {
+    hook: structure.hook,
+    relationship_context: structure.relationship_context,
+    three_specific_qualities: structure.three_specific_qualities,
+    evidence_or_anecdote: structure.evidence_or_anecdote,
+    good_match_for: structure.good_match_for,
+  };
+}
+
+/**
+ * The subset of the pitch `PitchPlayer` actually renders.
+ *
+ * `PitchPlayer` is a `'use client'` component, so whatever it receives is
+ * serialized into the RSC flight payload embedded in the page source. Handing
+ * it the whole `PitchView` shipped `structure` (hard claims included),
+ * `approvedBody` and `transcriptText` into the HTML of every public page — text
+ * a Dater may have deliberately removed (fifth audit, verdict 4, reproduced
+ * with curl). This projection is the boundary: the player gets what it draws
+ * and nothing else.
+ */
+export type PitchPlayerView = Pick<
+  PitchView,
+  | 'campaignSlug'
+  | 'daterName'
+  | 'age'
+  | 'approximateLocation'
+  | 'introducerPseudonym'
+  | 'relationship'
+  | 'durationMs'
+  | 'photos'
+  | 'captions'
+  | 'audioUrl'
+>;
+
+/** Field-by-field on purpose — see `PitchPlayerView`. Never spread here. */
+export function toPitchPlayerView(pitch: PitchView): PitchPlayerView {
+  return {
+    campaignSlug: pitch.campaignSlug,
+    daterName: pitch.daterName,
+    age: pitch.age,
+    approximateLocation: pitch.approximateLocation,
+    introducerPseudonym: pitch.introducerPseudonym,
+    relationship: pitch.relationship,
+    durationMs: pitch.durationMs,
+    photos: pitch.photos,
+    captions: pitch.captions,
+    audioUrl: pitch.audioUrl,
+  };
+}
+
 export function relationshipLabel(pitch: PublishedPitch): string {
   const kind =
     pitch.relationshipType === null
@@ -90,7 +171,9 @@ export function fromFixture(fixture: PitchFixture): PitchView {
     ...fixture,
     approvedBody: null,
     transcriptText: null,
-    structure: fixture.structure,
+    structure: publicStructure(fixture.structure),
+    // Nobody approved a fixture. The demo copy says so in its own words.
+    daterReviewedStructure: false,
     // Demo fixtures never fabricate an age; real seed data provides it or not.
     age: null,
     isDemo: true,
@@ -164,7 +247,8 @@ export function fromPublishedPitch(pitch: PublishedPitch): PitchView {
     daterName: pitch.daterDisplayName,
     approvedBody: pitch.body,
     transcriptText: pitch.transcript?.text ?? null,
-    structure: pitch.structure,
+    structure: publicStructure(pitch.structure),
+    daterReviewedStructure: pitch.daterReviewedStructure,
     // CP-1/GP-P0-3: surface the dater-confirmed age (server-derived), null-safe.
     age: pitch.age,
     approximateLocation: pitch.approximateLocation,

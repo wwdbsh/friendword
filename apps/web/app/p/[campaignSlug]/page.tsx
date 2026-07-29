@@ -10,7 +10,8 @@ import { ReferralTracker } from '@/components/ReferralTracker';
 import { ReportCampaignLink } from '@/components/ReportCampaignLink';
 import { getPitchFixture } from '@/fixtures/pitch';
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
-import { fromFixture, fromPublishedPitch, type PitchView } from '@/pitch/view';
+import { daterControlLine, structureProvenanceLine, transcriptProvenanceLine } from '@/pitch/copy';
+import { fromFixture, fromPublishedPitch, toPitchPlayerView, type PitchView } from '@/pitch/view';
 
 import styles from './page.module.css';
 
@@ -120,13 +121,18 @@ export default async function PitchPage({ params }: PitchPageProps) {
     notFound();
   }
 
+  const transcriptLine = transcriptProvenanceLine(pitch);
+
   return (
     <main className={styles.page}>
       <ReferralTracker seedSlug={campaignSlug} />
       <StickerField />
 
       <section className={styles.stageRegion} aria-label={`${pitch.daterName}’s pitch`}>
-        <PitchPlayer pitch={pitch} />
+        {/* Fifth audit (verdict 4): PitchPlayer is a client component, so its
+            props are serialized into this page's HTML. Pass the narrow player
+            projection, never the whole pitch. */}
+        <PitchPlayer pitch={toPitchPlayerView(pitch)} />
       </section>
 
       {(pitch.structure !== null ||
@@ -177,11 +183,15 @@ export default async function PitchPage({ params }: PitchPageProps) {
               )
             )}
 
-            <p className={styles.storyMeta}>
-              {pitch.isDemo
-                ? `A structured example of how a friend’s pitch is organized. Demo data — no live recording or approval yet.`
-                : `Structured from ${pitch.introducerPseudonym}’s voice note — every word here was reviewed and approved by ${pitch.daterName} before publishing.`}
-            </p>
+            {/* Copy honesty (fifth audit P0, CLAUDE.md §12). Every sentence
+                here branches on what the row actually proves — see
+                src/pitch/copy.ts for the guarantee behind each one. The
+                previous "every word here was reviewed and approved" was false
+                twice over: rows published before the section editor carry
+                sections their Dater never saw, and the transcript (which also
+                runs as the captions) is nobody's to edit. */}
+            <p className={styles.storyMeta}>{structureProvenanceLine(pitch)}</p>
+            {transcriptLine !== null && <p className={styles.storyMeta}>{transcriptLine}</p>}
             {pitch.transcriptText !== null && (
               <details className={styles.transcript}>
                 <summary>Read the full voice transcript</summary>
@@ -206,16 +216,13 @@ export default async function PitchPage({ params }: PitchPageProps) {
               : `${pitch.daterName} stays in control.`}
           </h2>
           {/* TODO(identity-provider): Restore identity-verification copy after verification ships. */}
-          {/* Copy honesty (third audit CP-1): the dater edits the wording,
-              photos, and claims and chooses the audience + duration — they do
-              NOT re-record. The friend's original voice recording is immutable,
-              so we no longer imply "could edit any of it". Framed as "who can
-              reach out", not "who can see it" (viewing is open to anyone). */}
-          <p>
-            {pitch.isDemo
-              ? `On a real page, the person being introduced reviews the pitch before it goes live, edits the wording, photos, and claims, chooses who can reach out, and sets how long the page stays up. The friend’s original voice recording plays as they made it. Interest requires signing in and completing a dating profile with 2 photos, a bio, and dating intent. Contact details stay private.`
-              : `${pitch.daterName} reviewed this pitch before it went live, edited the wording, photos, and claims, chose who can reach out, and set how long this page stays up.${pitch.audioUrl !== null ? ' The friend’s original voice recording plays as they made it.' : ''} Interest requires signing in and completing a dating profile with 2 photos, a bio, and dating intent. Contact details stay private.`}
-          </p>
+          {/* Copy honesty (fifth audit, verdict 4): this block used to say the
+              Dater "edited the wording, photos, and claims". Claims are not
+              edited — they are kept or removed, one by one — and on a
+              pre-section-editor row the wording was never theirs to edit at
+              all. Framed as "who can reach out", not "who can see it"
+              (viewing is open to anyone). */}
+          <p>{daterControlLine(pitch)}</p>
         </div>
       </section>
 

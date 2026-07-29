@@ -1,5 +1,13 @@
 import { z } from 'zod';
 
+import {
+  daterPitchStructureEditSchema,
+  deriveDaterPitchBody,
+  deriveDaterPitchHeadline,
+  pitchStructureSchema,
+  type DaterPitchStructureEdit,
+} from '@friendword/contracts';
+
 import type { RelationshipDuration, RelationshipType } from '@friendword/contracts';
 import type { Session } from '@supabase/supabase-js';
 
@@ -34,6 +42,15 @@ const daterRevisionInputSchema = z.object({
   headline: z.string().trim().min(1).max(120),
   body: z.string().trim().min(1).max(2000),
   includedAssetIds: z.array(z.string().uuid()),
+  // Fifth audit P0: when present, the five structure fields ARE the approved
+  // content and the server derives headline/body from them.
+  structure: daterPitchStructureEditSchema.optional(),
+  // Per-claim disposition (fifth audit P0, decision D2). Absent → the RPC keeps
+  // every flagged claim (pre-0047 behaviour). Present → the published structure
+  // carries exactly these claims; an empty array means "I removed all of them".
+  // The server rejects any entry that was not already flagged, so this can only
+  // ever shrink the list.
+  retainedHardClaims: z.array(z.string().trim().min(1)).optional(),
 });
 
 const daterProfileSchema = z
@@ -101,11 +118,36 @@ export type ConsentReview = {
   readonly assets: readonly PitchAssetRow[];
   readonly hardClaims: readonly string[];
   /**
+   * The five structure fields the public page renders, so the Dater can edit
+   * the exact text that publishes (fifth audit P0). Null when the snapshot
+   * predates the structured pitch or doesn't match the shape — the UI then
+   * falls back to headline/body editing and says so instead of publishing
+   * sentences the Dater never saw.
+   */
+  readonly editableStructure: EditablePitchStructure | null;
+  /**
+   * The machine transcript frozen into this revision — the exact text
+   * approve_and_publish_pitch copies onto the published draft, which the public
+   * page prints in full AND runs as the captions over the photos. It is not
+   * editable (it is what the Introducer actually said), so the consent UI shows
+   * it read-only: "approve" cannot mean anything unless the Dater has seen it.
+   * Null when the recording has no transcript.
+   */
+  readonly transcriptText: string | null;
+  /**
    * True when the current revision was cut by the Dater editing the copy
    * (third audit P0-NEW-3). The approve gate then requires an explicit
    * hard-claims confirmation, so the UI always surfaces the confirmation.
    */
   readonly daterEdited: boolean;
+  /**
+   * True when this revision was created through the structure path, i.e. the
+   * five published fields came from the Dater's own editor. False for AI-drafted
+   * and pre-0047 revisions, whose structure the Dater never saw — the caller
+   * must not claim otherwise, and must re-send the structure on the next save
+   * so the moderation ledger keys stay in step (see createDaterRevision).
+   */
+  readonly structureReviewed: boolean;
 };
 
 export type ConsentApproval = {
@@ -121,6 +163,17 @@ export type DaterRevisionInput = {
   readonly headline: string;
   readonly body: string;
   readonly includedAssetIds: readonly string[];
+  /**
+   * The Dater's edited structure. When set, headline/body are re-derived here
+   * and again by the RPC, which ignores the client's copies; the passed
+   * headline/body only stay in the payload for pre-0047 compatibility.
+   */
+  readonly structure?: DaterPitchStructureEdit;
+  /**
+   * The flagged claims the Dater says are still true and still on the page.
+   * Omit to keep every flagged claim. An empty array publishes none of them.
+   */
+  readonly retainedHardClaims?: readonly string[];
 };
 
 export type DaterRevisionResult = {
@@ -176,6 +229,29 @@ const revisionStructureSchema = z
     hard_claims_requiring_confirmation: z.array(z.string().trim().min(1)).default([]),
   })
   .nullable();
+
+/**
+ * Read-side shape of the Dater-editable fields. Deliberately looser than
+ * `daterPitchStructureEditSchema`: an AI draft may exceed the edit limits or
+ * leave a field blank, and the Dater must still be able to open it and fix it.
+ * The strict contract schema gates the save.
+ */
+const editablePitchStructureSchema = pitchStructureSchema.omit({
+  hard_claims_requiring_confirmation: true,
+});
+
+export type EditablePitchStructure = z.infer<typeof editablePitchStructureSchema>;
+
+/**
+ * The revision's frozen transcript snapshot (migration 0032). Only `text` is
+ * needed at consent — the segments drive the public page's captions, which are
+ * cut from this same text, so showing the text covers both surfaces.
+ */
+const revisionTranscriptSchema = z
+  .object({ text: z.string() })
+  .passthrough()
+  .nullable()
+  .catch(null);
 
 const responseNoteSchema = z.string().trim().min(1);
 
@@ -287,16 +363,37 @@ export class ConsentRepo {
       throw new DataLayerError('consent.getConsentReview.structure', parsedStructure.error);
     }
 
-    // `dater_edited` lands with migration 0036; the generated Row type is
-    // regenerated at integration time, so read it structurally until then.
-    const daterEdited =
-      (revision as { readonly dater_edited?: boolean | null }).dater_edited === true;
+    // `dater_edited` lands with migration 0036 and `structure_reviewed` with
+    // 0047; the generated Row type is regenerated at integration time, so read
+    // them structurally. Both fail closed to false on a pre-migration row.
+    const revisionFlags = revision as {
+      readonly dater_edited?: boolean | null;
+      readonly structure_reviewed?: boolean | null;
+    };
+    const daterEdited = revisionFlags.dater_edited === true;
+    const structureReviewed = revisionFlags.structure_reviewed === true;
+
+    // The transcript is a snapshot the approve RPC copies to the published
+    // draft, so what the Dater reads here is what publishes. An unparseable
+    // snapshot reads as "no transcript" rather than a half-rendered blob.
+    const transcript = revisionTranscriptSchema.parse(
+      (revision as { readonly transcript?: unknown }).transcript ?? null,
+    );
+    const transcriptText =
+      transcript === null || transcript.text.trim() === '' ? null : transcript.text;
+
+    // Fail closed on the editable half too: a structure that doesn't match the
+    // shape is reported as absent (legacy fallback), never coerced into blanks.
+    const parsedEditable = editablePitchStructureSchema.safeParse(revision.structure);
 
     return {
       revision,
       assets,
       hardClaims: parsedStructure.data?.hard_claims_requiring_confirmation ?? [],
+      editableStructure: parsedEditable.success ? parsedEditable.data : null,
+      transcriptText,
       daterEdited,
+      structureReviewed,
     };
   }
 
@@ -421,11 +518,20 @@ export class ConsentRepo {
   async createDaterRevision(input: DaterRevisionInput): Promise<DaterRevisionResult> {
     await this.getRequiredSession();
     const parsed = daterRevisionInputSchema.parse(input);
+    const structure = parsed.structure;
     const { data, error } = await callUntypedRpc(this.client, 'create_dater_revision', {
       draft_id: parsed.draftId,
-      new_headline: parsed.headline,
-      new_body: parsed.body,
+      new_headline: structure === undefined ? parsed.headline : deriveDaterPitchHeadline(structure),
+      new_body: structure === undefined ? parsed.body : deriveDaterPitchBody(structure),
       included_asset_ids: parsed.includedAssetIds,
+      // Omitted (not null) without a structure so pre-0047 deployments, whose
+      // function has no such parameter, keep resolving the legacy signature.
+      ...(structure === undefined ? {} : { new_structure: structure }),
+      // Same reasoning for the claim disposition: omitted means "keep them all",
+      // which is also what a pre-0047 function does with no such parameter.
+      ...(parsed.retainedHardClaims === undefined
+        ? {}
+        : { retained_hard_claims: parsed.retainedHardClaims }),
     });
     if (error !== null) {
       throw new DataLayerError('consent.createDaterRevision', error);

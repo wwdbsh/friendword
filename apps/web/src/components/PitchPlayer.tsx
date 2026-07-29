@@ -8,12 +8,17 @@ import { trackEvent } from '@friendword/data';
 
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { activeWindowIndex, distributePhotoScenes, type SceneWindow } from '@/pitch/scenes';
-import type { PitchView } from '@/pitch/view';
+import type { PitchPlayerView } from '@/pitch/view';
 
 import styles from './PitchPlayer.module.css';
 
+// Fifth audit (verdict 4): this is a client component, so every prop lands in
+// the RSC flight payload of the public page's HTML. It takes `PitchPlayerView`
+// — not `PitchView` — so the published `structure` (hard claims included), the
+// approved body and the full transcript cannot ride along. Widen this type
+// only if the player genuinely renders the new field.
 type PitchPlayerProps = {
-  readonly pitch: PitchView;
+  readonly pitch: PitchPlayerView;
 };
 
 // CP-2: the waveform is decoded from the real audio. It has three honest

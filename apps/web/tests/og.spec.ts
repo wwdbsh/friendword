@@ -39,6 +39,7 @@ test('keeps the real campaign fallback branded and isolated from Blair fixtures'
     body: 'A warm introduction approved for publication.',
     transcript: null,
     structure: null,
+    daterReviewedStructure: false,
     approximateLocation: null,
     age: null,
     datingIntent: null,

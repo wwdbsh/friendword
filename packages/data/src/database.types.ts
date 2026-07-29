@@ -38,6 +38,12 @@ export type PitchDraftRow = {
   readonly publish_days: number | null;
   readonly relationship_type: RelationshipType | null;
   readonly relationship_duration: RelationshipDuration | null;
+  /**
+   * Copied from the approved revision's `structure_reviewed` at publish
+   * (migration 0047). Optional because rows read from a pre-0047 deployment
+   * carry no such column; readers must treat a missing value as false.
+   */
+  readonly structure_reviewed?: boolean | null;
   readonly created_at: string;
   readonly updated_at: string;
 };
@@ -134,6 +140,12 @@ export type ConsentRevisionRow = {
   readonly asset_ids: readonly string[];
   readonly voice_asset_path: string | null;
   readonly content_hash: string;
+  /** Frozen transcript snapshot (migration 0032); published verbatim. */
+  readonly transcript?: Json | null;
+  /** True when the Dater edited this revision's copy (migration 0036). */
+  readonly dater_edited?: boolean | null;
+  /** True when this revision came from the Dater's section editor (0047). */
+  readonly structure_reviewed?: boolean | null;
   readonly created_at: string;
 };
 

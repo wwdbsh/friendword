@@ -161,3 +161,24 @@ Advisor 실기기 재검증: 크래시 없음, 업로드 객체 `photo-1.jpg/pho
 ## 관찰 (심층방어 갭, 사용자 경로 아님)
 
 - **O-1**: service-role 직접 PATCH로는 `expired → published` 되돌리기가 통과한다(트리거 부재). 사용자 경로(RPC)는 정상 차단되고 service role은 우리 서버/운영 도구이므로 취약점은 아니지만, launch gate·one-active-campaign 등 다른 불변식은 트리거로 강제하는 것과 **일관성이 없다**. 트리거 추가를 권고(운영 실수·향후 service-role 코드 경로에서 유료 Campaign Pass 창을 되살릴 수 있음).
+
+## 루프 5 (goal 미달성 확인 후 계속 진행)
+
+### PASS
+
+- **E-kit unlock**: 크레딧 없이 `unlock_share_kit` → `creator launch credit required` 차단(결제 게이트와 일관).
+- **OG 만료 처리**: 만료된 캠페인의 `/api/og`는 404 + `Cache-Control: no-store`.
+
+### 확인된 기능 부재 (테스트 실패 아님)
+
+- **C-withdraw**: `withdrawn`은 상태값으로만 존재하고 RPC·UI가 없다 → 4차 감사 H-7 그대로 **미구현**. 관심을 보낸 사람이 스스로 철회할 수단이 없다.
+
+### 내 판단 정정
+
+- OG CDN 캐시에 대해 나는 "no-store라 우려 없음"이라고 판단했으나 **틀렸다**. 만료 후(404 경로)를 측정한 결과였고, 정상 렌더 경로는 `s-maxage=3600`이다. 코드가 "Paused or archived campaigns may remain in a social cache for at most this accepted hour"로 명시한 의도된 창이며, 적대자의 지적이 유효하다. 이는 버그가 아니라 **정책 승인이 필요한 항목**(일시정지·차단 직후 최대 1시간 동안 소셜 캐시에 기존 OG 이미지가 남을 수 있음).
+
+### 미증명 항목의 현재 분석 (수정 미착수 — 다음 라운드 입력)
+
+무한로딩의 진짜 원인은 여전히 미증명이나, 후보가 하나로 좁혀졌다. `HybridPitchDraftService.getCurrentUserId()`(`apps/mobile/src/services/pitchDraftsSupabase.ts:577`)는 `client.auth.getSession()`을 호출하고, 모바일 클라이언트는 `autoRefreshToken: true` + `persistSession: true`(`packages/data/src/client.ts:59-60`)로 구성된다. supabase-js v2는 이 조합에서 auth lock을 사용하므로, 토큰 갱신이 타임아웃 없는 네트워크 호출에 걸리면 `getSession()`이 무기한 대기할 수 있다. 이것이 관찰된 "settle되지 않는 promise"와 유일하게 부합하는 후보다.
+
+주의: 이 호출을 단순 제거할 수는 없다. `listMyDrafts()`의 RLS는 **본인이 만든 draft와 본인이 대상(subject)인 draft를 모두** 반환하므로, `created_by_user_id === currentUserId` 필터는 "내가 만든 것"만 남기는 의미 있는 경계다. 따라서 올바른 방향은 제거가 아니라 (a) 이 호출 자체를 짧게 바운드하고 사용자 id 미상일 때 enrich 단계를 건너뛰거나, (b) 저장된 세션에서 id를 읽어 auth lock을 타지 않는 경로를 쓰는 것이다. 현재는 바깥 8초 바운드가 증상을 막고 있어 사용자 영향은 없다.

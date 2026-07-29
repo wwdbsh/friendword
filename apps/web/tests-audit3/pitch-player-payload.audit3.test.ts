@@ -121,8 +121,11 @@ describe('[D6] provenance copy claims only what the row proves', () => {
     }
     // The reviewed row may say they had the final say on the flagged claims —
     // that is the disposition the RPC actually records (retained_hard_claims).
-    expect(daterControlLine(reviewed)).toContain('final say on every claim');
-    expect(daterControlLine(notReviewed)).not.toContain('final say on every claim');
+    // "any claim", not "every claim": the page cannot show how many were
+    // flagged, and "every" would imply some existed when the count may be 0.
+    expect(daterControlLine(reviewed)).toContain('final say on any claim');
+    expect(daterControlLine(reviewed)).not.toContain('every claim');
+    expect(daterControlLine(notReviewed)).not.toContain('final say on any claim');
   });
 
   it('names the caption surface only when captions actually render', () => {

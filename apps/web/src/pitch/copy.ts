@@ -78,7 +78,9 @@ export function daterControlLine(pitch: ControlInput): string {
   }
 
   if (pitch.daterReviewedStructure) {
-    return `${pitch.daterName} reviewed this page before it went live: they approved each written section, chose which photos appear, had the final say on every claim our AI flagged for checking, chose who can reach out, and set how long this page stays up.${recording} The recording and its automatic transcript are the one part ${pitch.daterName} could not change — they publish unedited. ${INTEREST_TERMS}`;
+    // "any claim", not "every claim": the reader cannot see how many claims were
+    // flagged, and "every" implies some were. "any" is true when the count is 0.
+    return `${pitch.daterName} reviewed this page before it went live: they approved each written section, chose which photos appear, had the final say on any claim our AI flagged for checking, chose who can reach out, and set how long this page stays up.${recording} The recording and its automatic transcript are the one part ${pitch.daterName} could not change — they publish unedited. ${INTEREST_TERMS}`;
   }
 
   // Pre-section-editor row: they approved publication, the photos, the audience

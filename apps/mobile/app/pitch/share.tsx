@@ -9,7 +9,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { HypeButton, QuietNavAction, TrustCard } from '../../src/components';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
 import { buildIntroducerShareUrl } from '../../src/services/introducedCampaigns';
-import { hasFinalizedConsent, settleWithin } from '../../src/services/pitchDrafts';
+import {
+  hasFinalizedConsent,
+  settleWithin,
+  type DraftSyncState,
+  type PitchDraftListing,
+} from '../../src/services/pitchDrafts';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 import type { PitchDraft, PitchDraftId } from '../../src/services/types';
 import { buildConsentUrl, getWebOrigin } from '../../src/services/webOrigin';
@@ -31,11 +36,13 @@ export const SHARE_CONTACT_PURGE_TIMEOUT_MS = 8_000;
 export type ShareDraftUpdate = {
   readonly draft: PitchDraft | null;
   readonly loading: boolean;
+  /** Whether this invite was confirmed against the server on this visit. */
+  readonly sync: DraftSyncState;
 };
 
 export type ResolveShareDraftInput = {
   readonly draftId: string | undefined;
-  readonly listDrafts: () => Promise<readonly PitchDraft[]>;
+  readonly listDrafts: () => Promise<PitchDraftListing>;
   readonly purgeInvitationContact: (draftId: PitchDraftId) => Promise<PitchDraft>;
   readonly publish: (update: ShareDraftUpdate) => void;
   readonly loadTimeoutMs?: number;
@@ -63,7 +70,9 @@ export function needsInvitationContactPurge(draft: PitchDraft | null): draft is 
  * is published as soon as the list is in hand, and the invitation-contact purge
  * runs afterwards as a bounded best effort that can only refine what is already
  * on screen. A draft source that fails or stalls publishes `null`, which is the
- * screen's honest "Invite not found" — never a permanent loading state.
+ * screen's honest "Invite not found" — never a permanent loading state. The
+ * listing's sync state is carried through so the screen can say whether the
+ * invite it shows was checked with the server on this visit.
  */
 export async function resolveShareDraft(input: ResolveShareDraftInput): Promise<void> {
   const {
@@ -75,15 +84,19 @@ export async function resolveShareDraft(input: ResolveShareDraftInput): Promise<
     purgeTimeoutMs = SHARE_CONTACT_PURGE_TIMEOUT_MS,
   } = input;
 
-  let drafts: readonly PitchDraft[] = [];
+  let listing: PitchDraftListing = { drafts: [], sync: 'unconfirmed' };
   try {
-    drafts = await settleWithin(listDrafts(), loadTimeoutMs, () => []);
+    listing = await settleWithin(listDrafts(), loadTimeoutMs, () => ({
+      drafts: [],
+      sync: 'unconfirmed',
+    }));
   } catch {
-    drafts = [];
+    listing = { drafts: [], sync: 'unconfirmed' };
   }
 
-  const candidate = drafts.find((draft) => draft.id === draftId) ?? null;
-  publish({ draft: candidate, loading: false });
+  const sync = listing.sync;
+  const candidate = listing.drafts.find((draft) => draft.id === draftId) ?? null;
+  publish({ draft: candidate, loading: false, sync });
   if (!needsInvitationContactPurge(candidate)) {
     return;
   }
@@ -94,7 +107,7 @@ export async function resolveShareDraft(input: ResolveShareDraftInput): Promise<
       purgeTimeoutMs,
       () => candidate,
     );
-    publish({ draft: purged, loading: false });
+    publish({ draft: purged, loading: false, sync });
   } catch {
     // The contact stays on this device until the next visit retries the purge;
     // the invite itself is already rendered and must not be taken away.
@@ -139,6 +152,7 @@ export default function SharePitchScreen() {
     slug?: string;
   }>();
   const [draft, setDraft] = useState<PitchDraft | null>(null);
+  const [draftSync, setDraftSync] = useState<DraftSyncState>('confirmed');
   const [loading, setLoading] = useState(true);
   const [shareError, setShareError] = useState<string | null>(null);
   const [publicShareError, setPublicShareError] = useState<string | null>(null);
@@ -151,13 +165,14 @@ export default function SharePitchScreen() {
     let active = true;
     void resolveShareDraft({
       draftId,
-      listDrafts: () => pitchDraftService.getMyDrafts(),
+      listDrafts: () => pitchDraftService.listMyDrafts(),
       purgeInvitationContact: (id) => pitchDraftService.purgeInvitationContact(id),
       publish: (update) => {
         if (!active) {
           return;
         }
         setDraft(update.draft);
+        setDraftSync(update.sync);
         setLoading(update.loading);
       },
     });
@@ -407,6 +422,16 @@ export default function SharePitchScreen() {
                 Only {friendName} should get this link — it’s how they claim, review, and approve
                 the pitch in their own words.
               </Text>
+              {/* The link keeps working either way — the consent page refuses an
+                  answered request — but the screen must not imply it was just
+                  checked when it was not. */}
+              {draftSync !== 'confirmed' ? (
+                <Text style={styles.finePrint}>
+                  {draftSync === 'signed_out'
+                    ? `Sign in to check this invite’s status. Until then this is the copy saved on this device, and ${friendName} may have already answered it.`
+                    : `Friendword could not be reached, so this is the copy saved on this device. ${friendName} may have already answered it.`}
+                </Text>
+              ) : null}
               <HypeButton
                 label={`Send it to ${friendName}`}
                 onPress={() => {

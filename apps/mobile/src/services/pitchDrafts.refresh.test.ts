@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DataLayerError } from '@friendword/data';
+import { DataLayerError, UnauthenticatedError } from '@friendword/data';
 import type { ConsentRequestRow, PitchDraftRow } from '@friendword/data';
 
-import { MockPitchDraftService, type PitchDraftStorage } from './pitchDrafts';
+import {
+  isUnconfirmedSubmission,
+  MockPitchDraftService,
+  type DraftSyncState,
+  type PitchDraftStorage,
+} from './pitchDrafts';
 import { HybridPitchDraftService } from './pitchDraftsSupabase';
 import { EMPTY_PITCH_STRUCTURE, type PitchDraftId, type PitchReview } from './types';
 
@@ -130,10 +135,12 @@ describe('draft list resilience to a slow or failing server refresh', () => {
       20,
     );
 
-    const drafts = await service.getMyDrafts();
+    const { drafts, sync } = await service.listMyDrafts();
 
     expect(drafts.map((draft) => draft.id)).toEqual([id]);
     expect(drafts[0]?.server?.consentToken).toBe(CONSENT_TOKEN);
+    // The screen still renders, but it is told the list is local-only.
+    expect(sync).toBe('unconfirmed');
   });
 
   it('returns the locally held invite when the server refresh rejects', async () => {
@@ -152,10 +159,33 @@ describe('draft list resilience to a slow or failing server refresh', () => {
       updateDraft: unexpected,
     });
 
-    const drafts = await service.getMyDrafts();
+    const { drafts, sync } = await service.listMyDrafts();
 
     expect(drafts.map((draft) => draft.id)).toEqual([id]);
     expect(drafts[0]?.server?.consentToken).toBe(CONSENT_TOKEN);
+    expect(sync).toBe('unconfirmed');
+  });
+
+  it('reports a signed-out refresh as signed out rather than as an outage', async () => {
+    const local = createLocalService();
+    const id = await createSubmittedDraft(local);
+    const service = new HybridPitchDraftService(null, local, {
+      createDraft: unexpected,
+      getDraft: unexpected,
+      listMyConsentRequests: async () => [CONSENT_REQUEST],
+      listMyDrafts: async () => {
+        throw new UnauthenticatedError();
+      },
+      registerAsset: unexpected,
+      requestAssetUpload: unexpected,
+      submitForConsent: unexpected,
+      updateDraft: unexpected,
+    });
+
+    const { drafts, sync } = await service.listMyDrafts();
+
+    expect(drafts.map((draft) => draft.id)).toEqual([id]);
+    expect(sync).toBe('signed_out');
   });
 
   it('syncs a server row whose timestamp carries a PostgREST offset', async () => {
@@ -172,13 +202,55 @@ describe('draft list resilience to a slow or failing server refresh', () => {
       updateDraft: unexpected,
     });
 
-    const drafts = await service.getMyDrafts();
+    const { drafts, sync } = await service.listMyDrafts();
 
     expect(drafts.map((draft) => draft.id)).toEqual([id]);
     // The refresh actually landed rather than being swallowed by the fallback.
+    expect(sync).toBe('confirmed');
     expect(drafts[0]?.status).toBe('changes_requested');
     expect(drafts[0]?.updatedAt).toBe('2099-01-01T00:00:00.123Z');
     expect(drafts[0]?.server?.consentToken).toBe(CONSENT_TOKEN);
+  });
+
+  it('lets a refresh the caller stopped waiting for write nothing', async () => {
+    const local = createLocalService();
+    const id = await createSubmittedDraft(local);
+    let releaseServerDrafts: (rows: readonly PitchDraftRow[]) => void = () => undefined;
+    const pendingServerDrafts = new Promise<readonly PitchDraftRow[]>((resolve) => {
+      releaseServerDrafts = resolve;
+    });
+    const service = new HybridPitchDraftService(
+      null,
+      local,
+      {
+        createDraft: unexpected,
+        getDraft: unexpected,
+        listMyConsentRequests: async () => [CONSENT_REQUEST],
+        listMyDrafts: () => pendingServerDrafts,
+        registerAsset: unexpected,
+        requestAssetUpload: unexpected,
+        submitForConsent: unexpected,
+        updateDraft: unexpected,
+      },
+      20,
+    );
+
+    const fallback = await service.listMyDrafts();
+    expect(fallback.sync).toBe('unconfirmed');
+    expect(fallback.drafts[0]?.status).toBe('consent_pending');
+
+    // What the share screen does the moment the fallback lands: it publishes the
+    // invite and purges the raw contact from this device.
+    await local.purgeInvitationContact(id);
+
+    releaseServerDrafts([SERVER_ROW]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const [stored] = await local.getMyDrafts();
+    expect(stored?.relationship?.contact).toEqual({ kind: 'sent' });
+    // Ordering between a late refresh and the purge is otherwise unspecified, so
+    // the refresh is abandoned outright rather than allowed to interleave.
+    expect(stored?.status).toBe('consent_pending');
   });
 
   it('recovers a server-only draft whose timestamps carry a PostgREST offset', async () => {
@@ -194,10 +266,45 @@ describe('draft list resilience to a slow or failing server refresh', () => {
       updateDraft: unexpected,
     });
 
-    const drafts = await service.getMyDrafts();
+    const { drafts } = await service.listMyDrafts();
 
     expect(drafts).toHaveLength(1);
     expect(drafts[0]?.id).toBe(SERVER_DRAFT_ID);
     expect(drafts[0]?.createdAt).toBe('2098-01-01T00:00:00.654Z');
+  });
+});
+
+describe('editing a draft the server may have moved past', () => {
+  const SYNC_STATES: readonly DraftSyncState[] = ['unconfirmed', 'signed_out'];
+
+  it('blocks a submitted draft whenever the listing was not confirmed', async () => {
+    const local = createLocalService();
+    const id = await createSubmittedDraft(local);
+    const [submitted] = (await local.getMyDrafts()).filter((draft) => draft.id === id);
+    if (submitted === undefined) {
+      throw new Error('Expected the submitted draft');
+    }
+
+    // This is the D2 scenario: the local copy still reads consent_pending with
+    // no response note while the dater has asked for changes on the server.
+    expect(submitted.status).toBe('consent_pending');
+    expect(submitted.review.responseNote).toBeNull();
+    for (const sync of SYNC_STATES) {
+      expect(isUnconfirmedSubmission(submitted, sync)).toBe(true);
+    }
+    expect(isUnconfirmedSubmission(submitted, 'confirmed')).toBe(false);
+  });
+
+  it('keeps a never-submitted draft editable offline', async () => {
+    const local = createLocalService();
+    const draft = await local.createDraft();
+    const attached = await local.attachServerDraft(draft.id, SERVER_DRAFT_ID);
+
+    // No consent request exists, so no dater can have moved this draft; an
+    // offline introducer must still be able to work on it.
+    for (const sync of SYNC_STATES) {
+      expect(isUnconfirmedSubmission(draft, sync)).toBe(false);
+      expect(isUnconfirmedSubmission(attached, sync)).toBe(false);
+    }
   });
 });

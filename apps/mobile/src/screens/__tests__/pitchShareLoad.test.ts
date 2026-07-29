@@ -47,6 +47,7 @@ vi.mock('../../services/introducedCampaigns', () => ({
 }));
 
 import { resolveShareDraft, type ShareDraftUpdate } from '../../../app/pitch/share';
+import type { PitchDraftListing } from '../../services/pitchDrafts';
 import { EMPTY_PITCH_STRUCTURE, PitchDraftSchema, type PitchDraft } from '../../services/types';
 
 const CONSENT_TOKEN = 'pWnhpdxKfdZx9-XwDwQ23MrZ0e0thzvn';
@@ -89,6 +90,12 @@ const PURGED_DRAFT: PitchDraft = PitchDraftSchema.parse({
 const never = <T>(): Promise<T> => new Promise<T>(() => undefined);
 const neverPurge = (): Promise<PitchDraft> => never<PitchDraft>();
 
+/** A listing the server refresh confirmed. */
+const confirmed = (...drafts: readonly PitchDraft[]): PitchDraftListing => ({
+  drafts,
+  sync: 'confirmed',
+});
+
 describe('share screen draft resolution', () => {
   it('renders the locally held invite and then the purged copy', async () => {
     const purged: string[] = [];
@@ -96,7 +103,7 @@ describe('share screen draft resolution', () => {
 
     await resolveShareDraft({
       draftId: SUBMITTED_DRAFT.id,
-      listDrafts: async () => [SUBMITTED_DRAFT],
+      listDrafts: async () => confirmed(SUBMITTED_DRAFT),
       purgeInvitationContact: async (id) => {
         purged.push(id);
         return PURGED_DRAFT;
@@ -106,8 +113,8 @@ describe('share screen draft resolution', () => {
 
     expect(purged).toEqual([SUBMITTED_DRAFT.id]);
     expect(updates).toEqual([
-      { draft: SUBMITTED_DRAFT, loading: false },
-      { draft: PURGED_DRAFT, loading: false },
+      { draft: SUBMITTED_DRAFT, loading: false, sync: 'confirmed' },
+      { draft: PURGED_DRAFT, loading: false, sync: 'confirmed' },
     ]);
   });
 
@@ -116,7 +123,7 @@ describe('share screen draft resolution', () => {
 
     await resolveShareDraft({
       draftId: SUBMITTED_DRAFT.id,
-      listDrafts: async () => [SUBMITTED_DRAFT],
+      listDrafts: async () => confirmed(SUBMITTED_DRAFT),
       purgeInvitationContact: neverPurge,
       publish: (update) => updates.push(update),
       purgeTimeoutMs: 20,
@@ -124,7 +131,7 @@ describe('share screen draft resolution', () => {
 
     // The raw contact stays for the next visit to retry, but the introducer can
     // already reach the approval link.
-    expect(updates[0]).toEqual({ draft: SUBMITTED_DRAFT, loading: false });
+    expect(updates[0]).toEqual({ draft: SUBMITTED_DRAFT, loading: false, sync: 'confirmed' });
     expect(updates.every((update) => !update.loading)).toBe(true);
     expect(updates.at(-1)?.draft?.server?.consentToken).toBe(CONSENT_TOKEN);
   });
@@ -134,14 +141,14 @@ describe('share screen draft resolution', () => {
 
     await resolveShareDraft({
       draftId: SUBMITTED_DRAFT.id,
-      listDrafts: async () => [SUBMITTED_DRAFT],
+      listDrafts: async () => confirmed(SUBMITTED_DRAFT),
       purgeInvitationContact: async () => {
         throw new Error('Saved pitch drafts could not be read.');
       },
       publish: (update) => updates.push(update),
     });
 
-    expect(updates).toEqual([{ draft: SUBMITTED_DRAFT, loading: false }]);
+    expect(updates).toEqual([{ draft: SUBMITTED_DRAFT, loading: false, sync: 'confirmed' }]);
   });
 
   it('stops loading when the draft list never settles', async () => {
@@ -155,7 +162,7 @@ describe('share screen draft resolution', () => {
       loadTimeoutMs: 20,
     });
 
-    expect(updates).toEqual([{ draft: null, loading: false }]);
+    expect(updates).toEqual([{ draft: null, loading: false, sync: 'unconfirmed' }]);
   });
 
   it('stops loading when the draft list fails', async () => {
@@ -170,7 +177,23 @@ describe('share screen draft resolution', () => {
       publish: (update) => updates.push(update),
     });
 
-    expect(updates).toEqual([{ draft: null, loading: false }]);
+    expect(updates).toEqual([{ draft: null, loading: false, sync: 'unconfirmed' }]);
+  });
+
+  it('carries an unconfirmed listing through so the invite is not shown as checked', async () => {
+    const updates: ShareDraftUpdate[] = [];
+
+    await resolveShareDraft({
+      draftId: SUBMITTED_DRAFT.id,
+      listDrafts: async () => ({ drafts: [SUBMITTED_DRAFT], sync: 'unconfirmed' }),
+      purgeInvitationContact: async () => PURGED_DRAFT,
+      publish: (update) => updates.push(update),
+    });
+
+    // The invite still renders — the link is local and keeps working — but every
+    // update says it was not checked with the server on this visit.
+    expect(updates.every((update) => update.sync === 'unconfirmed')).toBe(true);
+    expect(updates.at(-1)?.draft?.server?.consentToken).toBe(CONSENT_TOKEN);
   });
 
   it('skips the purge once the contact has already been handed over', async () => {
@@ -179,12 +202,12 @@ describe('share screen draft resolution', () => {
 
     await resolveShareDraft({
       draftId: PURGED_DRAFT.id,
-      listDrafts: async () => [PURGED_DRAFT],
+      listDrafts: async () => confirmed(PURGED_DRAFT),
       purgeInvitationContact,
       publish: (update) => updates.push(update),
     });
 
     expect(purgeInvitationContact).not.toHaveBeenCalled();
-    expect(updates).toEqual([{ draft: PURGED_DRAFT, loading: false }]);
+    expect(updates).toEqual([{ draft: PURGED_DRAFT, loading: false, sync: 'confirmed' }]);
   });
 });

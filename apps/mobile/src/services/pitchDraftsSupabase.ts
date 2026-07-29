@@ -18,6 +18,7 @@ import {
   MockPitchDraftService,
   PitchDraftSubmissionError,
   settleWithin,
+  type PitchDraftListing,
   type PitchDraftService,
   type PurgeScope,
 } from './pitchDrafts';
@@ -151,12 +152,21 @@ const MOBILE_RELATIONSHIP_DURATION: Record<ServerRelationshipDuration, Relations
 };
 
 /**
- * How long the server refresh may hold up {@link HybridPitchDraftService.getMyDrafts}.
+ * Marks a server refresh the caller has stopped waiting for. `settleWithin`
+ * cannot cancel the underlying request, so this is what stops its side effects.
+ */
+type RefreshLifetime = { superseded: boolean };
+
+/**
+ * How long the server refresh may hold up {@link HybridPitchDraftService.listMyDrafts}.
  * Local storage already holds every draft the introducer needs to act on —
  * including the raw consent token behind the approval link — so a stalled
  * PostgREST call must degrade to that local truth instead of blocking a screen.
  */
 export const SERVER_REFRESH_TIMEOUT_MS = 8_000;
+
+const SERVER_TIMESTAMP =
+  /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|z|[+-]\d{2}(?::?\d{2})?)?$/;
 
 /**
  * PostgREST returns `timestamptz` as an offset instant with microsecond
@@ -164,10 +174,33 @@ export const SERVER_REFRESH_TIMEOUT_MS = 8_000;
  * only UTC "Z" instants, and `syncServerReview` compares timestamps
  * lexicographically, which is sound only on that canonical form. An unparseable
  * value is passed through so the schema reports it rather than this masking it.
+ *
+ * The shape is decomposed rather than handed straight to `new Date`, because
+ * that constructor reads an offsetless timestamp (a `timestamp` column, or a
+ * computed RPC field) in the *device* zone and would silently move the instant
+ * by the device's UTC offset. Sub-second digits are normalized to exactly three
+ * here so both sides of the lexicographic comparison have the same width as the
+ * `new Date().toISOString()` stamps local drafts carry; a wider server value
+ * would otherwise sort below an equal local one on the trailing "Z".
  */
-function toIsoInstant(value: string): string {
-  const parsed = new Date(value);
+export function toIsoInstant(value: string): string {
+  const match = SERVER_TIMESTAMP.exec(value.trim());
+  if (match === null) {
+    return value;
+  }
+  const [, date, time, fraction, offset] = match;
+  const millis = (fraction ?? '').padEnd(3, '0').slice(0, 3);
+  const parsed = new Date(`${date}T${time}.${millis}${toUtcOffset(offset)}`);
   return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+}
+
+/** Normalizes the offset spellings Postgres emits ("+09", "+0900", none) to "±HH:MM". */
+function toUtcOffset(offset: string | undefined): string {
+  if (offset === undefined || offset.toUpperCase() === 'Z') {
+    return 'Z';
+  }
+  const digits = offset.slice(1).replace(':', '');
+  return `${offset.slice(0, 1)}${digits.slice(0, 2)}:${digits.slice(2).padEnd(2, '0')}`;
 }
 
 export class HybridPitchDraftService implements PitchDraftService {
@@ -215,36 +248,55 @@ export class HybridPitchDraftService implements PitchDraftService {
    * Local drafts are the answer; the server pass only enriches them. It is
    * therefore both time-bounded and non-fatal: a stalled, unauthenticated or
    * failing refresh returns the local list rather than rejecting, so a caller
-   * that owns a consent token can always render it. Only a local storage
-   * failure (read before the refresh) still rejects.
+   * that owns a consent token can always render it. The returned
+   * `sync` state is how the caller tells a list the server confirmed
+   * from one this device produced alone — without it the fallback would hide a
+   * permanently broken sync behind a normal-looking screen. Only a local
+   * storage failure (read before the refresh) still rejects.
    */
-  async getMyDrafts(): Promise<readonly PitchDraft[]> {
+  async listMyDrafts(): Promise<PitchDraftListing> {
     const localDrafts = await this.local.getMyDrafts();
     const repo = this.repo;
     if (repo === null) {
-      return localDrafts;
+      return { drafts: localDrafts, sync: 'signed_out' };
     }
+    const refresh: RefreshLifetime = { superseded: false };
     try {
       return await settleWithin(
-        this.refreshFromServer(repo, localDrafts),
+        this.refreshFromServer(repo, localDrafts, refresh),
         this.refreshTimeoutMs,
-        () => localDrafts,
+        () => {
+          refresh.superseded = true;
+          return { drafts: localDrafts, sync: 'unconfirmed' };
+        },
       );
     } catch (error: unknown) {
-      if (!(error instanceof UnauthenticatedError)) {
-        console.warn(
-          'Pitch draft server refresh failed; showing the drafts saved on this device:',
-          error instanceof Error ? error.message : 'Unknown refresh error.',
-        );
+      refresh.superseded = true;
+      if (error instanceof UnauthenticatedError) {
+        return { drafts: localDrafts, sync: 'signed_out' };
       }
-      return localDrafts;
+      console.warn(
+        'Pitch draft server refresh failed; showing the drafts saved on this device:',
+        error instanceof Error ? error.message : 'Unknown refresh error.',
+      );
+      return { drafts: localDrafts, sync: 'unconfirmed' };
     }
   }
 
+  /**
+   * The refresh cannot be cancelled, so every local write it performs is gated
+   * on `refresh` still being live. Once the caller has taken the fallback list
+   * it has already acted on it — the share screen publishes the invite and
+   * purges the raw contact — and a late write interleaving with that has no
+   * defined order. Abandoning the refresh makes the outcome deterministic: the
+   * next read runs it again.
+   */
   private async refreshFromServer(
     repo: PitchDraftRepository,
     localDrafts: readonly PitchDraft[],
-  ): Promise<readonly PitchDraft[]> {
+    refresh: RefreshLifetime,
+  ): Promise<PitchDraftListing> {
+    const abandoned: PitchDraftListing = { drafts: localDrafts, sync: 'unconfirmed' };
     const [visibleServerDrafts, requests, currentUserId] = await Promise.all([
       repo.listMyDrafts(),
       repo.listMyConsentRequests(),
@@ -258,6 +310,9 @@ export class HybridPitchDraftService implements PitchDraftService {
       const serverDraft = serverDrafts.find((row) => row.id === draft.server?.draftId);
       if (serverDraft === undefined) {
         continue;
+      }
+      if (refresh.superseded) {
+        return abandoned;
       }
       const request = requests.find((row) => row.pitch_draft_id === serverDraft.id);
       await this.local.syncServerReview(draft.id, {
@@ -273,10 +328,16 @@ export class HybridPitchDraftService implements PitchDraftService {
       if (knownServerIds.has(serverDraft.id)) {
         continue;
       }
+      if (refresh.superseded) {
+        return abandoned;
+      }
       const request = requests.find((row) => row.pitch_draft_id === serverDraft.id);
       await this.local.restoreServerDraft(recoverServerDraft(serverDraft, request));
     }
-    return this.local.getMyDrafts();
+    if (refresh.superseded) {
+      return abandoned;
+    }
+    return { drafts: await this.local.getMyDrafts(), sync: 'confirmed' };
   }
 
   /**

@@ -215,8 +215,8 @@ describe('pitch draft AI review flow', () => {
       updateDraft: unexpected,
     });
 
-    const firstLoad = await service.getMyDrafts();
-    const secondLoad = await service.getMyDrafts();
+    const { drafts: firstLoad } = await service.listMyDrafts();
+    const { drafts: secondLoad } = await service.listMyDrafts();
     const restored = firstLoad[0];
     if (restored === undefined) {
       throw new Error('Expected a recovered server draft');
@@ -266,7 +266,7 @@ describe('pitch draft AI review flow', () => {
       updateDraft: unexpected,
     });
 
-    const drafts = await service.getMyDrafts();
+    const { drafts } = await service.listMyDrafts();
     const merged = drafts[0];
     if (merged === undefined) {
       throw new Error('Expected a merged draft');
@@ -370,8 +370,8 @@ describe('pitch draft AI review flow', () => {
       updateDraft: unexpected,
     });
 
-    const drafts = await service.getMyDrafts();
-    const draftsAfterSync = await service.getMyDrafts();
+    const { drafts } = await service.listMyDrafts();
+    const { drafts: draftsAfterSync } = await service.listMyDrafts();
 
     expect(drafts.map((draft) => draft.id)).toEqual([SERVER_ROW.id, olderServerRow.id]);
     expect(draftsAfterSync.map((draft) => draft.id)).toEqual([SERVER_ROW.id, olderServerRow.id]);

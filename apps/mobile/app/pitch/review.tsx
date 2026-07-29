@@ -17,8 +17,13 @@ import {
   preparePitchReview,
   type PitchReviewPreparationChoice,
 } from '../../src/features/pitch/preparePitchReview';
-import { HypeButton } from '../../src/components';
+import { HypeButton, QuietNavAction, TrustCard } from '../../src/components';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
+import {
+  isUnconfirmedSubmission,
+  unconfirmedDraftMessage,
+  type DraftSyncState,
+} from '../../src/services/pitchDrafts';
 import {
   ManualPitchNeedsAiReviewError,
   NeedsSignInError,
@@ -29,6 +34,7 @@ export default function PitchReviewScreen() {
   const router = useRouter();
   const { draftId } = useLocalSearchParams<{ draftId: string }>();
   const [draft, setDraft] = useState<PitchDraft | null>(null);
+  const [draftSync, setDraftSync] = useState<DraftSyncState>('confirmed');
   const [review, setReview] = useState<PitchReview | null>(null);
   const [loading, setLoading] = useState(true);
   const [preparing, setPreparing] = useState(false);
@@ -39,15 +45,15 @@ export default function PitchReviewScreen() {
   const [needsAiReview, setNeedsAiReview] = useState(false);
   const finalizeInFlight = useRef(false);
   const pendingPreparation = useRef<PitchReviewPreparationChoice | null>(null);
+  const friendName = draft?.relationship?.friendFirstName ?? 'your friend';
 
   const loadReview = useCallback(async (): Promise<void> => {
     setLoading(true);
     setErrorMessage(null);
     setAiConsentState('checking');
     try {
-      const candidate = (await pitchDraftService.getMyDrafts()).find(
-        (savedDraft) => savedDraft.id === draftId,
-      );
+      const listing = await pitchDraftService.listMyDrafts();
+      const candidate = listing.drafts.find((savedDraft) => savedDraft.id === draftId);
       if (candidate === undefined) {
         setDraft(null);
         setReview(null);
@@ -55,7 +61,14 @@ export default function PitchReviewScreen() {
         return;
       }
       setDraft(candidate);
+      setDraftSync(listing.sync);
       setReview(candidate.review);
+      // A submitted draft this device could not confirm may already carry a
+      // change request or an approval the introducer has never seen. Editing it
+      // stops here rather than preparing a revision of a superseded copy.
+      if (isUnconfirmedSubmission(candidate, listing.sync)) {
+        return;
+      }
       if (candidate.review.generationMode === 'pending') {
         setPreparing(true);
         const prepared = await preparePitchReview(
@@ -119,6 +132,12 @@ export default function PitchReviewScreen() {
     if (draft === null || review === null || busy || finalizeInFlight.current) {
       return;
     }
+    // The editor is not rendered in this state; this also covers the sign-in
+    // sheet resuming a finalize that was queued before the block was known.
+    if (isUnconfirmedSubmission(draft, draftSync)) {
+      setErrorMessage(unconfirmedDraftMessage(draftSync, friendName));
+      return;
+    }
     finalizeInFlight.current = true;
     setBusy(true);
     try {
@@ -166,6 +185,50 @@ export default function PitchReviewScreen() {
     setNeedsAiReview(false);
     await preparePendingReview('affirm_ai_consent');
   };
+
+  // An unconfirmed submitted draft is presented as what it is — this device's
+  // copy — instead of as an editable current state. Ahead of every other branch,
+  // so it cannot be regenerated or resent either. Not a dead end: checking again
+  // is one tap, and resending needs the network in any case.
+  if (draft !== null && !loading && isUnconfirmedSubmission(draft, draftSync)) {
+    return (
+      <>
+        <SafeAreaView style={styles.safeArea}>
+          <Stack.Screen options={{ title: 'Review your draft' }} />
+          <ScrollView contentContainerStyle={styles.disclosureContent}>
+            <TrustCard tone="danger">
+              <Text style={styles.blockedTitle}>This pitch has not been checked</Text>
+              <Text style={styles.blockedNotice}>
+                {unconfirmedDraftMessage(draftSync, friendName)}
+              </Text>
+              {draftSync === 'signed_out' ? (
+                <HypeButton label="Sign in" onPress={() => setSignInVisible(true)} />
+              ) : (
+                <HypeButton
+                  label="Check again"
+                  onPress={() => {
+                    void loadReview();
+                  }}
+                />
+              )}
+              <QuietNavAction
+                label="Back to my campaigns"
+                onPress={() => router.replace('/campaigns')}
+              />
+            </TrustCard>
+          </ScrollView>
+        </SafeAreaView>
+        <SignInSheet
+          visible={signInVisible}
+          onClose={() => setSignInVisible(false)}
+          onSignedIn={() => {
+            setSignInVisible(false);
+            void loadReview();
+          }}
+        />
+      </>
+    );
+  }
 
   if (
     draft !== null &&
@@ -264,7 +327,7 @@ export default function PitchReviewScreen() {
       <PitchReviewEditor
         busy={busy}
         errorMessage={errorMessage}
-        friendName={draft.relationship?.friendFirstName ?? 'your friend'}
+        friendName={friendName}
         onChange={setReview}
         onSubmit={() => {
           void finalize();
@@ -287,6 +350,7 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background, padding: spacing.lg },
   disclosureContent: { flexGrow: 1, justifyContent: 'center' },
   message: { color: colors.textSecondary, fontFamily: fonts.body, fontSize: fontSizes.md },
+  blockedTitle: { color: colors.ink, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.lg },
   blockedNotice: {
     color: colors.textSecondary,
     fontFamily: fonts.body,

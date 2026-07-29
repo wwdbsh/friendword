@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { hasCurrentAiProcessingConsent } from '../../services/aiConsent';
 import { pitchDraftService } from '../../services/draftServiceInstance';
+import { isUnconfirmedSubmission, unconfirmedDraftMessage } from '../../services/pitchDrafts';
 import { NeedsSignInError } from '../../services/pitchDraftsSupabase';
 import type { PitchDraftId } from '../../services/types';
 import { handleSubmitError, requireDraftId } from './pitchFlowState';
@@ -36,6 +37,9 @@ export function usePitchSubmission(
   const [aiConsentState, setAiConsentState] = useState<AiConsentUiState>('checking');
   const inFlight = useRef(false);
   const pendingChoice = useRef<PitchReviewPreparationChoice | null>(null);
+  // Set by the consent read below, which already knows the listing's sync state,
+  // so blocking a submit costs no extra bounded-and-possibly-stalling call.
+  const unconfirmed = useRef<string | null>(null);
 
   const refreshAiConsent = useCallback(async (): Promise<void> => {
     if (draftId === null) {
@@ -44,9 +48,22 @@ export function usePitchSubmission(
     }
     setAiConsentState('checking');
     try {
-      const draft = (await pitchDraftService.getMyDrafts()).find(
-        (candidate) => candidate.id === draftId,
-      );
+      const listing = await pitchDraftService.listMyDrafts();
+      const draft = listing.drafts.find((candidate) => candidate.id === draftId);
+      // A draft the dater may already have answered must not be re-prepared from
+      // this device's unconfirmed copy.
+      unconfirmed.current =
+        draft !== undefined && isUnconfirmedSubmission(draft, listing.sync)
+          ? unconfirmedDraftMessage(
+              listing.sync,
+              draft.relationship?.friendFirstName ?? 'your friend',
+            )
+          : null;
+      if (unconfirmed.current !== null) {
+        setAiConsentState('error');
+        setErrorMessage(unconfirmed.current);
+        return;
+      }
       if (draft?.server === null || draft?.server === undefined) {
         setAiConsentState('required');
         return;
@@ -70,6 +87,10 @@ export function usePitchSubmission(
       return;
     }
     const activeDraftId = requireDraftId(draftId);
+    if (unconfirmed.current !== null) {
+      setErrorMessage(unconfirmed.current);
+      return;
+    }
     pendingChoice.current = choice;
     inFlight.current = true;
     setSubmitting(true);

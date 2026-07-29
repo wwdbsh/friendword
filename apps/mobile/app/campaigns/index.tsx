@@ -28,6 +28,7 @@ import {
   listMyIntroducedCampaigns,
   type IntroducedCampaign,
 } from '../../src/services/introducedCampaigns';
+import type { DraftSyncState } from '../../src/services/pitchDrafts';
 import { isRecoveredServerDraft } from '../../src/services/pitchDraftsSupabase';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 import type { PitchDraft } from '../../src/services/types';
@@ -91,6 +92,7 @@ type IntroducedLoadState = 'loading' | 'ready' | 'signed_out' | 'error';
 export default function CampaignsScreen() {
   const router = useRouter();
   const [drafts, setDrafts] = useState<readonly PitchDraft[]>([]);
+  const [draftSync, setDraftSync] = useState<DraftSyncState>('confirmed');
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [ownedCampaigns, setOwnedCampaigns] = useState<readonly OwnedCampaignBenefit[]>([]);
@@ -153,15 +155,20 @@ export default function CampaignsScreen() {
     setCopiedCampaignId(null);
     setIntroducerShareError(null);
     pitchDraftService
-      .getMyDrafts()
-      .then((savedDrafts) => {
+      .listMyDrafts()
+      .then((listing) => {
         if (active) {
-          setDrafts(savedDrafts);
+          setDrafts(listing.drafts);
+          setDraftSync(listing.sync);
           setErrorMessage(null);
         }
       })
+      // Only a local storage failure reaches here now — a failing server refresh
+      // resolves with this device's drafts and an unconfirmed sync state.
       .catch(() => {
         if (active) {
+          setDrafts([]);
+          setDraftSync('unconfirmed');
           setErrorMessage('Your saved pitches could not be loaded.');
         }
       })
@@ -429,7 +436,35 @@ export default function CampaignsScreen() {
         {loading ? <Text style={styles.message}>Loading your mixes…</Text> : null}
         {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
 
-        {!loading && !errorMessage && drafts.length === 0 ? (
+        {/* The draft read falls back to this device's copies rather than failing,
+            so a broken sync has no other way to become visible. */}
+        {!loading && errorMessage === null && draftSync === 'unconfirmed' ? (
+          <TrustCard tone="danger">
+            <Text style={styles.emptyTitle}>Showing this device’s copies</Text>
+            <Text style={styles.message}>
+              Friendword could not be reached, so these are the pitches saved on this device. Your
+              friends’ latest answers may be missing, and pitches saved to your account that this
+              device has never synced are not listed.
+            </Text>
+            <HypeButton
+              label="Try again"
+              onPress={() => {
+                load();
+              }}
+              secondary
+            />
+          </TrustCard>
+        ) : null}
+
+        {!loading && errorMessage === null && draftSync === 'signed_out' ? (
+          <SignInPromptCard
+            title="Sign in to sync your pitches"
+            message="These are the pitches saved on this device. Sign in to check your friends’ latest answers and to see pitches saved to your account."
+            onSignIn={() => setSignInVisible(true)}
+          />
+        ) : null}
+
+        {!loading && errorMessage === null && draftSync === 'confirmed' && drafts.length === 0 ? (
           <StickerCard>
             <Text style={styles.emptyTitle}>No mixes on deck yet.</Text>
             <Text style={styles.message}>

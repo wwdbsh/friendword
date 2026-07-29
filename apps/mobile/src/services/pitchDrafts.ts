@@ -29,6 +29,24 @@ export type PitchDraftStorage = {
   setItem(key: string, value: string): Promise<void>;
 };
 
+/**
+ * Whether a draft listing was confirmed against the server on the read that
+ * produced it.
+ * - `confirmed`: the server refresh completed, so every server-backed draft in
+ *   the listing carries the status and review the server holds.
+ * - `unconfirmed`: the refresh timed out or failed. The listing is what this
+ *   device saved, which may lag whatever the dater has since done, and drafts
+ *   that live only on the server are missing from it.
+ * - `signed_out`: there is no session to sync against, so the same caveats
+ *   apply, but signing in — not retrying — is the fix.
+ */
+export type DraftSyncState = 'confirmed' | 'unconfirmed' | 'signed_out';
+
+export type PitchDraftListing = {
+  readonly drafts: readonly PitchDraft[];
+  readonly sync: DraftSyncState;
+};
+
 export interface PitchDraftService {
   createDraft(): Promise<PitchDraft>;
   saveRelationship(id: PitchDraftId, relationship: PitchRelationship): Promise<PitchDraft>;
@@ -42,11 +60,39 @@ export interface PitchDraftService {
   purgeInvitationContact(id: PitchDraftId): Promise<PitchDraft>;
   purgeSensitiveDraftData(id: PitchDraftId, scope: PurgeScope): Promise<PitchDraft>;
   purgeAllConsentTokens(): Promise<number>;
-  getMyDrafts(): Promise<readonly PitchDraft[]>;
+  /**
+   * The screen-facing draft read. It carries its own {@link DraftSyncState}
+   * rather than a bare array so no caller can present a list this device could
+   * not confirm as the current one — that is the whole failure mode the
+   * local-drafts fallback would otherwise hide.
+   */
+  listMyDrafts(): Promise<PitchDraftListing>;
 }
 
 export function hasFinalizedConsent(draft: PitchDraft): boolean {
   return draft.server !== null && draft.server.consentRequestId !== null;
+}
+
+/**
+ * True when editing or resubmitting this draft would mean acting on state the
+ * server may already have moved past: it has been submitted for consent, so the
+ * dater can have approved it or asked for changes, and this listing was not
+ * confirmed against the server. A draft that was never submitted has no server
+ * state to fall behind, so it stays editable offline.
+ */
+export function isUnconfirmedSubmission(draft: PitchDraft, sync: DraftSyncState): boolean {
+  return sync !== 'confirmed' && hasFinalizedConsent(draft);
+}
+
+/** Says why a submitted draft could not be confirmed, without overclaiming. */
+export function unconfirmedDraftMessage(sync: DraftSyncState, friendName: string): string {
+  return sync === 'signed_out'
+    ? `Sign in to check whether ${friendName} has already answered this pitch. ` +
+        'Until then this device only has its own saved copy, and resending could ' +
+        'overwrite a change request you have not seen.'
+    : `Friendword could not be reached, so this is only the copy saved on this device. ` +
+        `${friendName} may have answered or asked for changes since. ` +
+        'Check again before editing or resending.';
 }
 
 /**
@@ -336,11 +382,21 @@ export class MockPitchDraftService implements PitchDraftService {
     return this.updateDraft(id, purgeInvitationContact);
   }
 
+  /** The on-device store, with no claim about the server. */
   async getMyDrafts(): Promise<readonly PitchDraft[]> {
     return this.runExclusive(async () => {
       const drafts = await this.readDrafts();
       return [...drafts].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     });
+  }
+
+  /**
+   * This store has no server behind it, so a listing straight from it is never
+   * confirmed. {@link HybridPitchDraftService} overrides this with the real
+   * refresh.
+   */
+  async listMyDrafts(): Promise<PitchDraftListing> {
+    return { drafts: await this.getMyDrafts(), sync: 'signed_out' };
   }
 
   private requireCompleteDraft(draft: PitchDraft): void {

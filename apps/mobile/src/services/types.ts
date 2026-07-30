@@ -45,6 +45,81 @@ export const PHOTO_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as con
 export type PhotoMimeType = (typeof PHOTO_MIME_TYPES)[number];
 
 /**
+ * Container types the server's ingest probe accepts for a pitch clip (mp4 and
+ * mov, H.264/HEVC inside). The probe re-reads the real bytes and is the
+ * authority; this list only keeps the app from uploading a file under a name and
+ * Content-Type the probe would refuse.
+ */
+export const CLIP_MIME_TYPES = ['video/mp4', 'video/quicktime'] as const;
+
+export type ClipMimeType = (typeof CLIP_MIME_TYPES)[number];
+
+/**
+ * Longest source clip the pipeline accepts (user cap, 2026-07-30): 15 seconds
+ * in, at most 10 seconds of it used per scene window. `videoMaxDuration` only
+ * bounds *recording*, so a library pick has to be measured and refused here.
+ */
+export const CLIP_MAX_SOURCE_DURATION_MS = 15_000;
+
+/**
+ * How many photos and clips one pitch may carry. The server enforces both (the
+ * storage quota and the clip entitlement); these are the client mirror that
+ * keeps the picker from handing over a selection the server would reject.
+ * `MAX_PITCH_VISUALS` is the combined ceiling — with today's per-kind caps it is
+ * never the binding one, but it is what a scene's shot budget is spent on, so
+ * the picker checks it rather than assuming the sum stays small.
+ */
+export const MAX_PITCH_PHOTOS = 4;
+export const MAX_PITCH_CLIPS = 3;
+export const MAX_PITCH_VISUALS = MAX_PITCH_PHOTOS + MAX_PITCH_CLIPS;
+
+/**
+ * Clips a draft may register without a Campaign Pass.
+ *
+ * `MAX_PITCH_CLIPS` is the absolute schema ceiling; this is the allowance the
+ * server actually applies to an ordinary draft (0050
+ * `private.pitch_draft_video_allowance`: 3 while the pitch's campaign holds an
+ * active pass, otherwise 1 — and a campaign exists only after publish, so a
+ * first-time draft always gets 1). The picker mirrors this so the introducer is
+ * told before the upload, not by a registration the server refuses. The server
+ * decides; this never grants anything.
+ */
+export const FREE_PITCH_CLIP_ALLOWANCE = 1;
+
+/**
+ * Upload ceiling for one clip when the app was built without a configured value:
+ * 50MB, which is what Supabase Storage accepts on the current Free plan. Kept in
+ * sync with `FRIENDWORD_VIDEO_MAX_BYTES` on the server, which is the authority —
+ * this is the mirror that saves the introducer a doomed upload.
+ */
+export const DEFAULT_CLIP_MAX_BYTES = 52_428_800;
+
+/**
+ * Where one uploaded clip stands in the server's ingest pipeline (probe → silent
+ * proxy → poster → frame moderation). The five values of
+ * `pitch_video_ingests.ingest_status` (0050), mirrored exactly so this app can
+ * never invent a sixth state or collapse two into one:
+ * - `pending`: queued, nothing has run yet.
+ * - `processing`: a worker holds the lease.
+ * - `succeeded`: every automated check came back clean and the derivatives exist.
+ * - `flagged`: frame moderation refused it. The clip stays unpublishable, the
+ *   original is kept as review evidence, and a person decides next.
+ * - `failed`: the pipeline could not process it (probe refusal, transcode error).
+ *
+ * Never a claim about identity, face matching, or audio — the proxy has no audio
+ * track at all. Only about the automated checks that actually ran.
+ */
+export const CLIP_INGEST_STATES = [
+  'pending',
+  'processing',
+  'succeeded',
+  'flagged',
+  'failed',
+] as const;
+
+export type ClipIngestState = (typeof CLIP_INGEST_STATES)[number];
+
+/**
  * What already succeeded for one asset of a server-backed draft, recorded as
  * soon as each step lands so a retry after a partial failure neither re-uploads
  * (the signed URL is upsert:false) nor re-registers (which would duplicate
@@ -83,6 +158,38 @@ const PitchPhotoSchema = z.object({
   // falls back to the file extension.
   mimeType: z.enum(PHOTO_MIME_TYPES).optional(),
   upload: UploadedAssetSchema.optional(),
+});
+/**
+ * One short video the introducer picked. Kept apart from `PitchPhoto` because
+ * the two are handled differently end to end: a clip's bytes are judged by the
+ * ingest pipeline rather than by `/api/media/validate`, and `durationMillis` /
+ * `byteSize` are load-bearing (they mirror the caps the server enforces), not
+ * decoration.
+ */
+const PitchClipSchema = z.object({
+  uri: z.string().min(1),
+  width: z.number().nonnegative(),
+  height: z.number().nonnegative(),
+  // Source length as the picker measured it. Required: a clip whose length
+  // could not be read cannot be checked against the 15s cap, and the picker
+  // refuses it rather than uploading a file the probe would reject.
+  durationMillis: z.number().int().positive().max(CLIP_MAX_SOURCE_DURATION_MS),
+  // Byte size, from the picker or from the local file. Required for the same
+  // reason: it is what the client-side mirror of the upload ceiling reads.
+  byteSize: z.number().int().positive(),
+  // Same identity contract as PitchPhoto.assetKey: the stored object is named
+  // `clip-<assetKey>.<ext>`, which must match the storage policy's object-name
+  // pattern end to end.
+  assetKey: z
+    .string()
+    .max(32)
+    .regex(/^[a-z0-9]+$/)
+    .optional(),
+  mimeType: z.enum(CLIP_MIME_TYPES),
+  upload: UploadedAssetSchema.optional(),
+  // Cached mirror of the server's ingest job state, refreshed by polling. The
+  // server is the authority; absence means this device has not heard yet.
+  ingest: z.enum(CLIP_INGEST_STATES).optional(),
 });
 const PitchRecordingSchema = z.object({
   uri: z.string().min(1),
@@ -145,7 +252,9 @@ export const PitchDraftSchema = z.object({
   status: PitchDraftStatusSchema,
   contextRole: z.literal('INTRODUCER'),
   relationship: PitchRelationshipSchema.nullable(),
-  photos: z.array(PitchPhotoSchema).max(4),
+  photos: z.array(PitchPhotoSchema).max(MAX_PITCH_PHOTOS),
+  // Defaulted so drafts persisted before clips existed still parse.
+  clips: z.array(PitchClipSchema).max(MAX_PITCH_CLIPS).default([]),
   recording: PitchRecordingSchema.nullable(),
   review: PitchReviewSchema.default({
     headline: '',
@@ -169,6 +278,7 @@ export type EmailInvitationContact = z.infer<typeof EmailInvitationContactSchema
 export type InvitationContact = z.infer<typeof InvitationContactSchema>;
 export type PitchRelationship = z.infer<typeof PitchRelationshipSchema>;
 export type PitchPhoto = z.infer<typeof PitchPhotoSchema>;
+export type PitchClip = z.infer<typeof PitchClipSchema>;
 export type PitchRecording = z.infer<typeof PitchRecordingSchema>;
 export type PitchDraft = z.infer<typeof PitchDraftSchema> & {
   readonly status: PitchDraftStatus;

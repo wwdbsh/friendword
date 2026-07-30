@@ -22,9 +22,13 @@ import { trackEvent } from '@friendword/data';
 
 import { SignInSheet } from '../../src/features/auth/SignInSheet';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
-import { StoredVoiceReplacementError } from '../../src/services/pitchDrafts';
+import {
+  StoredClipRemovalError,
+  StoredVoiceReplacementError,
+} from '../../src/services/pitchDrafts';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 import type {
+  PitchClip,
   PitchDraftId,
   PitchPhoto,
   PitchRecording,
@@ -45,6 +49,7 @@ export default function NewPitchScreen() {
   const [friendFirstName, setFriendFirstName] = useState('');
   const [contactValue, setContactValue] = useState('');
   const [photos, setPhotos] = useState<readonly PitchPhoto[]>([]);
+  const [clips, setClips] = useState<readonly PitchClip[]>([]);
   const [recording, setRecording] = useState<PitchRecording | null>(null);
   const [draftId, setDraftId] = useState<PitchDraftId | null>(null);
   const [savedRelationship, setSavedRelationship] = useState<PitchRelationship | null>(null);
@@ -126,7 +131,7 @@ export default function NewPitchScreen() {
     }
   };
 
-  const savePhotos = async (): Promise<void> => {
+  const saveVisuals = async (): Promise<void> => {
     if (savingRef.current) {
       return;
     }
@@ -135,9 +140,20 @@ export default function NewPitchScreen() {
       savingRef.current = true;
       setSaving(true);
       await pitchDraftService.savePhotos(activeDraftId, photos);
+      const saved = await pitchDraftService.saveClips(activeDraftId, clips);
+      setClips(saved.clips);
       setErrorMessage(null);
       setTrack(4);
     } catch (error: unknown) {
+      // A clip whose bytes are already stored cannot be detached from the server
+      // draft, so the screen goes back to the clips the draft actually holds
+      // rather than carrying a removal that will never take effect. Not a dead
+      // end: the pitch can be sent, and an unpublishable clip is not published.
+      if (error instanceof StoredClipRemovalError) {
+        setClips(error.keptClips);
+        setErrorMessage(error.message);
+        return;
+      }
       handleFlowError(error, setErrorMessage);
     } finally {
       savingRef.current = false;
@@ -208,11 +224,13 @@ export default function NewPitchScreen() {
       return (
         <PhotosStep
           busy={saving}
+          clips={clips}
           photos={photos}
           saveErrorMessage={errorMessage}
           onBack={goBack}
+          onClipsChange={setClips}
           onContinue={() => {
-            void savePhotos();
+            void saveVisuals();
           }}
           onPhotosChange={setPhotos}
         />

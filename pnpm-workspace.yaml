@@ -4,6 +4,7 @@ packages:
   - media-worker
 allowBuilds:
   esbuild: true
+  ffmpeg-static: true
   sharp: true
 patchedDependencies:
   expo-modules-jsi@57.0.1: patches/expo-modules-jsi@57.0.1.patch

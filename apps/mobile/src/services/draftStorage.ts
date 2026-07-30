@@ -68,23 +68,30 @@ export function purgeableMediaUris(draft: PitchDraft): readonly string[] {
   for (const photo of draft.photos) {
     uris.push(photo.uri);
   }
+  // Clips go too: the introducer's phone must not keep a copy of a video the
+  // server already holds, and the local file is not the source of anything after
+  // publish (the render pipeline works from the server-side proxy).
+  for (const clip of draft.clips) {
+    uris.push(clip.uri);
+  }
   return uris;
 }
 
 /**
- * Clears the on-device recording/photo copies once the server holds the
+ * Clears the on-device recording/photo/clip copies once the server holds the
  * originals. A no-op until the media has been uploaded.
  */
 export function purgeUploadedMedia(draft: PitchDraft): PitchDraft {
   if (draft.server === null || !draft.server.mediaUploaded) {
     return draft;
   }
-  if (draft.recording === null && draft.photos.length === 0) {
+  if (draft.recording === null && draft.photos.length === 0 && draft.clips.length === 0) {
     return draft;
   }
   return PitchDraftSchema.parse({
     ...draft,
     recording: null,
     photos: [],
+    clips: [],
   });
 }

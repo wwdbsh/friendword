@@ -298,16 +298,19 @@ END;
 $$;
 ROLLBACK;
 
+-- 0052 removed every anon table privilege: the no-signup surfaces read through
+-- the service-role server client or SECURITY DEFINER RPCs, so anon reads fail
+-- at the ACL, not merely as an RLS-empty result.
 BEGIN;
 SET LOCAL ROLE anon;
 DO $$
-DECLARE
-  visible_count INTEGER;
 BEGIN
-  SELECT count(*) INTO visible_count FROM users;
-  IF visible_count <> 0 THEN
+  BEGIN
+    PERFORM count(*) FROM users;
     RAISE EXCEPTION 'anonymous user can read users';
-  END IF;
+  EXCEPTION
+    WHEN insufficient_privilege THEN NULL;
+  END;
 END;
 $$;
 ROLLBACK;

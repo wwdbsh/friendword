@@ -23,7 +23,7 @@ const config: ExpoConfig = {
       NSMicrophoneUsageDescription:
         'Friendword uses your microphone to record a 30–60 second pitch for your friend.',
       NSPhotoLibraryUsageDescription:
-        'Friendword lets you suggest photos that your friend can approve or replace.',
+        'Friendword lets you suggest photos and short videos that your friend can approve or replace.',
     },
   },
   android: {
@@ -44,7 +44,8 @@ const config: ExpoConfig = {
     [
       'expo-image-picker',
       {
-        photosPermission: 'Allow Friendword to suggest photos your friend can approve or replace.',
+        photosPermission:
+          'Allow Friendword to suggest photos and short videos your friend can approve or replace.',
       },
     ],
     'expo-font',
@@ -65,6 +66,11 @@ const config: ExpoConfig = {
     supabaseUrl: process.env['EXPO_PUBLIC_SUPABASE_URL'] ?? '',
     supabaseAnonKey: process.env['EXPO_PUBLIC_SUPABASE_ANON_KEY'] ?? '',
     webOrigin: process.env['EXPO_PUBLIC_WEB_ORIGIN'] ?? '',
+    // Mirror of the server's clip byte ceiling, so both sides read one env name
+    // (`FRIENDWORD_VIDEO_MAX_BYTES`, 50MB on Supabase Free). Not a secret and not
+    // an authority: the client uses it to refuse a doomed upload early, the
+    // server decides what is stored. Absent leaves the app on its own default.
+    videoMaxBytes: process.env['FRIENDWORD_VIDEO_MAX_BYTES'] ?? '',
     revenueCatIosApiKey: process.env['EXPO_PUBLIC_REVENUECAT_IOS_API_KEY'] ?? '',
   },
   experiments: {

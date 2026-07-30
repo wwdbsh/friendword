@@ -353,6 +353,56 @@
   color: var(--color-surface);
 }
 
+/* Clip cards (Phase 3a): read-only visibility — poster, length, ingest state,
+   silent preview. No include/exclude affordance on purpose; that is Phase 3b. */
+.clipGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.clipCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.clipMedia {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  object-fit: cover;
+  border: var(--stroke-trust) solid var(--color-border-muted);
+  border-radius: var(--radius-md);
+  background: var(--color-background);
+}
+
+.clipPlaceholder {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  border: var(--stroke-trust) dashed var(--color-border-muted);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-ink) 5%, var(--color-surface));
+}
+
+.clipMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs);
+}
+
+.clipState {
+  font-size: var(--font-size-xs);
+  font-weight: 800;
+}
+
+.clipDuration {
+  font-size: var(--font-size-xs);
+  color: var(--color-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .editBlock,
 .preferenceBlock,
 .profileSummary {

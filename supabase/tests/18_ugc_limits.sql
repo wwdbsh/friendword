@@ -99,18 +99,24 @@ INSERT INTO public.pitch_drafts (
   '00000000-0000-0000-0000-000000000004',
   'draft',
   'Storage quota fixture',
-  'The thirteenth object in one draft prefix must be rejected.'
+  'The twenty-first object in one draft prefix must be rejected.'
 );
 
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000004';
 
+-- 0050 raised the pitch-media prefix ceiling from 12 to 20 because ingest puts
+-- DERIVATIVES in the same prefix and private.pitch_media_object_count counts
+-- them: voice 1 + photos 4 + proxies 3 + posters 3 + blur variants 3 = 14 in the
+-- steady state, plus the three originals that exist between registration and
+-- ingest success = 17 at the transitional peak. The profile-media ceiling below
+-- is untouched at 12 — nothing derives from a profile photo.
 INSERT INTO storage.objects (bucket_id, name, owner_id)
 SELECT
   'pitch-media',
   '18000000-0000-0000-0000-000000000002/quota-' || sequence_number || '.jpg',
   auth.uid()::TEXT
-FROM generate_series(1, 12) AS sequence_number;
+FROM generate_series(1, 20) AS sequence_number;
 
 DO $$
 BEGIN
@@ -118,14 +124,14 @@ BEGIN
     INSERT INTO storage.objects (bucket_id, name, owner_id)
     VALUES (
       'pitch-media',
-      '18000000-0000-0000-0000-000000000002/quota-13.jpg',
+      '18000000-0000-0000-0000-000000000002/quota-21.jpg',
       auth.uid()::TEXT
     );
-    RAISE EXCEPTION 'thirteenth pitch-media object was accepted';
+    RAISE EXCEPTION 'twenty-first pitch-media object was accepted';
   EXCEPTION
     WHEN insufficient_privilege THEN NULL;
     WHEN raise_exception THEN
-      IF SQLERRM = 'thirteenth pitch-media object was accepted' THEN
+      IF SQLERRM = 'twenty-first pitch-media object was accepted' THEN
         RAISE;
       END IF;
   END;

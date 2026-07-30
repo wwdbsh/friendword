@@ -3,6 +3,7 @@ export * from './publicPitch';
 export * from './draftInputs';
 export * from './pitchScene';
 export * from './pitchSceneV2';
+export * from './pitchSceneV3';
 export * from './pitchSceneBuilder';
 export * from './pitchSceneGoldenVectors';
 export * from './transcriptWords';

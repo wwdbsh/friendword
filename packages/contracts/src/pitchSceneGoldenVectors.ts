@@ -22,6 +22,14 @@ import type { TranscriptWordTiming } from './transcriptWords';
 //
 // Adding a vector: give it a stable `name` (it is the SQL row key), say WHY in
 // `why`, and regenerate the SQL block. Never edit the generated block by hand.
+//
+// v3 (the clip shot) has its OWN list, {@link PITCH_SCENE_V3_GOLDEN_VECTORS}, and its
+// own generated block. Two reasons, in order of importance: the rows above are the
+// rows `supabase/tests/25_motion_scene_v2.sql` runs today, and that harness asserts
+// the database still REJECTS `schemaVersion: 3` — mixing v3 rows into the block it
+// reads would break it — and a v3 vector witnesses a clip rule rather than the
+// onset-only flash budget these were built to catch, so it cannot carry
+// `acceptedByOnsetOnlyBudget` honestly.
 
 /**
  * What every implementation must answer for one vector. A rejection carries both
@@ -553,8 +561,238 @@ export const PITCH_SCENE_GOLDEN_VECTORS: readonly PitchSceneGoldenVector[] = [
   },
 ];
 
+// ── v3: the clip shot ───────────────────────────────────────────────────────
+//
+// Same device as above, one version later. Three implementations will enforce the
+// clip rules — the zod parser in pitchSceneV3.ts, the PL/pgSQL mirror that must land
+// before any v3 scene can be stored, and the builder that will emit clips — so the
+// rules are written down once, here, as scenes and verdicts rather than as prose.
+//
+// The vectors are chosen so that each one fails EXACTLY ONE rule, which is why, for
+// example, the over-long clip is a single 10001ms window (the per-shot ceiling, the
+// window ceiling and the per-clip total all answer with the same sentence) while the
+// two-window vector splits 10001ms across windows that are each legal on their own.
+// A repeated window is deliberately absent: an identical window also overlaps
+// itself, so no scene can isolate that rule, and pitchSceneV3.test.ts pins it
+// instead.
+
+export type PitchSceneV3GoldenVector = {
+  /** Stable identifier, also the row key on the SQL side. */
+  readonly name: string;
+  /** What this vector pins down that no other vector does. */
+  readonly why: string;
+  /** See {@link PitchSceneGoldenVector.requiresReviewedStructure}. */
+  readonly requiresReviewedStructure: boolean;
+  readonly scene: Readonly<Record<string, unknown>>;
+  readonly verdict: PitchSceneGoldenVerdict;
+};
+
+/** Illustrative clip ids, deliberately a different prefix from the photos. */
+function clipId(index: number): string {
+  return `50000000-0000-0000-0000-${String(index).padStart(12, '0')}`;
+}
+
+/** The 2000ms opening photo every v3 vector uses: a clip may never stand alone. */
+function v3OpeningPhotoShot(): Readonly<Record<string, unknown>> {
+  return {
+    level: 'wide',
+    assetId: PHOTO_A,
+    startMs: 0,
+    endMs: 2_000,
+    crop: { x: 0, y: 0, width: 1, height: 1 },
+    effects: [],
+  };
+}
+
+function v3ClipShot(
+  clip: number,
+  startMs: number,
+  endMs: number,
+  clipInMs: number,
+  clipOutMs: number,
+  effects: readonly Readonly<Record<string, unknown>>[] = [],
+): Readonly<Record<string, unknown>> {
+  return { level: 'clip', assetId: clipId(clip), startMs, endMs, clipInMs, clipOutMs, effects };
+}
+
+function v3Scene(
+  durationMs: number,
+  clips: readonly number[],
+  shots: readonly Readonly<Record<string, unknown>>[],
+): Readonly<Record<string, unknown>> {
+  return {
+    schemaVersion: 3,
+    template: 'hype',
+    canvas: CANVAS,
+    durationMs,
+    assetIds: [PHOTO_A],
+    clipAssetIds: clips.map(clipId),
+    shots: [v3OpeningPhotoShot(), ...shots],
+    look: LOOK,
+    chrome: CHROME,
+    overlays: [],
+  };
+}
+
+const CLIP_HOLD_VERDICT: PitchSceneGoldenVerdict = {
+  accept: false,
+  zodMessage: 'a clip may not hold the screen longer than 10000ms',
+  dbReason: 'pitch scene clip may not hold the screen longer than 10000ms',
+};
+
+export const PITCH_SCENE_V3_GOLDEN_VECTORS: readonly PitchSceneV3GoldenVector[] = [
+  {
+    name: 'v3-one-clip-after-a-photo',
+    why: 'The smallest legal v3 scene: one photo, one clip, one declared clip id. Pins that a clip shot needs no kenBurns however long it runs (4000ms is past the 2500ms static ceiling) and that clipAssetIds is a list of its own rather than an entry in assetIds.',
+    requiresReviewedStructure: false,
+    scene: v3Scene(6_000, [1], [v3ClipShot(1, 2_000, 6_000, 0, 4_000)]),
+    verdict: { accept: true },
+  },
+  {
+    name: 'v3-three-clips-at-every-cap',
+    why: 'Three distinct clips, which is the cap, with the third holding the screen for exactly 10000ms over the source window [5000, 15000) — the last millisecond of a 15s recording. An implementation off by one on the clip count, on the 10s hold or on the 15s source bound rejects this scene.',
+    requiresReviewedStructure: false,
+    scene: v3Scene(
+      19_000,
+      [1, 2, 3],
+      [
+        v3ClipShot(1, 2_000, 5_000, 0, 3_000),
+        v3ClipShot(2, 5_000, 9_000, 1_000, 5_000),
+        v3ClipShot(3, 9_000, 19_000, 5_000, 15_000),
+      ],
+    ),
+    verdict: { accept: true },
+  },
+  {
+    name: 'v3-clip-card-and-wordpop-mixed',
+    why: 'A clip, a text card and a photo in one timeline, with a wordPop drawn ON the clip. Pins the two things a mixed scene must not lose: a wordPop is the one effect a clip may carry, and it pays the 334ms flash budget from a clip exactly as it would from a photo.',
+    requiresReviewedStructure: true,
+    scene: v3Scene(
+      8_200,
+      [1, 2],
+      [
+        v3ClipShot(1, 2_000, 5_000, 2_000, 5_000, [
+          {
+            type: 'wordPop',
+            word: { segmentIndex: 0, wordIndex: 2 },
+            startMs: 2_200,
+            endMs: 2_600,
+            scale: 1.25,
+            easing: 'easeOut',
+          },
+        ]),
+        {
+          level: 'typographic',
+          startMs: 5_000,
+          endMs: 7_000,
+          text: {
+            type: 'kineticText',
+            source: 'hook',
+            revealMs: 300,
+            easing: 'easeOut',
+            emphasis: 0.8,
+          },
+        },
+        v3ClipShot(2, 7_000, 8_200, 0, 1_200),
+      ],
+    ),
+    verdict: { accept: true },
+  },
+  {
+    name: 'v3-clip-retimed-not-1to1',
+    why: 'A 3000ms source window played over 2000ms of screen time: a 1.5x speed-up of footage the Dater reviewed at normal speed. Every other bound holds, so only the 1:1 playback equation can catch it — and an implementation that merely checks "the window is long enough for the shot" accepts it.',
+    requiresReviewedStructure: false,
+    scene: v3Scene(4_000, [1], [v3ClipShot(1, 2_000, 4_000, 0, 3_000)]),
+    verdict: {
+      accept: false,
+      zodMessage: 'a clip shot must replay its source 1:1',
+      dbReason:
+        'pitch scene clip shot must replay its source 1:1 (clipOut - clipIn must equal endMs - startMs)',
+    },
+  },
+  {
+    name: 'v3-clip-window-past-ten-seconds',
+    why: 'One clip window of 10001ms, played 1:1, one millisecond past the scene-use cap the product fixed. The three checks that could catch it — per-shot hold, window length, per-clip total — answer with the same sentence on purpose, so a mirror may evaluate them in any order.',
+    requiresReviewedStructure: false,
+    scene: v3Scene(12_001, [1], [v3ClipShot(1, 2_000, 12_001, 0, 10_001)]),
+    verdict: CLIP_HOLD_VERDICT,
+  },
+  {
+    name: 'v3-clip-total-past-ten-seconds-across-windows',
+    why: 'Two windows of ONE clip, 6000ms and 4001ms, each legal alone and 10001ms together. The per-shot ceiling alone waves this through, which is how three adjacent 5s windows would replay 15s of a 15s recording; the per-clip total is what stops it.',
+    requiresReviewedStructure: false,
+    scene: v3Scene(
+      12_001,
+      [1],
+      [v3ClipShot(1, 2_000, 8_000, 0, 6_000), v3ClipShot(1, 8_000, 12_001, 6_000, 10_001)],
+    ),
+    verdict: CLIP_HOLD_VERDICT,
+  },
+  {
+    name: 'v3-four-distinct-clips',
+    why: 'Four clips where the product allows three (free tier 1, premium 3 — the entitlement is the database’s, the absolute ceiling is the schema’s). Rejected at the field, before any timeline rule runs.',
+    requiresReviewedStructure: false,
+    scene: v3Scene(
+      6_800,
+      [1, 2, 3, 4],
+      [
+        v3ClipShot(1, 2_000, 3_200, 0, 1_200),
+        v3ClipShot(2, 3_200, 4_400, 0, 1_200),
+        v3ClipShot(3, 4_400, 5_600, 0, 1_200),
+        v3ClipShot(4, 5_600, 6_800, 0, 1_200),
+      ],
+    ),
+    verdict: {
+      accept: false,
+      zodMessage: 'a scene may use at most 3 clips',
+      dbReason: 'pitch scene may use at most 3 clips',
+    },
+  },
+  {
+    name: 'v3-overlapping-windows-of-one-clip',
+    why: 'Two windows of one clip, [0, 3000) and [2900, 5900): 2900ms of the same frames replayed a tenth of a second later, which reads as a stutter rather than as a return. Unique-window uniqueness alone admits it, so the overlap rule is separate.',
+    requiresReviewedStructure: false,
+    scene: v3Scene(
+      8_000,
+      [1],
+      [v3ClipShot(1, 2_000, 5_000, 0, 3_000), v3ClipShot(1, 5_000, 8_000, 2_900, 5_900)],
+    ),
+    verdict: {
+      accept: false,
+      zodMessage: 'two windows of the same clip may not overlap',
+      dbReason: 'pitch scene two windows of the same clip may not overlap',
+    },
+  },
+  {
+    name: 'v3-kenburns-on-a-clip',
+    why: 'A kenBurns over footage that is already moving: a camera move invented for a still, double-transforming pixels the Dater approved. The effect union on a clip shot holds wordPop and nothing else, so this fails at the discriminator rather than at a rule.',
+    requiresReviewedStructure: false,
+    scene: v3Scene(
+      5_000,
+      [1],
+      [
+        v3ClipShot(1, 2_000, 5_000, 0, 3_000, [
+          {
+            type: 'kenBurns',
+            to: { x: 0.02, y: 0.02, width: 0.96, height: 0.96 },
+            easing: 'easeInOut',
+          },
+        ]),
+      ],
+    ),
+    verdict: {
+      accept: false,
+      zodMessage: "Invalid discriminator value. Expected 'wordPop'",
+      dbReason: 'pitch scene clip shot may carry only wordPop effects',
+    },
+  },
+];
+
 /** Where the generated block is kept, relative to this file. */
 export const PITCH_SCENE_GOLDEN_VECTORS_SQL_FILE = 'pitchSceneGoldenVectors.generated.sql';
+
+/** Where the v3 block is kept, relative to this file. */
+export const PITCH_SCENE_GOLDEN_VECTORS_V3_SQL_FILE = 'pitchSceneGoldenVectorsV3.generated.sql';
 
 /**
  * The vectors as a SQL block for `supabase/tests/25_motion_scene_v2.sql` to run.
@@ -598,6 +836,44 @@ export function pitchSceneGoldenVectorsSql(): string {
     'VALUES',
     `${rows.join(',\n')};`,
     '-- ── END GOLDEN VECTORS ───────────────────────────────────────────────────',
+  ].join('\n');
+}
+
+/**
+ * The v3 vectors as their own SQL block, into its own temporary table.
+ *
+ * Separate from {@link pitchSceneGoldenVectorsSql} because the v2 block is inlined in
+ * `supabase/tests/25_motion_scene_v2.sql`, which today asserts the database REJECTS
+ * `schemaVersion: 3`. This block is checked in beside this file and is ready for the
+ * harness that comes with the v3 migration; until that migration exists, no database
+ * reads it, and the contracts suite still guards it against drift.
+ */
+export function pitchSceneV3GoldenVectorsSql(): string {
+  const rows = PITCH_SCENE_V3_GOLDEN_VECTORS.map((vector) => {
+    const reason = vector.verdict.accept ? 'NULL' : quote(vector.verdict.dbReason);
+    return [
+      `  (${quote(vector.name)},`,
+      `   ${vector.requiresReviewedStructure},`,
+      `   ${reason},`,
+      `   $vector$${JSON.stringify(vector.scene)}$vector$::JSONB)`,
+    ].join('\n');
+  });
+  return [
+    '-- ── GOLDEN VECTORS, v3 CLIP SHOT (GENERATED — DO NOT EDIT) ───────────────',
+    '-- Source: packages/contracts/src/pitchSceneGoldenVectors.ts',
+    '--         (PITCH_SCENE_V3_GOLDEN_VECTORS, printed by pitchSceneV3GoldenVectorsSql)',
+    '-- The same rows run against the zod parser in that package’s vitest suite.',
+    '-- expected_reason NULL means the scene must be ACCEPTED.',
+    'CREATE TEMPORARY TABLE pitch_scene_golden_vector_v3 (',
+    '  name TEXT PRIMARY KEY,',
+    '  requires_structure BOOLEAN NOT NULL,',
+    '  expected_reason TEXT,',
+    '  scene JSONB NOT NULL',
+    ');',
+    'INSERT INTO pitch_scene_golden_vector_v3 (name, requires_structure, expected_reason, scene)',
+    'VALUES',
+    `${rows.join(',\n')};`,
+    '-- ── END GOLDEN VECTORS, v3 ───────────────────────────────────────────────',
   ].join('\n');
 }
 

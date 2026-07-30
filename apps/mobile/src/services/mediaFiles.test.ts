@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  createPhotoAssetKey,
+  createMediaAssetKey,
   photoMimeType,
   photoObjectName,
   pickedPhotoMimeType,
@@ -66,7 +66,7 @@ describe('photo object naming', () => {
   });
 
   it('mints identities the storage object-name pattern accepts', () => {
-    const keys = Array.from({ length: 50 }, () => createPhotoAssetKey());
+    const keys = Array.from({ length: 50 }, () => createMediaAssetKey());
 
     // The whole object name has to match the storage policy's pattern; these
     // keys sit inside `photo-<key>.<ext>`, so check the name it produces.

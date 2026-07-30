@@ -10,7 +10,9 @@ import {
   AiConsentDisclosure,
   type AiConsentUiState,
 } from '../../src/features/pitch/AiConsentDisclosure';
+import { ClipIngestNotice } from '../../src/features/pitch/ClipIngestNotice';
 import { PitchReviewEditor } from '../../src/features/pitch/PitchReviewEditor';
+import { useClipIngestStatus } from '../../src/features/pitch/useClipIngestStatus';
 import {
   getAiDraftFailureMessage,
   isAiConsentRequiredFailure,
@@ -28,7 +30,10 @@ import {
   ManualPitchNeedsAiReviewError,
   NeedsSignInError,
 } from '../../src/services/pitchDraftsSupabase';
-import type { PitchDraft, PitchReview } from '../../src/services/types';
+import type { PitchClip, PitchDraft, PitchReview } from '../../src/services/types';
+
+/** Stable identity, so a draft-less render does not restart the ingest poll. */
+const EMPTY_CLIPS: readonly PitchClip[] = [];
 
 export default function PitchReviewScreen() {
   const router = useRouter();
@@ -46,6 +51,9 @@ export default function PitchReviewScreen() {
   const finalizeInFlight = useRef(false);
   const pendingPreparation = useRef<PitchReviewPreparationChoice | null>(null);
   const friendName = draft?.relationship?.friendFirstName ?? 'your friend';
+  // The clips were uploaded by the preparation step above, so this screen is the
+  // first place their ingest verdict can be shown.
+  const clipIngest = useClipIngestStatus(draft?.id ?? null, draft?.clips ?? EMPTY_CLIPS);
 
   const loadReview = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -328,6 +336,14 @@ export default function PitchReviewScreen() {
         busy={busy}
         errorMessage={errorMessage}
         friendName={friendName}
+        notice={
+          <ClipIngestNotice
+            checking={clipIngest.checking}
+            clips={clipIngest.clips}
+            onCheckNow={clipIngest.checkNow}
+            poll={clipIngest.poll}
+          />
+        }
         onChange={setReview}
         onSubmit={() => {
           void finalize();

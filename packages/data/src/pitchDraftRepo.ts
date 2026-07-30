@@ -281,7 +281,7 @@ export class PitchDraftRepo {
    */
   async registerAsset(
     draftId: string,
-    assetType: 'voice' | 'photo',
+    assetType: 'voice' | 'photo' | 'video',
     fileName: string,
     sortOrder = 0,
     dimensions?: AssetDimensions,

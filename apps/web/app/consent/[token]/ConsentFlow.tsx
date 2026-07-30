@@ -33,6 +33,7 @@ import {
 
 import { EmailSignIn } from '@/components/EmailSignIn';
 import { MotionPitchPlayer } from '@/components/MotionPitchPlayer';
+import { requestClipIngestCards, type ClipIngestCard } from '@/lib/clipCards';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { requestDaterPitchModeration } from '@/lib/moderateText';
 import {
@@ -142,6 +143,18 @@ type ReviewContext = {
   readonly review: ConsentReview;
   readonly voiceUrl: string | null;
   readonly photos: readonly { readonly assetId: string; readonly url: string }[];
+  /**
+   * Phase 3a visibility: the short clips attached to this pitch, each with its
+   * ingest state and — once every automated check passed — a poster and a
+   * SILENT preview. Read-only on this surface: including/excluding a clip and
+   * face blurring are Phase 3b, so nothing here feeds the revision save.
+   * `card` is null while the state read is unanswered (offline, not yet
+   * processed), which the UI reports as "not confirmed yet", never as a pass.
+   */
+  readonly clips: readonly {
+    readonly assetId: string;
+    readonly card: ClipIngestCard | null;
+  }[];
 };
 
 type FlowState =
@@ -207,6 +220,7 @@ function relationshipLine(preview: ConsentPreview): string {
 }
 
 async function loadReviewContext(
+  client: BrowserSupabaseClient,
   repo: ConsentRepo,
   preview: ConsentPreview,
   review: ConsentReview,
@@ -222,7 +236,44 @@ async function loadReviewContext(
       url: await repo.createAssetViewUrl(asset.storage_path),
     })),
   );
-  return { preview, review, voiceUrl, photos };
+  return { preview, review, voiceUrl, photos, clips: await loadClipCards(client, review) };
+}
+
+/**
+ * Clip ingest state comes from /api/media/clip-ingest-state (the
+ * pitch_video_ingests table is service-role only — the browser can never read
+ * it, or the face boxes stored beside it). Object names are recovered from
+ * pitch_assets.storage_path, whose shape buildPitchMediaPath fixes as
+ * `pitch-media/<draftId>/<fileName>`.
+ */
+async function loadClipCards(
+  client: BrowserSupabaseClient,
+  review: ConsentReview,
+): Promise<ReviewContext['clips']> {
+  const clipAssets = review.assets.filter((asset) => asset.asset_type === 'video');
+  if (clipAssets.length === 0) {
+    return [];
+  }
+  const draftId = review.revision.pitch_draft_id;
+  const prefix = `pitch-media/${draftId}/`;
+  const objectNameByAssetId = new Map(
+    clipAssets
+      .filter((asset) => asset.storage_path.startsWith(prefix))
+      .map((asset) => [asset.id, asset.storage_path.slice(prefix.length)] as const),
+  );
+  const { data: sessionData } = await client.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+  const cards =
+    accessToken === undefined
+      ? new Map<string, ClipIngestCard>()
+      : await requestClipIngestCards(draftId, [...objectNameByAssetId.values()], accessToken);
+  return clipAssets.map((asset) => {
+    const objectName = objectNameByAssetId.get(asset.id);
+    return {
+      assetId: asset.id,
+      card: objectName === undefined ? null : (cards.get(objectName) ?? null),
+    };
+  });
 }
 
 /**
@@ -341,6 +392,52 @@ function revisionAssetIds(
     ...retainedRevisionAssets,
     ...includedPhotoAssetIds.filter((assetId) => !retainedIds.has(assetId)),
   ];
+}
+
+/** m:ss for a clip length the probe measured. */
+function formatClipDuration(durationMs: number): string {
+  const totalSeconds = Math.round(durationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+/**
+ * Clip status copy. Deliberately narrow, like the mobile equivalent: the
+ * pipeline probes the container, strips the audio, and runs automated frame
+ * moderation — it never checks who is in the footage and never hears it, so no
+ * sentence here may imply either.
+ */
+function clipStateLabel(card: ClipIngestCard | null): string {
+  switch (card?.state) {
+    case 'succeeded':
+      return 'Passed automated safety checks';
+    case 'flagged':
+      return 'Did not pass safety checks';
+    case 'failed':
+      return 'Could not be processed';
+    case 'pending':
+    case 'processing':
+      return 'Safety review in progress';
+    default:
+      return 'Safety review not confirmed yet';
+  }
+}
+
+function clipStateDetail(card: ClipIngestCard | null): string {
+  switch (card?.state) {
+    case 'succeeded':
+      return 'This is the exact silent footage a published page could use.';
+    case 'flagged':
+      return 'It will not be published. A person reviews every flag; if they clear it, the checks run once more.';
+    case 'failed':
+      return 'Friendword could not process this clip, so it will not be published.';
+    case 'pending':
+    case 'processing':
+      return 'It cannot be published until the automated review finishes.';
+    default:
+      return 'It stays unpublished until the review is confirmed. Reload in a minute to check again.';
+  }
 }
 
 function audienceError(minAge: string, maxAge: string): string | null {
@@ -462,7 +559,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         await ensureUserRow(activeClient);
         const { pitchDraftId } = await repo.claim(token);
         const review = await repo.getConsentReview(pitchDraftId);
-        const context = await loadReviewContext(repo, preview, review);
+        const context = await loadReviewContext(activeClient, repo, preview, review);
         const disclosureRevision = await repo.getAiDisclosureRevision().catch(() => null);
         setAiDisclosureRevision(disclosureRevision);
         setDaterAiConsent('pending');
@@ -778,7 +875,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         ...(newScene === null ? {} : { newScene }),
       });
       const latestReview = await repo.getConsentReview(review.revision.pitch_draft_id);
-      const context = await loadReviewContext(repo, state.preview, latestReview);
+      const context = await loadReviewContext(client, repo, state.preview, latestReview);
       setState({ step: 'review', ...context });
       setIncludedAssetIds(context.photos.map((photo) => photo.assetId));
       setEditHeadline(latestReview.revision.headline);
@@ -1658,6 +1755,55 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                     })}
                   </div>
                   <p className={styles.muted}>Choose which photos this review version includes.</p>
+                </div>
+              )}
+
+              {state.clips.length > 0 && (
+                <div className={styles.photoBlock} data-consent-clips>
+                  <h3 className={styles.photoHeading}>Video clips your friend attached</h3>
+                  <div className={styles.clipGrid}>
+                    {state.clips.map((clip, index) => (
+                      <div key={clip.assetId} className={styles.clipCard}>
+                        {clip.card?.state === 'succeeded' && clip.card.proxyUrl !== null ? (
+                          // The SILENT proxy is the only playable form a clip
+                          // has here — the pipeline strips the audio track
+                          // entirely, so there is no sound to mute.
+                          <video
+                            className={styles.clipMedia}
+                            src={clip.card.proxyUrl}
+                            poster={clip.card.posterUrl ?? undefined}
+                            controls
+                            muted
+                            playsInline
+                            preload="metadata"
+                            aria-label={`Silent preview of clip ${index + 1}`}
+                          />
+                        ) : clip.card?.state === 'succeeded' && clip.card.posterUrl !== null ? (
+                          <img
+                            className={styles.clipMedia}
+                            src={clip.card.posterUrl}
+                            alt={`Poster frame of clip ${index + 1}`}
+                          />
+                        ) : (
+                          <div className={styles.clipPlaceholder} aria-hidden="true" />
+                        )}
+                        <div className={styles.clipMeta}>
+                          <span className={styles.clipState}>{clipStateLabel(clip.card)}</span>
+                          {clip.card?.durationMs != null && (
+                            <span className={styles.clipDuration}>
+                              {formatClipDuration(clip.card.durationMs)}
+                            </span>
+                          )}
+                        </div>
+                        <p className={styles.muted}>{clipStateDetail(clip.card)}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className={styles.muted}>
+                    Clips are silent on Friendword — only your friend’s voice note carries sound.
+                    Nothing from a clip publishes unless its automated safety review passes, and
+                    choosing where clips appear on your page is coming next.
+                  </p>
                 </div>
               )}
 

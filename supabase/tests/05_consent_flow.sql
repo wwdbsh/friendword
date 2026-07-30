@@ -12,9 +12,9 @@ GRANT ALL ON consent_journey TO anon, authenticated;
 SET LOCAL ROLE authenticated;
 -- Publishing requires at least one reviewed photo (0017), so the fixture
 -- draft carries one before finalize snapshots the revision.
-INSERT INTO pitch_assets (id, pitch_draft_id, uploaded_by_user_id, asset_type, storage_path)
+-- Same column shape the client sends (0052): the id is server-generated.
+INSERT INTO pitch_assets (pitch_draft_id, uploaded_by_user_id, asset_type, storage_path)
 VALUES (
-  '30000000-0000-0000-0000-000000000501',
   '10000000-0000-0000-0000-000000000002',
   '00000000-0000-0000-0000-000000000004',
   'photo',

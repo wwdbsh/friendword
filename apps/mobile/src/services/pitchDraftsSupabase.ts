@@ -6,6 +6,7 @@ import {
   type BrowserSupabaseClient,
   type ConsentRequestRow,
   type ConsentSubmission,
+  type PitchAssetRow,
   type PitchDraftRow,
 } from '@friendword/data';
 import {
@@ -16,8 +17,13 @@ import {
   type RelationshipType as ServerRelationshipType,
 } from '@friendword/contracts';
 
-import { photoMimeType, photoObjectName, putLocalFile } from './mediaFiles';
+import { clipObjectName, photoMimeType, photoObjectName, putLocalFile } from './mediaFiles';
 import { requestMediaValidation, type MediaValidationOutcome } from './mediaValidation';
+import {
+  mergeClipIngestStates,
+  requestClipIngestStates,
+  type ClipIngestReader,
+} from './clipIngest';
 import {
   PITCH_SCENE_TEMPLATE,
   pitchSceneRejectionMessage,
@@ -39,6 +45,8 @@ import {
   EMPTY_PITCH_STRUCTURE,
   PitchDraftListSchema,
   PitchReviewSchema,
+  DEFAULT_CLIP_MAX_BYTES,
+  type PitchClip,
   type PitchDraft,
   type PitchDraftId,
   type PitchPhoto,
@@ -50,19 +58,46 @@ import {
   type UploadedAsset,
 } from './types';
 
-export type PitchDraftRepository = Pick<
-  PitchDraftRepo,
-  | 'createDraft'
-  | 'getDraft'
-  | 'listAssets'
-  | 'listMyConsentRequests'
-  | 'listMyDrafts'
-  | 'registerAsset'
-  | 'removeAsset'
-  | 'requestAssetUpload'
-  | 'submitForConsent'
-  | 'updateDraft'
->;
+/**
+ * The `pitch_assets.asset_type` values this app registers, pinned to the closed
+ * set 0050 put a CHECK constraint on: `voice`, `photo`, `video`. The introducer's
+ * short clips register as `video` — the draft model calls them clips, the column
+ * does not, and this is the one place the two names meet.
+ */
+export type PitchAssetKind = 'voice' | 'photo' | 'video';
+
+export type PitchDraftRepository = Omit<
+  Pick<
+    PitchDraftRepo,
+    | 'createDraft'
+    | 'getDraft'
+    | 'listAssets'
+    | 'listMyConsentRequests'
+    | 'listMyDrafts'
+    | 'registerAsset'
+    | 'removeAsset'
+    | 'requestAssetUpload'
+    | 'submitForConsent'
+    | 'updateDraft'
+  >,
+  'registerAsset'
+> & {
+  /**
+   * Widened from the data layer's `'voice' | 'photo'` so a clip can be
+   * registered as `video`. Method syntax on purpose: TypeScript checks method
+   * parameters bivariantly, so the narrower `PitchDraftRepo` still satisfies
+   * this. The data layer's own signature is what has to catch up (owned by the
+   * web worker); until it does, this seam is where the mobile side declares what
+   * it actually sends, rather than casting at the call site.
+   */
+  registerAsset(
+    draftId: string,
+    assetType: PitchAssetKind,
+    fileName: string,
+    sortOrder?: number,
+    dimensions?: AssetDimensions,
+  ): Promise<PitchAssetRow>;
+};
 
 export class NeedsSignInError extends Error {
   constructor() {
@@ -80,6 +115,41 @@ export class NeedsSignInError extends Error {
  * require completed validation').
  */
 const MEDIA_VALIDATION_GATE_MESSAGE = 'pitch media requires completed validation';
+
+/**
+ * Stable substrings of the three server refusals a clip can produce (0050). All
+ * of them are raised by triggers, so they hold on every write path and their
+ * text is owned by the migration — matched on a substring for that reason.
+ */
+const CLIP_ENTITLEMENT_MESSAGE = 'requires a Campaign Pass';
+const CLIP_CEILING_MESSAGE = 'at most 3 video clips';
+const FLAGGED_CLIP_GATE_MESSAGE = 'remove the flagged video clip before requesting consent';
+
+/**
+ * Copy for the entitlement refusal. Honest about the shape of the limit: the
+ * server allows one clip per draft unless the pitch's campaign holds a Campaign
+ * Pass, and a campaign only exists after publish — so on today's flow a first
+ * pitch gets one clip. The rest of the pitch is intact, which is the part the
+ * introducer needs to hear.
+ */
+export const CLIP_NEEDS_CAMPAIGN_PASS_MESSAGE =
+  'Friendword includes one video per pitch; more than that needs a Campaign Pass. ' +
+  'This video was not attached — everything else on your pitch was saved.';
+
+export const CLIP_CEILING_REACHED_MESSAGE =
+  'A pitch can carry at most three videos, so this one was not attached. ' +
+  'Everything else on your pitch was saved.';
+
+/**
+ * Copy for the one server gate a flagged clip creates: the draft cannot enter
+ * consent review while it carries a clip frame moderation refused (0050
+ * `reject_flagged_video_on_consent`). Says what is true — the pitch is blocked,
+ * a person reviews the flag — and does not promise a removal this app cannot do.
+ */
+export const FLAGGED_CLIP_BLOCKS_SUBMIT_MESSAGE =
+  'One of your videos did not pass Friendword’s automated safety checks, so this pitch cannot be ' +
+  'sent while it is attached. Someone reviews every flag; if they clear it, the checks run again ' +
+  'and you can send the pitch then.';
 
 /**
  * Copy for the honest manual→AI trade-off: while safety review is on, a pitch
@@ -144,6 +214,25 @@ function includesServerMessage(error: unknown, needle: string, depth = 0): boole
  */
 export function isPitchMediaValidationGateRejection(error: unknown): boolean {
   return includesServerMessage(error, MEDIA_VALIDATION_GATE_MESSAGE);
+}
+
+/**
+ * The introducer-facing message for a clip registration the server refused on a
+ * count, or null when the failure is something else (network, auth, ownership).
+ * Only these two are treated as "this clip cannot be attached": everything else
+ * has to keep propagating, because a clip silently dropped on a network error
+ * would leave the introducer thinking they sent a video they did not.
+ */
+export function clipRegistrationRefusalMessage(error: unknown): string | null {
+  if (includesServerMessage(error, CLIP_ENTITLEMENT_MESSAGE)) {
+    return CLIP_NEEDS_CAMPAIGN_PASS_MESSAGE;
+  }
+  return includesServerMessage(error, CLIP_CEILING_MESSAGE) ? CLIP_CEILING_REACHED_MESSAGE : null;
+}
+
+/** True when the submit failed because a flagged clip is still attached (0050). */
+export function isFlaggedClipSubmitRejection(error: unknown): boolean {
+  return includesServerMessage(error, FLAGGED_CLIP_GATE_MESSAGE);
 }
 
 const RELATIONSHIP_TYPE_MAP: Record<RelationshipKind, ServerRelationshipType> = {
@@ -241,6 +330,8 @@ export class HybridPitchDraftService implements PitchDraftService {
     ) => Promise<MediaValidationOutcome> = requestMediaValidation,
     private readonly buildScene: PitchSceneBuilder = buildPitchSceneV2,
     private readonly reportSceneDemotion: PitchSceneDemotionReporter = reportPitchSceneDemotion,
+    private readonly readClipIngest: ClipIngestReader = requestClipIngestStates,
+    private readonly clipMaxBytes: () => Promise<number> = resolveClipMaxBytes,
   ) {}
 
   createDraft(): Promise<PitchDraft> {
@@ -253,6 +344,41 @@ export class HybridPitchDraftService implements PitchDraftService {
 
   savePhotos(id: PitchDraftId, value: readonly PitchPhoto[]): Promise<PitchDraft> {
     return this.local.savePhotos(id, value);
+  }
+
+  saveClips(id: PitchDraftId, value: readonly PitchClip[]): Promise<PitchDraft> {
+    return this.local.saveClips(id, value);
+  }
+
+  /**
+   * Asks the server where this draft's uploaded clips stand and writes the answer
+   * into the local mirror.
+   *
+   * Only uploaded clips are asked about — a clip that has never been sent has no
+   * job — and a clip the server says nothing about keeps whatever state it had:
+   * an unreachable server must not be able to reset a `flagged` verdict to
+   * `pending`. Never throws for an unavailable server; the caller's poll phase is
+   * what says "not confirmed yet".
+   */
+  async refreshClipIngest(id: PitchDraftId): Promise<PitchDraft> {
+    const draft = await findDraft(this.local, id);
+    if (draft.server === null) {
+      return draft;
+    }
+    const objectNames = draft.clips.flatMap((clip) =>
+      clip.upload === undefined ? [] : [clip.upload.objectName],
+    );
+    if (objectNames.length === 0) {
+      return draft;
+    }
+    const observed = await this.readClipIngest({
+      draftId: draft.server.draftId,
+      objectNames,
+    });
+    if (mergeClipIngestStates(draft.clips, observed) === draft.clips) {
+      return draft;
+    }
+    return this.local.saveClipIngestStates(id, observed);
   }
 
   saveRecording(id: PitchDraftId, value: PitchRecording): Promise<PitchDraft> {
@@ -426,7 +552,7 @@ export class HybridPitchDraftService implements PitchDraftService {
       return draft;
     }
     const plans = planDraftMedia(draft);
-    if (plans.every((plan) => plan.record?.validated === true)) {
+    if (plans.every(isAssetSyncSettled)) {
       return draft;
     }
     if (draft.recording === null) {
@@ -435,6 +561,7 @@ export class HybridPitchDraftService implements PitchDraftService {
     const serverDraftId = draft.server.draftId;
     let recording = draft.recording;
     let photos = [...draft.photos];
+    let clips = [...draft.clips];
     let unvalidated = 0;
     try {
       for (const plan of plans) {
@@ -444,12 +571,31 @@ export class HybridPitchDraftService implements PitchDraftService {
             await this.local.saveRecording(id, recording);
             return;
           }
+          if (plan.kind === 'video') {
+            clips = clips.map((clip, index) =>
+              // `pending` from the moment the bytes are stored: the ingest job
+              // exists from then on, and a clip with an upload record but no
+              // state would read as "nothing is happening to this video".
+              index === plan.index
+                ? { ...clip, upload: record, ingest: clip.ingest ?? 'pending' }
+                : clip,
+            );
+            await this.local.saveClips(id, clips);
+            return;
+          }
           photos = photos.map((photo, index) =>
             index === plan.index ? { ...photo, upload: record } : photo,
           );
           await this.local.savePhotos(id, photos);
         };
-        if ((await this.syncAsset(repo, serverDraftId, plan, persist)) !== 'passed') {
+        const outcome = await this.syncAssetOrDropRefusedClip(
+          repo,
+          id,
+          serverDraftId,
+          plan,
+          persist,
+        );
+        if (outcome !== 'passed' && outcome !== 'ingest_pending') {
           unvalidated += 1;
         }
       }
@@ -558,6 +704,13 @@ export class HybridPitchDraftService implements PitchDraftService {
         throw draft.review.generationMode === 'generated'
           ? new PitchDraftSubmissionError(MEDIA_VALIDATION_INCOMPLETE_MESSAGE)
           : new ManualPitchNeedsAiReviewError();
+      }
+      // A clip frame moderation refused blocks the draft from entering consent
+      // review at all (0050). Surfaced as its own message: nothing is wrong with
+      // the pitch text, and the media-validation copy would send the introducer
+      // to check their connection for a decision the network had no part in.
+      if (isFlaggedClipSubmitRejection(error)) {
+        throw new PitchDraftSubmissionError(FLAGGED_CLIP_BLOCKS_SUBMIT_MESSAGE);
       }
       throw error;
     }
@@ -701,7 +854,10 @@ export class HybridPitchDraftService implements PitchDraftService {
     }
     // 0046 removes photos only, by design: the introducer's voice is a server
     // invariant. A stray voice row means the local draft lost its recording
-    // rather than that a photo was removed, and detaching it is not the fix.
+    // rather than that a photo was removed, and detaching it is not the fix. A
+    // stray clip row is the same class of problem — which is why dropping an
+    // uploaded clip locally is refused (StoredClipRemovalError) instead of
+    // producing one here.
     if (orphaned.some((row) => row.asset_type !== 'photo')) {
       throw new PitchDraftSubmissionError(STALE_PITCH_ASSETS_MESSAGE);
     }
@@ -722,6 +878,37 @@ export class HybridPitchDraftService implements PitchDraftService {
   }
 
   /**
+   * {@link syncAsset}, with the one failure that must not leave a pitch
+   * permanently unsendable handled: the server refusing to register a clip on a
+   * count (the entitlement, or the absolute ceiling of three).
+   *
+   * That clip's bytes are stored but no row names them, so the local draft is the
+   * only thing still claiming the pitch has this video. Dropping it there is what
+   * makes the next attempt succeed with the rest of the pitch; the object goes to
+   * the 48h orphan sweep. The introducer is told why, and it is a raise rather
+   * than a silent drop because a video vanishing from a pitch without a word is
+   * exactly the kind of thing they would only find out after publishing.
+   */
+  private async syncAssetOrDropRefusedClip(
+    repo: PitchDraftRepository,
+    id: PitchDraftId,
+    serverDraftId: string,
+    plan: MediaAssetPlan,
+    persist: (record: UploadedAsset) => Promise<void>,
+  ): Promise<AssetSyncOutcome> {
+    try {
+      return await this.syncAsset(repo, serverDraftId, plan, persist);
+    } catch (error: unknown) {
+      const refusal = plan.kind === 'video' ? clipRegistrationRefusalMessage(error) : null;
+      if (refusal === null) {
+        throw error;
+      }
+      await this.local.dropUnregisteredClip(id, plan.objectName);
+      throw new PitchDraftSubmissionError(refusal);
+    }
+  }
+
+  /**
    * Brings one asset up to date — upload, register, validate — skipping
    * whatever a previous attempt already completed and persisting each step
    * before the next one runs. Returns the validation outcome; `rejected`
@@ -732,7 +919,7 @@ export class HybridPitchDraftService implements PitchDraftService {
     draftId: string,
     plan: MediaAssetPlan,
     persist: (record: UploadedAsset) => Promise<void>,
-  ): Promise<MediaValidationOutcome> {
+  ): Promise<AssetSyncOutcome> {
     let record = plan.record;
     if (record === null) {
       await this.uploadAssetBytes(repo, draftId, plan);
@@ -749,6 +936,16 @@ export class HybridPitchDraftService implements PitchDraftService {
       );
       record = { ...record, registered: true };
       await persist(record);
+    }
+    // A clip is never sent to `/api/media/validate`: that route's allowlist is
+    // image and audio kinds, so it would refuse video bytes the server itself
+    // accepts, and this call site turns a `rejected` into "pick a different
+    // file". Video is judged by the ingest pipeline (probe → silent proxy →
+    // poster → frame moderation) and its verdict reaches the app as an ingest
+    // state. Nothing here may record `validated`, which would claim a check that
+    // never ran.
+    if (plan.kind === 'video') {
+      return 'ingest_pending';
     }
     if (record.validated) {
       return 'passed';
@@ -770,6 +967,15 @@ export class HybridPitchDraftService implements PitchDraftService {
     draftId: string,
     plan: MediaAssetPlan,
   ): Promise<void> {
+    // Last mirror of the server's byte ceiling. The picker already refused an
+    // oversized clip, but a draft can outlive a lowered ceiling, and the upload
+    // reads the whole file into memory — so this refuses before the read rather
+    // than letting the phone allocate bytes the server will not accept.
+    if (plan.byteSize !== null && plan.byteSize > (await this.clipMaxBytes())) {
+      throw new PitchDraftSubmissionError(
+        `${plan.label} is too large to upload. Trim it or export it smaller, then pick it again.`,
+      );
+    }
     const upload = await repo.requestAssetUpload(draftId, plan.objectName);
     const status = await putLocalFile(upload.signedUrl, plan.sourceUri, {
       'Content-Type': plan.contentType,
@@ -804,12 +1010,18 @@ export class HybridPitchDraftService implements PitchDraftService {
   }
 }
 
+/**
+ * What one `syncAsset` call settled on. `ingest_pending` is a clip's stored-and
+ * -registered state: not a pass, and not a failure the introducer can act on.
+ */
+type AssetSyncOutcome = MediaValidationOutcome | 'ingest_pending';
+
 /** The voice object name is fixed: /api/transcribe reads `{draftId}/voice.m4a`. */
 const VOICE_OBJECT_NAME = 'voice.m4a';
 
 export type MediaAssetPlan = {
-  readonly kind: 'voice' | 'photo';
-  /** Photo position, also its pitch_assets sort_order. Always 0 for the voice. */
+  readonly kind: PitchAssetKind;
+  /** Photo/clip position, also its pitch_assets sort_order. Always 0 for the voice. */
   readonly index: number;
   /** How this asset is named to the introducer when something goes wrong. */
   readonly label: string;
@@ -824,12 +1036,32 @@ export type MediaAssetPlan = {
    * and CHECK `> 0`, so a missing measurement is left absent rather than faked.
    */
   readonly dimensions: AssetDimensions | null;
+  /**
+   * Measured byte size, for the assets that carry one (clips). Null where the
+   * app never measured it — the voice track it recorded itself, and photos,
+   * whose size the picker does not have to report.
+   */
+  readonly byteSize: number | null;
 };
 
-/** The picker's reported size, or null when it is not a size a photo can have. */
-function photoDimensions(photo: PitchPhoto): AssetDimensions | null {
-  const width = Math.round(photo.width);
-  const height = Math.round(photo.height);
+/**
+ * The configured clip byte ceiling, or the built-in default when this runtime
+ * cannot read app config (tests, web). Imported lazily: `expo-constants` pulls in
+ * React Native, which must not be a static dependency of the draft service.
+ */
+async function resolveClipMaxBytes(): Promise<number> {
+  try {
+    const { getClipMaxBytes } = await import('./clipUploadLimits');
+    return getClipMaxBytes();
+  } catch {
+    return DEFAULT_CLIP_MAX_BYTES;
+  }
+}
+
+/** The picker's reported size, or null when it is not a size a visual can have. */
+function visualDimensions(visual: PitchPhoto | PitchClip): AssetDimensions | null {
+  const width = Math.round(visual.width);
+  const height = Math.round(visual.height);
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     return null;
   }
@@ -858,7 +1090,8 @@ function legacyRecord(objectName: string): UploadedAsset {
 function hasNoAssetRecords(draft: PitchDraft): boolean {
   return (
     draft.recording?.upload === undefined &&
-    draft.photos.every((photo) => photo.upload === undefined)
+    draft.photos.every((photo) => photo.upload === undefined) &&
+    draft.clips.every((clip) => clip.upload === undefined)
   );
 }
 
@@ -880,6 +1113,7 @@ export function planDraftMedia(draft: PitchDraft): readonly MediaAssetPlan[] {
       record:
         draft.recording.upload ?? (uploadedBeforeRecords ? legacyRecord(VOICE_OBJECT_NAME) : null),
       dimensions: null,
+      byteSize: null,
     });
   }
   draft.photos.forEach((photo, index) => {
@@ -898,23 +1132,54 @@ export function planDraftMedia(draft: PitchDraft): readonly MediaAssetPlan[] {
         (uploadedBeforeRecords && photo.assetKey === undefined
           ? legacyRecord(`photo-${index + 1}.jpg`)
           : null),
-      dimensions: photoDimensions(photo),
+      dimensions: visualDimensions(photo),
+      byteSize: null,
+    });
+  });
+  // Clips last, so a draft that gains one keeps every photo's plan — and its
+  // upload record — exactly where it was. `uploadedBeforeRecords` has no clip
+  // case: no build that predates per-asset records could store a clip.
+  draft.clips.forEach((clip, index) => {
+    plans.push({
+      kind: 'video',
+      index,
+      label: `Video ${index + 1}`,
+      sourceUri: clip.uri,
+      contentType: clip.mimeType,
+      objectName: clipObjectName(clip, index),
+      record: clip.upload ?? null,
+      dimensions: visualDimensions(clip),
+      byteSize: clip.byteSize,
     });
   });
   return plans;
 }
 
 /**
+ * True when this plan needs nothing more from `uploadDraftMedia`.
+ *
+ * For a voice track or photo that means a recorded `passed` verdict from
+ * `/api/media/validate`. A clip has no verdict to record there: its bytes are
+ * judged by the server's ingest pipeline, whose outcome arrives later as an
+ * ingest state, so "stored and registered" is as far as the upload step can get.
+ */
+function isAssetSyncSettled(plan: MediaAssetPlan): boolean {
+  return plan.kind === 'video' ? plan.record?.registered === true : plan.record?.validated === true;
+}
+
+/**
  * True when every asset's bytes are already on the server but at least one has
  * no `passed` verdict — the state a submit can resolve by asking the validator
- * again, as opposed to one that still needs an upload.
+ * again, as opposed to one that still needs an upload. Clips are excluded: no
+ * number of retries produces a validation verdict for one, so counting them here
+ * would make every submit re-run the upload step for nothing.
  */
 export function hasPendingMediaValidation(draft: PitchDraft): boolean {
   const plans = planDraftMedia(draft);
   return (
     plans.length > 0 &&
     plans.every((plan) => plan.record !== null) &&
-    plans.some((plan) => plan.record?.validated === false)
+    plans.some((plan) => plan.kind !== 'video' && plan.record?.validated === false)
   );
 }
 
@@ -985,6 +1250,7 @@ function recoverServerDraft(
     contextRole: 'INTRODUCER',
     relationship,
     photos: [],
+    clips: [],
     recording: null,
     review: reviewFromServer(row, fallbackReview, request),
     server: {

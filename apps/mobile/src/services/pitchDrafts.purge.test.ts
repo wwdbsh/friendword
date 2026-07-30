@@ -117,6 +117,30 @@ describe('publish purge of uploaded local media', () => {
     expect(serialized).not.toContain('file:///one.jpg');
   });
 
+  it('removes the local copy of an uploaded clip on publish', async () => {
+    const { storage, values } = createStorage();
+    const deleteMediaFile = vi.fn(async () => {});
+    const service = new MockPitchDraftService(storage, deleteMediaFile);
+    const id = await createSubmittedDraft(service, { mediaUploaded: true });
+    await service.saveClips(id, [
+      {
+        uri: 'file:///beach.mov',
+        width: 1080,
+        height: 1920,
+        durationMillis: 9_000,
+        byteSize: 8_000_000,
+        mimeType: 'video/quicktime',
+      },
+    ]);
+
+    await service.syncServerReview(id, { status: 'published', review: REVIEW });
+
+    const draft = await firstDraft(service);
+    expect(draft.clips).toEqual([]);
+    expect(deleteMediaFile).toHaveBeenCalledWith('file:///beach.mov');
+    expect(values.get(STORAGE_KEY) ?? '').not.toContain('file:///beach.mov');
+  });
+
   it('preserves local media that has not been uploaded to the server yet', async () => {
     const { storage } = createStorage();
     const deleteMediaFile = vi.fn(async () => {});

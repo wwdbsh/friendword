@@ -1,4 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "next build"
+  "buildCommand": "next build",
+  "functions": {
+    "app/api/media/ingest-run/route.ts": {
+      "maxDuration": 300,
+      "memory": 2048
+    }
+  }
 }

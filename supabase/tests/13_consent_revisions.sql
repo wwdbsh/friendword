@@ -200,8 +200,8 @@ UPDATE pitch_drafts
        body = 'Revision two body',
        structure = '{"hard_claims_requiring_confirmation":["Still needs confirmation"]}'::JSONB
  WHERE id = 'd1300000-0000-0000-0000-000000000001';
+-- Same column shape the client sends (0052): the id is server-generated.
 INSERT INTO pitch_assets (
-  id,
   pitch_draft_id,
   uploaded_by_user_id,
   asset_type,
@@ -209,7 +209,6 @@ INSERT INTO pitch_assets (
   sort_order
 )
 VALUES (
-  'd1300000-0000-0000-0000-000000000014',
   'd1300000-0000-0000-0000-000000000001',
   '00000000-0000-0000-0000-000000000004',
   'photo',

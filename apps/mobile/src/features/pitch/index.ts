@@ -1,3 +1,4 @@
+export { ClipIngestNotice } from './ClipIngestNotice';
 export { FriendDetailsStep } from './FriendDetailsStep';
 export { PhotosStep } from './PhotosStep';
 export { PitchReviewEditor } from './PitchReviewEditor';

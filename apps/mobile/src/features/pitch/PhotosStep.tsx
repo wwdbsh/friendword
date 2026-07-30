@@ -4,52 +4,64 @@ import { useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { HypeButton, StickerCard } from '../../components';
-import { pickedPhotoMimeType } from '../../services/mediaFiles';
-import type { PitchPhoto } from '../../services/types';
+import { clipIngestLabel } from '../../services/clipIngest';
+import { getClipMaxBytes } from '../../services/clipUploadLimits';
+import {
+  remainingVisualSelection,
+  selectPickedVisuals,
+  visualPickLimits,
+  visualPickMessage,
+} from '../../services/pickedVisuals';
+import { CLIP_MAX_SOURCE_DURATION_MS, type PitchClip, type PitchPhoto } from '../../services/types';
 import { PitchStepFrame } from './PitchStepFrame';
-
-/**
- * Named so the introducer can act on it: the picker hands back formats the
- * server refuses (GIF, BMP, TIFF, AVIF, and any HEIC it could not transcode),
- * and uploading those bytes anyway only fails later with a message about a
- * file they can no longer identify.
- */
-const UNSUPPORTED_PHOTO_MESSAGE =
-  'Friendword can publish JPEG, PNG, and WebP photos only. Pick a different one.';
 
 type PhotosStepProps = {
   readonly busy: boolean;
   readonly saveErrorMessage: string | null;
   readonly photos: readonly PitchPhoto[];
+  readonly clips: readonly PitchClip[];
   readonly onPhotosChange: (photos: readonly PitchPhoto[]) => void;
+  readonly onClipsChange: (clips: readonly PitchClip[]) => void;
   readonly onBack: () => void;
   readonly onContinue: () => void;
+  /** Injectable so a test can drive the mirror without expo-constants. */
+  readonly clipMaxBytes?: number;
 };
 
 export function PhotosStep({
   busy,
   saveErrorMessage,
   photos,
+  clips,
   onPhotosChange,
+  onClipsChange,
   onBack,
   onContinue,
+  clipMaxBytes,
 }: PhotosStepProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const limits = visualPickLimits(clipMaxBytes ?? getClipMaxBytes());
+  const maxClipSeconds = Math.floor(CLIP_MAX_SOURCE_DURATION_MS / 1000);
+  const clipAllowanceCopy =
+    limits.maxClips === 1 ? 'one short video clip' : `up to ${limits.maxClips} short video clips`;
 
-  const pickPhotos = async (): Promise<void> => {
+  const pickVisuals = async (): Promise<void> => {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        setErrorMessage('Photo access is needed to suggest photos for your friend.');
+        setErrorMessage('Photo access is needed to suggest photos and videos for your friend.');
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ['images', 'videos'],
         allowsMultipleSelection: true,
         orderedSelection: true,
-        selectionLimit: 4 - photos.length,
+        selectionLimit: remainingVisualSelection({ photos, clips }, limits),
         quality: 0.9,
+        // Only bounds a video the picker *records*; a library pick of any length
+        // still comes back, which is why selectPickedVisuals measures it.
+        videoMaxDuration: maxClipSeconds,
         // iPhone libraries hold HEIC, which the server refuses. Compatible mode
         // makes the picker transcode those to JPEG; PNG/WebP screenshots come
         // back untouched and are uploaded under their own type below.
@@ -60,30 +72,26 @@ export function PhotosStep({
         return;
       }
 
-      const selected: PitchPhoto[] = [];
-      for (const asset of result.assets) {
-        const mimeType = pickedPhotoMimeType(asset);
-        if (mimeType === null) {
-          continue;
-        }
-        selected.push({ uri: asset.uri, width: asset.width, height: asset.height, mimeType });
-      }
-      onPhotosChange([...photos, ...selected].slice(0, 4));
-      setErrorMessage(selected.length < result.assets.length ? UNSUPPORTED_PHOTO_MESSAGE : null);
+      const selection = await selectPickedVisuals(result.assets, { photos, clips }, limits);
+      onPhotosChange(selection.photos);
+      onClipsChange(selection.clips);
+      setErrorMessage(visualPickMessage(selection.rejections, limits));
     } catch (error: unknown) {
       if (error instanceof Error) {
-        setErrorMessage('Those photos could not be opened. Please try again.');
+        setErrorMessage('Those files could not be opened. Please try again.');
         return;
       }
       throw error;
     }
   };
 
+  const full = photos.length >= limits.maxPhotos && clips.length >= limits.maxClips;
+
   return (
     <PitchStepFrame
       track={3}
       title="Pick their best shots"
-      subtitle="Suggest 1–4 photos. Your friend approves, replaces, or removes each one before anything is public."
+      subtitle={`Suggest 1–${limits.maxPhotos} photos, plus ${clipAllowanceCopy} of ${maxClipSeconds} seconds or less. Your friend approves, replaces, or removes each one before anything is public.`}
       onBack={onBack}
       footer={
         <HypeButton
@@ -116,17 +124,46 @@ export function PhotosStep({
           ))}
         </View>
 
-        {photos.length < 4 ? (
+        {clips.map((clip, index) => (
+          <View key={clip.uri} style={styles.clipRow}>
+            <Text style={styles.clipTitle}>{`Video ${index + 1}`}</Text>
+            <Text style={styles.clipMeta}>
+              {`${(clip.durationMillis / 1000).toFixed(1)}s · ${Math.max(1, Math.round(clip.byteSize / 1_048_576))}MB · ${clipIngestLabel(clip.ingest)}`}
+            </Text>
+            <Pressable
+              accessibilityLabel={`Remove suggested video ${index + 1}`}
+              accessibilityRole="button"
+              onPress={() => onClipsChange(clips.filter((candidate) => candidate.uri !== clip.uri))}
+              style={styles.remove}
+            >
+              <Text style={styles.removeLabel}>Remove</Text>
+            </Pressable>
+          </View>
+        ))}
+
+        {!full ? (
           <HypeButton
-            label={photos.length === 0 ? 'Choose photos' : 'Add another photo'}
+            label={
+              photos.length === 0 && clips.length === 0
+                ? 'Choose photos or videos'
+                : 'Add another photo or video'
+            }
             onPress={() => {
-              void pickPhotos();
+              void pickVisuals();
             }}
             secondary
           />
         ) : null}
 
-        <Text style={styles.count}>{photos.length} of 4 suggested</Text>
+        <Text style={styles.count}>
+          {`${photos.length} of ${limits.maxPhotos} photos · ${clips.length} of ${limits.maxClips} video${limits.maxClips === 1 ? '' : 's'}`}
+        </Text>
+        {clips.length > 0 ? (
+          <Text style={styles.count}>
+            Videos go through automated safety checks after you send the pitch, and are not
+            published until those finish.
+          </Text>
+        ) : null}
         {errorMessage ? (
           <Text accessibilityLiveRegion="polite" style={styles.error}>
             {errorMessage}
@@ -153,6 +190,20 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   photo: { width: '100%', aspectRatio: 1, resizeMode: 'cover' },
+  clipRow: {
+    gap: spacing.xs,
+    borderColor: colors.ink,
+    borderRadius: radii.sm,
+    borderWidth: strokes.sticker,
+    backgroundColor: colors.background,
+    padding: spacing.sm,
+  },
+  clipTitle: { color: colors.ink, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.md },
+  clipMeta: {
+    color: colors.textSecondary,
+    fontFamily: 'BricolageGrotesqueSemiBold',
+    fontSize: fontSizes.sm,
+  },
   remove: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   removeLabel: {
     color: colors.danger,

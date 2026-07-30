@@ -30,22 +30,30 @@ BEGIN;
 
 DO $$
 BEGIN
+  -- 0050 added the sixth argument: the clips of the row a scene is written onto.
+  -- The v2 rules this suite pins are unchanged behind it, and every probe here
+  -- passes an empty clip list, so nothing below depends on a clip existing.
   IF to_regprocedure(
-    'private.pitch_scene_violation(jsonb,integer,uuid[],jsonb,jsonb)'
+    'private.pitch_scene_violation(jsonb,integer,uuid[],jsonb,jsonb,uuid[])'
   ) IS NULL THEN
     RAISE EXCEPTION
-      'D25: private.pitch_scene_violation(jsonb,integer,uuid[],jsonb,jsonb) missing';
+      'D25: private.pitch_scene_violation(jsonb,integer,uuid[],jsonb,jsonb,uuid[]) missing';
   END IF;
   IF to_regprocedure(
-    'private.assert_scene_definition(jsonb,integer,uuid[],jsonb,jsonb)'
+    'private.assert_scene_definition(jsonb,integer,uuid[],jsonb,jsonb,uuid[])'
   ) IS NULL THEN
     RAISE EXCEPTION
-      'D25: private.assert_scene_definition(jsonb,integer,uuid[],jsonb,jsonb) missing';
+      'D25: private.assert_scene_definition(jsonb,integer,uuid[],jsonb,jsonb,uuid[]) missing';
   END IF;
-  -- The 3-argument forms are gone on purpose: they would be a call path where a
-  -- v2 scene is judged with no transcript and no structure.
+  -- The narrower forms are gone on purpose: each would be a call path where a
+  -- scene is judged with no transcript, no structure, or no clip list.
   IF to_regprocedure('private.pitch_scene_violation(jsonb,integer,uuid[])') IS NOT NULL THEN
     RAISE EXCEPTION 'D25: the 3-argument pitch_scene_violation still exists';
+  END IF;
+  IF to_regprocedure(
+    'private.pitch_scene_violation(jsonb,integer,uuid[],jsonb,jsonb)'
+  ) IS NOT NULL THEN
+    RAISE EXCEPTION 'D25: the 5-argument pitch_scene_violation still exists';
   END IF;
   IF to_regprocedure('private.canonical_pitch_json(jsonb)') IS NULL THEN
     RAISE EXCEPTION 'D25: private.canonical_pitch_json(jsonb) missing';
@@ -592,15 +600,30 @@ BEGIN
       'a missing look was not rejected: ' || coalesce(reason, 'ACCEPTED'));
   END IF;
 
-  -- An unknown schemaVersion is not a v2 scene, so it falls through to the v1
-  -- rules and is refused there.
+  -- schemaVersion 3 was refused by the v1 rules until 0050 existed. It is now a
+  -- real version, and v3 is a SUPERSET of v2 — the frozen contract asserts that
+  -- by sweeping every numeric leaf of the v2 example against both parsers — so
+  -- this very timeline, relabelled, must be ACCEPTED. It declares no
+  -- clipAssetIds and plays no clip, which is what a v2 scene is in v3 terms.
+  -- (The clip rules themselves are pinned by 26_video_ingest.sql.)
   reason := pg_temp.submit_reject_reason(
     draft, jsonb_set(pg_temp.canon(), '{schemaVersion}', '3'::JSONB)
+  );
+  IF reason IS NOT NULL THEN
+    failures := array_append(failures,
+      'the canonical timeline relabelled v3 was rejected: ' || reason);
+  END IF;
+
+  -- An unknown schemaVersion still falls through to the v1 rules and is refused
+  -- there, which is what keeps a future v4 from being stored by a database that
+  -- cannot judge it.
+  reason := pg_temp.submit_reject_reason(
+    draft, jsonb_set(pg_temp.canon(), '{schemaVersion}', '4'::JSONB)
   );
   IF reason IS DISTINCT FROM
      'pitch scene must carry only schemaVersion, canvas, durationMs and scenes' THEN
     failures := array_append(failures,
-      'schemaVersion 3 was not rejected: ' || coalesce(reason, 'ACCEPTED'));
+      'schemaVersion 4 was not rejected: ' || coalesce(reason, 'ACCEPTED'));
   END IF;
 
   -- Fonts and colours come from the template, which is a closed enum. That is
@@ -2198,7 +2221,11 @@ BEGIN
       (SELECT array_agg((listed.value #>> '{}')::UUID)
          FROM jsonb_array_elements(vector.scene -> 'assetIds') AS listed(value)),
       vector_transcript,
-      CASE WHEN vector.requires_structure THEN reviewed_structure END
+      CASE WHEN vector.requires_structure THEN reviewed_structure END,
+      -- No v2 vector references a clip, so the clip list is empty here on
+      -- purpose: a v2 scene must be judged identically whether or not the draft
+      -- it lands on carries video.
+      ARRAY[]::UUID[]
     );
     IF reason IS DISTINCT FROM vector.expected_reason THEN
       failures := array_append(

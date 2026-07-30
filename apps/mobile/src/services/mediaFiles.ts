@@ -1,4 +1,11 @@
-import { PHOTO_MIME_TYPES, type PhotoMimeType, type PitchPhoto } from './types';
+import {
+  CLIP_MIME_TYPES,
+  PHOTO_MIME_TYPES,
+  type ClipMimeType,
+  type PhotoMimeType,
+  type PitchClip,
+  type PitchPhoto,
+} from './types';
 
 /**
  * A local file as this runtime can actually read it. Declared structurally
@@ -10,6 +17,7 @@ type NativeFile = {
   readonly exists?: unknown;
   readonly bytes?: unknown;
   readonly delete?: unknown;
+  readonly size?: unknown;
 };
 
 /**
@@ -81,6 +89,13 @@ async function loadExpoFetch(): Promise<BytesFetch | null> {
  * fails is a real error and propagates — only unavailability falls back, so a
  * failure is never retried on a path that would send the bytes twice. Returns
  * the HTTP status of the upload response.
+ *
+ * `bytes()` loads the whole file into memory. That is accepted for pitch clips
+ * at the current 50MB ceiling (`FRIENDWORD_VIDEO_MAX_BYTES`, Supabase Free);
+ * when that ceiling is raised to 200MB on Pro this has to be revisited — a
+ * 200MB Uint8Array is not a safe allocation on a phone, so the clip path then
+ * needs a streaming upload (`File.createUploadTask`, whose completion-thread
+ * behaviour must be checked against the crash that banned `uploadAsync`).
  */
 export async function putLocalFile(
   url: string,
@@ -136,6 +151,28 @@ export async function deleteLocalMediaFile(uri: string): Promise<void> {
   }
 }
 
+/**
+ * Byte size of a local file, or null when this runtime cannot measure it.
+ *
+ * Used to mirror the upload ceiling *before* the bytes are read: the picker does
+ * not always report `fileSize` for a video, and reading a 50MB file into memory
+ * only to refuse it is the one thing this check exists to avoid. `size` is 0 for
+ * a file that does not exist or cannot be read, which is reported as null so a
+ * caller never reads it as "an empty, therefore acceptable, file".
+ */
+export async function localFileByteSize(uri: string): Promise<number | null> {
+  try {
+    const file = await openNativeFile(uri);
+    const size = file?.size;
+    if (typeof size !== 'number' || !Number.isFinite(size) || size <= 0) {
+      return null;
+    }
+    return Math.round(size);
+  } catch {
+    return null;
+  }
+}
+
 const PHOTO_FILE_EXTENSIONS: Record<PhotoMimeType, string> = {
   'image/jpeg': '.jpg',
   'image/png': '.png',
@@ -187,16 +224,16 @@ export function photoMimeType(photo: PitchPhoto): PhotoMimeType {
 }
 
 /**
- * A fresh photo identity.
+ * A fresh identity for one picked photo or clip.
  *
- * It is embedded in `photo-<key>.<ext>`, which must match
+ * It is embedded in `photo-<key>.<ext>` / `clip-<key>.<ext>`, which must match
  * `[A-Za-z0-9][A-Za-z0-9._-]{0,254}` end to end to satisfy both the storage
  * policy's object-name pattern (0003:63, matched case-insensitively) and the
  * data layer's file-name schema. Lowercase alphanumerics stay well inside that
  * set; the key never sits at the start of the name, so its first character is
  * not itself constrained.
  */
-export function createPhotoAssetKey(): string {
+export function createMediaAssetKey(): string {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
@@ -216,4 +253,56 @@ export function photoObjectName(photo: PitchPhoto, index: number): string {
   return photo.assetKey === undefined
     ? `photo-${index + 1}${extension}`
     : `photo-${photo.assetKey}${extension}`;
+}
+
+const CLIP_FILE_EXTENSIONS: Record<ClipMimeType, string> = {
+  'video/mp4': '.mp4',
+  'video/quicktime': '.mov',
+};
+
+const CLIP_MIME_TYPES_BY_EXTENSION: Record<string, ClipMimeType> = {
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  qt: 'video/quicktime',
+};
+
+function asClipMimeType(value: string): ClipMimeType | null {
+  const normalized = value.split(';')[0]?.trim().toLowerCase() ?? '';
+  return CLIP_MIME_TYPES.find((allowed) => allowed === normalized) ?? null;
+}
+
+function clipMimeTypeFromUri(uri: string): ClipMimeType | null {
+  const path = uri.split('?')[0] ?? uri;
+  const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
+  return CLIP_MIME_TYPES_BY_EXTENSION[extension] ?? null;
+}
+
+/**
+ * The publishable container of a video the picker returned, or null when it is
+ * one the ingest probe would refuse (webm, avi, mkv, 3gp, m4v). The picker's
+ * `mimeType` describes the file it actually wrote; the uri extension is the
+ * fallback for platforms that leave it unset.
+ */
+export function pickedClipMimeType(asset: {
+  readonly mimeType?: string | null;
+  readonly uri: string;
+}): ClipMimeType | null {
+  const declared = typeof asset.mimeType === 'string' ? asClipMimeType(asset.mimeType) : null;
+  return declared ?? clipMimeTypeFromUri(asset.uri);
+}
+
+/**
+ * Storage object name for a draft clip.
+ *
+ * Named after the clip's own identity for the same reason photos are — a
+ * position is not stable across a removal, and `upsert:false` turns a reused
+ * name into a 409 the upload path reads as "already stored". A clip saved
+ * without an identity (only reachable from a hand-edited store; every save
+ * assigns one) falls back to its position.
+ */
+export function clipObjectName(clip: PitchClip, index: number): string {
+  const extension = CLIP_FILE_EXTENSIONS[clip.mimeType];
+  return clip.assetKey === undefined
+    ? `clip-${index + 1}${extension}`
+    : `clip-${clip.assetKey}${extension}`;
 }

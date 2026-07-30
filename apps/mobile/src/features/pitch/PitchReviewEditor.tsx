@@ -1,5 +1,6 @@
 import type { PitchStructure } from '@friendword/contracts';
 import { colors, fonts, fontSizes, radii, spacing, strokes } from '@friendword/ui-tokens';
+import type { ReactNode } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -13,6 +14,11 @@ type PitchReviewEditorProps = {
   readonly errorMessage: string | null;
   readonly onChange: (review: PitchReview) => void;
   readonly onSubmit: () => void;
+  /**
+   * Rendered above the editor. Used for state the introducer has to see before
+   * sending but cannot edit here — today the ingest status of their clips.
+   */
+  readonly notice?: ReactNode;
 };
 
 export function PitchReviewEditor({
@@ -22,6 +28,7 @@ export function PitchReviewEditor({
   errorMessage,
   onChange,
   onSubmit,
+  notice,
 }: PitchReviewEditorProps) {
   const complete = review.headline.trim() !== '' && review.body.trim() !== '';
   const updateStructure = (structure: PitchStructure): void => {
@@ -44,6 +51,8 @@ export function PitchReviewEditor({
             review it.
           </Text>
         </View>
+
+        {notice}
 
         {review.generationMode === 'manual' ? (
           <StickerCard>

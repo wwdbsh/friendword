@@ -3,6 +3,8 @@ import { canTransitionPitchDraft } from '@friendword/domain';
 
 import {
   PitchDraftListSchema,
+  type ClipIngestState,
+  type PitchClip,
   type PitchDraft,
   type PitchDraftId,
   type PitchPhoto,
@@ -17,7 +19,7 @@ import {
   purgeableMediaUris,
   purgeInvitationContact,
 } from './draftStorage';
-import { createPhotoAssetKey, deleteLocalMediaFile } from './mediaFiles';
+import { createMediaAssetKey, deleteLocalMediaFile } from './mediaFiles';
 
 const STORAGE_KEY = '@friendword/pitch-drafts';
 
@@ -51,6 +53,14 @@ export interface PitchDraftService {
   createDraft(): Promise<PitchDraft>;
   saveRelationship(id: PitchDraftId, relationship: PitchRelationship): Promise<PitchDraft>;
   savePhotos(id: PitchDraftId, photos: readonly PitchPhoto[]): Promise<PitchDraft>;
+  /** Rejects with {@link StoredClipRemovalError} for a clip whose bytes are already stored. */
+  saveClips(id: PitchDraftId, clips: readonly PitchClip[]): Promise<PitchDraft>;
+  /**
+   * Re-reads the ingest state of this draft's uploaded clips from the server and
+   * updates the local mirror. A no-op for a draft with no uploaded clip, and for
+   * the local-only store, which has no server to ask.
+   */
+  refreshClipIngest(id: PitchDraftId): Promise<PitchDraft>;
   /** Rejects with {@link StoredVoiceReplacementError} for a take that would replace stored bytes. */
   saveRecording(id: PitchDraftId, recording: PitchRecording): Promise<PitchDraft>;
   prepareForReview(id: PitchDraftId): Promise<PitchDraft>;
@@ -171,6 +181,30 @@ export class StoredVoiceReplacementError extends Error {
   }
 }
 
+export const STORED_CLIP_REMOVAL_MESSAGE =
+  'This video has already been sent to Friendword, and it cannot be taken off this pitch yet, ' +
+  'so it was kept. It is only published if it passes the automated safety checks.';
+
+/**
+ * Raised when a clip whose bytes are already stored is dropped from the draft.
+ *
+ * The server's asset-removal RPC handles photos only (0046 refuses any other
+ * asset type), so a clip that has been uploaded and registered cannot be
+ * detached. Accepting the local removal would leave a pitch_assets row the
+ * submit snapshots into the consent revision while the local draft no longer
+ * mentions it — and `reconcileRegisteredAssets` would then refuse to send the
+ * pitch at all, because a non-photo leftover is exactly the state it fails
+ * closed on. Keeping the clip is the honest outcome: it stays visible, and the
+ * ingest verdict decides whether it is ever published. `keptClips` is what the
+ * draft actually holds, so the screen can put itself back on that.
+ */
+export class StoredClipRemovalError extends Error {
+  constructor(readonly keptClips: readonly PitchClip[]) {
+    super(STORED_CLIP_REMOVAL_MESSAGE);
+    this.name = 'StoredClipRemovalError';
+  }
+}
+
 /**
  * True when this device recorded that the draft's voice object was uploaded.
  *
@@ -219,12 +253,44 @@ function mergePhotoIdentities(
       photo.assetKey ??
       stored?.assetKey ??
       (stored === undefined || (removedAny && upload === undefined)
-        ? createPhotoAssetKey()
+        ? createMediaAssetKey()
         : undefined);
     return {
       ...photo,
       ...(assetKey === undefined ? {} : { assetKey }),
       ...(upload === undefined ? {} : { upload }),
+    };
+  });
+}
+
+/**
+ * Reconciles a clip save against what the draft already holds.
+ *
+ * Same contract as {@link mergePhotoIdentities} for identities and upload
+ * records — the stored object is named after the clip's identity, so a save must
+ * never strip one — with one added rule: dropping a clip whose bytes are already
+ * stored is refused ({@link StoredClipRemovalError}). Unlike a photo, an
+ * uploaded clip cannot be detached from the server draft.
+ */
+function mergeClipIdentities(
+  current: readonly PitchClip[],
+  next: readonly PitchClip[],
+): PitchClip[] {
+  const kept = current.filter(
+    (clip) => clip.upload !== undefined && !next.some((candidate) => candidate.uri === clip.uri),
+  );
+  if (kept.length > 0) {
+    throw new StoredClipRemovalError(current);
+  }
+  return next.map((clip) => {
+    const stored = current.find((candidate) => candidate.uri === clip.uri);
+    const upload = clip.upload ?? stored?.upload;
+    const ingest = clip.ingest ?? stored?.ingest;
+    return {
+      ...clip,
+      assetKey: clip.assetKey ?? stored?.assetKey ?? createMediaAssetKey(),
+      ...(upload === undefined ? {} : { upload }),
+      ...(ingest === undefined ? {} : { ingest }),
     };
   });
 }
@@ -266,6 +332,66 @@ export class MockPitchDraftService implements PitchDraftService {
     return this.updateDraft(id, (draft) => ({
       ...draft,
       photos: mergePhotoIdentities(draft.photos, photos),
+    }));
+  }
+
+  async saveClips(id: PitchDraftId, clips: readonly PitchClip[]): Promise<PitchDraft> {
+    return this.updateDraft(id, (draft) => ({
+      ...draft,
+      clips: mergeClipIdentities(draft.clips, clips),
+    }));
+  }
+
+  /**
+   * The local store has no server behind it, so there is no ingest job to ask
+   * about; the hybrid service overrides this. Kept as a read rather than a throw
+   * so a screen can poll without first knowing which store it is talking to.
+   */
+  async refreshClipIngest(id: PitchDraftId): Promise<PitchDraft> {
+    const draft = (await this.getMyDrafts()).find((candidate) => candidate.id === id);
+    if (draft === undefined) {
+      throw new PitchDraftNotFoundError(id);
+    }
+    return draft;
+  }
+
+  /**
+   * Drops a clip whose bytes were stored but which the server refused to
+   * register (the clip entitlement or the absolute ceiling).
+   *
+   * Safe where {@link saveClips} refuses: no pitch_assets row names this object,
+   * so nothing can be snapshotted into a consent revision and the reconcile has
+   * nothing to detach. The stored bytes are left to the 48h orphan sweep, which
+   * is the only path that can reclaim them. A registered clip is never touched.
+   */
+  async dropUnregisteredClip(id: PitchDraftId, objectName: string): Promise<PitchDraft> {
+    return this.updateDraft(id, (draft) => ({
+      ...draft,
+      clips: draft.clips.filter(
+        (clip) =>
+          clip.upload === undefined ||
+          clip.upload.registered ||
+          clip.upload.objectName !== objectName,
+      ),
+    }));
+  }
+
+  /**
+   * Writes the server's ingest verdicts into the local mirror. Separate from
+   * {@link saveClips} because it must not touch identities or the removal guard:
+   * it is a refresh of server-owned state, not an edit by the introducer.
+   */
+  async saveClipIngestStates(
+    id: PitchDraftId,
+    states: ReadonlyMap<string, ClipIngestState>,
+  ): Promise<PitchDraft> {
+    return this.updateDraft(id, (draft) => ({
+      ...draft,
+      clips: draft.clips.map((clip) => {
+        const objectName = clip.upload?.objectName;
+        const state = objectName === undefined ? undefined : states.get(objectName);
+        return state === undefined ? clip : { ...clip, ingest: state };
+      }),
     }));
   }
 

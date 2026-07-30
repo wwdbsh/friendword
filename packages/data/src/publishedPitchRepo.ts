@@ -1,9 +1,9 @@
 import { z } from 'zod';
 
 import {
-  pitchSceneV1Schema,
+  parsePitchScene,
   pitchStructureSchema,
-  type PitchSceneV1,
+  type PitchSceneAnyVersion,
   type PitchStructure,
   type RelationshipDuration,
   type RelationshipType,
@@ -11,6 +11,7 @@ import {
 
 import type { ServiceSupabaseClient } from './client';
 import { DataLayerError } from './errors';
+import { indexTranscriptWords, type IndexedTranscriptWord } from './transcriptWordIndex';
 
 const slugSchema = z
   .string()
@@ -127,12 +128,20 @@ export type PublishedPitch = {
   readonly photos: readonly PublishedPitchPhoto[];
   /**
    * The approved motion timeline, projected onto the published draft by
-   * approve_and_publish_pitch (migration 0048). Null for a legacy row, for a
-   * recording with no transcript segments, or when the stored JSON fails the
-   * shared safety floors — the player then falls back to the legacy runtime
-   * distribution (A4) instead of playing an illegal timeline.
+   * approve_and_publish_pitch (migration 0048), in whichever schemaVersion the
+   * row holds. Null for a legacy row, for a recording with no transcript
+   * segments, or when the stored JSON fails the shared safety floors — the player
+   * then falls back to the legacy runtime distribution (A4) instead of playing an
+   * illegal timeline. v1 rows keep playing as v1: nothing is backfilled (A4).
    */
-  readonly scene: PitchSceneV1 | null;
+  readonly scene: PitchSceneAnyVersion | null;
+  /**
+   * The published transcript's word timings with the (segmentIndex, wordIndex)
+   * pairs a v2 `wordPop` references (A7). The player needs them to resolve an
+   * approved accent to the word it points at; an empty list makes every wordPop
+   * skip silently, which is what a pre-A7 recording must do.
+   */
+  readonly transcriptWords: readonly IndexedTranscriptWord[];
 };
 
 /**
@@ -339,11 +348,20 @@ export async function getPublishedPitchBySlug(
   const structure = parsedStructure.success ? parsedStructure.data : null;
 
   // Migration 0048: the scene the Dater approved, copied onto the draft at
-  // publish. Read structurally so a pre-0048 row (no such column) reads as null.
-  const parsedScene = pitchSceneV1Schema.safeParse(
+  // publish. Read structurally so a pre-0048 row (no such column) reads as null,
+  // and version-dispatched so a v1 row keeps playing as v1 (A4).
+  const scene = parsePitchScene(
     (draft as { readonly scene_definition?: unknown }).scene_definition ?? null,
   );
-  const scene = parsedScene.success ? parsedScene.data : null;
+
+  // The word references a v2 scene may carry, derived from the same published
+  // snapshot the transcript above came from.
+  const transcriptWords = indexTranscriptWords(
+    rawTranscript,
+    (transcript?.segments ?? []).map((segment) => ({
+      startMs: Math.max(0, Math.round(segment.start * 1000)),
+    })),
+  );
 
   return {
     campaignId: campaign.id,
@@ -364,5 +382,6 @@ export async function getPublishedPitchBySlug(
     voiceUrl: signed?.signedUrl ?? null,
     photos,
     scene,
+    transcriptWords,
   };
 }

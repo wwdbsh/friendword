@@ -4,16 +4,18 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import {
-  buildPitchSceneV1,
+  buildPitchSceneV2,
   characterLength,
   DATER_HARD_CLAIM_ERRORS,
   DATER_PITCH_FIELD_LIMITS,
   daterPitchStructureEditSchema,
   deriveDaterPitchBody,
   deriveDaterPitchHeadline,
+  PITCH_SCENE_TEMPLATES,
   rendersBlank,
   type DaterPitchStructureEdit,
-  type PitchSceneV1,
+  type PitchSceneAnyVersion,
+  type PitchSceneTemplate,
 } from '@friendword/contracts';
 import {
   ageFromBirthDate,
@@ -33,6 +35,13 @@ import { EmailSignIn } from '@/components/EmailSignIn';
 import { MotionPitchPlayer } from '@/components/MotionPitchPlayer';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { requestDaterPitchModeration } from '@/lib/moderateText';
+import {
+  consentEditsDirty,
+  DEFAULT_PITCH_SCENE_TEMPLATE,
+  sameStructure,
+  sceneMatchesPhotos,
+  sceneTemplate,
+} from '@/pitch/consentEdits';
 
 import styles from './page.module.css';
 
@@ -68,6 +77,16 @@ const STRUCTURE_HINTS = {
   evidence_or_anecdote: 'The moment your friend told to show it.',
   good_match_for: 'Who your friend thinks you’d click with.',
 } as const;
+
+/**
+ * The two free templates (docs/MOTION_PITCH_PLAN_2026-07-29.md §D4). Named for
+ * what the Dater will see change, not for the parameters underneath: the template
+ * moves timing, grade and colour, and cannot add or remove a word or a photo.
+ */
+const TEMPLATE_LABELS: Record<PitchSceneTemplate, string> = {
+  warm: 'Warm — gentler cuts, warm colour',
+  hype: 'Hype — faster cuts, louder colour',
+};
 
 const RELATIONSHIP_LABELS: Record<string, string> = {
   friend: 'Friend',
@@ -204,29 +223,6 @@ async function loadReviewContext(
     })),
   );
   return { preview, review, voiceUrl, photos };
-}
-
-function sameIds(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((id) => right.includes(id));
-}
-
-function sameStructure(
-  left: EditablePitchStructure | null,
-  right: EditablePitchStructure | null,
-): boolean {
-  if (left === null || right === null) {
-    return left === right;
-  }
-  return (
-    left.hook === right.hook &&
-    left.relationship_context === right.relationship_context &&
-    left.evidence_or_anecdote === right.evidence_or_anecdote &&
-    left.good_match_for === right.good_match_for &&
-    left.three_specific_qualities.length === right.three_specific_qualities.length &&
-    left.three_specific_qualities.every(
-      (quality, index) => quality === right.three_specific_qualities[index],
-    )
-  );
 }
 
 /**
@@ -414,6 +410,9 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   // The five published fields. Null on a legacy snapshot the editor can't
   // parse — the flow then falls back to headline/body and says so.
   const [editStructure, setEditStructure] = useState<EditablePitchStructure | null>(null);
+  // The motion template this save will build with. Seeded from the scene the
+  // server already stored, so the switcher starts on what the Dater is watching.
+  const [template, setTemplate] = useState<PitchSceneTemplate>(DEFAULT_PITCH_SCENE_TEMPLATE);
   const [savingEdits, setSavingEdits] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [daterAiConsent, setDaterAiConsent] = useState<'pending' | 'granted'>('pending');
@@ -471,6 +470,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         setEditHeadline(review.revision.headline);
         setEditBody(review.revision.body);
         setEditStructure(review.editableStructure);
+        setTemplate(sceneTemplate(review.scene));
         setEditStatus(null);
         setEditError(null);
         setHardClaimsConfirmed(false);
@@ -739,13 +739,34 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         // fails closed on a missing verdict while enforcement is on.
       }
       // The motion timeline this save freezes. Built from the revision's own
-      // transcript segments and the photos still included, in play order — never
-      // from a measured audio duration, so the scene is identical on every
-      // device. Null (too short, no segments) omits the argument, and the RPC
-      // then forward-copies the previous scene against the new asset snapshot.
-      const newScene = buildPitchSceneV1({
+      // transcript segments and words and the photos still included, in play
+      // order — never from a measured audio duration, so the scene is identical
+      // on every device. Null (too short, no segments) omits the argument, and
+      // the RPC then forward-copies the previous scene against the new asset
+      // snapshot.
+      //
+      // `words` is omitted rather than empty when this recording has none (a
+      // pre-A7 transcript, or a manual pitch): the builder then degrades to
+      // segment rhythm and emits no wordPop, which is also the only thing the DB
+      // will accept for such a row.
+      //
+      // `structure` is the structure THIS save writes, so a text card can only
+      // ever name a sentence this same revision carries. It is omitted on the
+      // legacy headline/body path: that revision's structure was never reviewed
+      // section by section, and a 92px card is not the place to find out.
+      const newScene = buildPitchSceneV2({
+        template,
         photoAssetIds: orderedIncludedPhotoIds(state.photos, includedAssetIds),
         segments: review.transcriptSegments,
+        ...(review.transcriptWords.length === 0 ? {} : { words: review.transcriptWords }),
+        ...(editedStructure === undefined
+          ? {}
+          : {
+              structure: {
+                ...editedStructure,
+                hard_claims_requiring_confirmation: [...retained],
+              },
+            }),
       });
       await repo.createDaterRevision({
         draftId: review.revision.pitch_draft_id,
@@ -763,6 +784,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
       setEditHeadline(latestReview.revision.headline);
       setEditBody(latestReview.revision.body);
       setEditStructure(latestReview.editableStructure);
+      setTemplate(sceneTemplate(latestReview.scene));
       setHardClaimsConfirmed(false);
       setRemovedClaimIndexes(new Set());
       setEditStatus(
@@ -1025,14 +1047,25 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   // A claim marked "I took that out" is only actually gone once the new revision
   // is written, so an undisposed choice counts as an unsaved edit.
   const claimsDirty = claimsToKeep.length !== flaggedClaims.length;
+  // The template the server actually built this revision's motion with. Switching
+  // away from it is an unsaved edit like any other, so the approve gate closes
+  // until the save rebuilds the scene.
+  const savedTemplate = sceneTemplate(state.step === 'review' ? state.review.scene : null);
   const editsDirty =
     state.step === 'review' &&
-    ((editStructure !== null
-      ? !sameStructure(editStructure, state.review.editableStructure)
-      : editHeadline !== state.review.revision.headline ||
-        editBody !== state.review.revision.body) ||
-      claimsDirty ||
-      !sameIds(includedAssetIds, currentRevisionPhotoIds));
+    consentEditsDirty({
+      structure: editStructure,
+      savedStructure: state.review.editableStructure,
+      headline: editHeadline,
+      savedHeadline: state.review.revision.headline,
+      body: editBody,
+      savedBody: state.review.revision.body,
+      claimsDirty,
+      includedAssetIds,
+      revisionPhotoIds: currentRevisionPhotoIds,
+      template,
+      savedTemplate,
+    });
   const currentAudienceError = audienceError(minimumAge, maximumAge);
   const currentProfileError = daterProfileError(birthDate, region, ownIntent);
 
@@ -1046,21 +1079,23 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   // MOTION PHASE 1. The preview plays the scene the SERVER stored on this
   // revision — never a scene built here. Approval means "yes to that timeline",
   // which only holds if the bytes the Dater watched came back from the server.
-  const serverScene: PitchSceneV1 | null = state.step === 'review' ? state.review.scene : null;
+  const serverScene: PitchSceneAnyVersion | null =
+    state.step === 'review' ? state.review.scene : null;
   const orderedIncludedPhotos =
     state.step === 'review' ? orderedIncludedPhotoIds(state.photos, includedAssetIds) : [];
   // An unsaved photo change makes the stored scene describe a different set of
   // photos. Playing it anyway would show a photo the Dater just excluded, and
   // approve_and_publish_pitch would reject the mismatch — so the motion preview
   // waits for the save that rebuilds the scene.
-  const previewSceneMatchesSelection =
-    serverScene !== null &&
-    sameIds(
-      serverScene.scenes.map((window) => window.assetId),
-      orderedIncludedPhotos,
-    );
-  const previewScene = previewSceneMatchesSelection ? serverScene : null;
+  const previewScene = sceneMatchesPhotos(serverScene, orderedIncludedPhotos) ? serverScene : null;
   const previewCaptions = state.step === 'review' ? state.review.transcriptSegments : [];
+  // The words and sentences the approved scene REFERENCES. Both come from the
+  // server's own revision, like the scene itself: a card must print the reviewed
+  // sentence, not the one being typed above, or "this is your page" would be a
+  // claim about text nobody has saved yet. Unsaved edits are covered by the
+  // stale note plus the approve gate.
+  const previewSceneWords = state.step === 'review' ? state.review.transcriptWords : [];
+  const previewSceneText = state.step === 'review' ? state.review.editableStructure : null;
   // The page's headline is the hook whenever the structure is editable, matching
   // what the server derives and what /p/[campaignSlug] prints.
   const previewHeadline = editStructure === null ? editHeadline : editStructure.hook;
@@ -1645,6 +1680,36 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                   Your page needs at least one photo — keep one to publish.
                 </p>
               )}
+
+              {/* The look switcher. Deliberately inside this step rather than a
+                  step of its own: it is the same act as choosing a photo, and it
+                  goes out with the same save. Switching rebuilds the motion, so
+                  it counts as an unsaved edit and the approve button waits. */}
+              <fieldset className={styles.preferenceBlock} data-consent-template={template}>
+                <legend className={styles.label}>The look of your page</legend>
+                <p className={styles.fieldHint}>
+                  Your words, your photos and your friend’s recording don’t change — only how the
+                  page moves and how it’s coloured. Save to see it.
+                </p>
+                <div className={styles.choiceRow}>
+                  {PITCH_SCENE_TEMPLATES.map((option) => (
+                    <label className={styles.choice} key={option}>
+                      <input
+                        type="radio"
+                        name="pitch-template"
+                        value={option}
+                        checked={template === option}
+                        onChange={() => {
+                          setTemplate(option);
+                          setEditStatus(null);
+                          setEditError(null);
+                        }}
+                      />
+                      <span>{TEMPLATE_LABELS[option]}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
               {editStatus !== null && (
                 <p className={styles.status} role="status">
                   {editStatus}
@@ -2060,6 +2125,8 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                           alt: `Your photo ${index + 1}`,
                         }))}
                         scene={previewScene}
+                        sceneWords={previewSceneWords}
+                        sceneText={previewSceneText}
                         captions={previewCaptions}
                         audioUrl={state.voiceUrl}
                         fallbackDurationMs={previewScene.durationMs}
@@ -2106,9 +2173,10 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                     </div>
                   )}
 
-                  {previewScene === null && serverScene !== null && (
+                  {editsDirty && serverScene !== null && (
                     <p className={styles.muted} role="status" data-consent-motion-stale>
-                      Save your edits to see your page move with the photos you just chose.
+                      Save your edits to see your page move with the words, photos and look you just
+                      chose.
                     </p>
                   )}
 

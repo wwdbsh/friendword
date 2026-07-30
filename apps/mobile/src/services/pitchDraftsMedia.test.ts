@@ -9,10 +9,17 @@ import type {
 } from '@friendword/data';
 
 import type { AssetDimensions } from '@friendword/data';
-import type { PitchSceneSegment, PitchSceneV1 } from '@friendword/contracts';
+import {
+  examplePitchSceneV2,
+  pitchSceneV2Schema,
+  type PitchSceneAnyVersion,
+  type PitchSceneSegment,
+  type PitchSceneTemplate,
+  type PitchSceneV2,
+} from '@friendword/contracts';
 
 import { requestMediaValidation, type MediaValidationOutcome } from './mediaValidation';
-import type { PitchSceneBuilder } from './pitchSceneInput';
+import type { PitchSceneBuilder, PitchSceneDemotion } from './pitchSceneInput';
 
 import {
   MockPitchDraftService,
@@ -25,6 +32,7 @@ import {
   ManualPitchNeedsAiReviewError,
   MEDIA_VALIDATION_INCOMPLETE_MESSAGE,
   STALE_PITCH_ASSETS_MESSAGE,
+  type PitchDraftRepository,
 } from './pitchDraftsSupabase';
 import { EMPTY_PITCH_STRUCTURE } from './types';
 import type { PitchDraft, PitchDraftId, PitchPhoto } from './types';
@@ -79,10 +87,19 @@ type Harness = {
     readonly fileName: string;
     readonly dimensions: AssetDimensions | undefined;
   }>;
-  /** The scene each submit carried, so a test can see what the dater would get. */
-  readonly submittedScenes: ReadonlyArray<PitchSceneV1 | null | undefined>;
-  /** What the scene builder was asked to build from, in call order. */
+  /**
+   * The scene each submit carried, so a test can see what the dater would get.
+   * Typed as the repo types it — any schema version — so a test has to say which
+   * version it expects rather than assume one.
+   */
+  readonly submittedScenes: ReadonlyArray<PitchSceneAnyVersion | null | undefined>;
+  /**
+   * What the scene builder was asked to build from, in call order. Empty when
+   * the harness runs the service's own default builder (`defaultSceneBuilder`),
+   * which is not wrapped.
+   */
   readonly sceneInputs: ReadonlyArray<{
+    readonly template: PitchSceneTemplate;
     readonly photoAssetIds: readonly string[];
     readonly segments: readonly PitchSceneSegment[];
   }>;
@@ -94,6 +111,11 @@ type Harness = {
   readonly assetRows: PitchAssetRow[];
   /** Asset ids detached through remove_pitch_draft_asset, in order. */
   readonly removedAssets: readonly string[];
+  /**
+   * Every scene demotion the submit path reported. The introducer is told nothing
+   * when a scene is dropped, so this is the observability the fallback owes.
+   */
+  readonly demotions: readonly PitchSceneDemotion[];
   currentDraft(): Promise<PitchDraft>;
 };
 
@@ -173,6 +195,24 @@ async function createHarness(options: {
   readonly serverTranscript?: unknown;
   /** Stands in for the contracts builder, whose own timing rules are tested there. */
   readonly buildScene?: PitchSceneBuilder;
+  /**
+   * Stands in for the server's own judgement of the scene it was sent: the error
+   * `submit_pitch_for_consent` would surface, or null to accept. Called on every
+   * attempt, so a test can reject the scene and accept the sceneless retry.
+   */
+  readonly rejectScene?: (scene: PitchSceneAnyVersion | null | undefined) => Error | null;
+  /**
+   * Constructs the service without a builder argument, so the submit runs the
+   * schema version the service itself defaults to. That default is the thing
+   * under test; injecting a builder would pass whatever version the test picked.
+   */
+  readonly defaultSceneBuilder?: boolean;
+  /**
+   * The `pitch_assets.id` the server hands back for a registered asset. Defaults
+   * to a readable name so most assertions can spell it out; the real builder
+   * only accepts uuids, so the tests that run it supply real ones.
+   */
+  readonly serverAssetId?: (kind: string, fileName: string, sortOrder: number) => string;
 }): Promise<Harness> {
   const puts = installFetchMock(options.putStatus ?? (() => 200));
   const uploads: string[] = [];
@@ -181,13 +221,15 @@ async function createHarness(options: {
     fileName: string;
     dimensions: AssetDimensions | undefined;
   }> = [];
-  const submittedScenes: Array<PitchSceneV1 | null | undefined> = [];
+  const submittedScenes: Array<PitchSceneAnyVersion | null | undefined> = [];
   const sceneInputs: Array<{
+    template: PitchSceneTemplate;
     photoAssetIds: readonly string[];
     segments: readonly PitchSceneSegment[];
   }> = [];
   const assetRows: PitchAssetRow[] = [];
   const removedAssets: string[] = [];
+  const demotions: PitchSceneDemotion[] = [];
   const validated: string[] = [];
   const values = new Map<string, string>();
   const local = createLocalService(values);
@@ -208,83 +250,104 @@ async function createHarness(options: {
   const unexpected = async (): Promise<never> => {
     throw new Error('Unexpected repository method');
   };
+  const repository: PitchDraftRepository = {
+    createDraft: unexpected,
+    getDraft: unexpected,
+    listAssets: async (): Promise<readonly PitchAssetRow[]> => [...assetRows],
+    // Models 0046: photos the caller uploaded, on a still-editable draft.
+    removeAsset: async (assetId): Promise<void> => {
+      if (options.removeAssetFails === true) {
+        throw new DataLayerError('pitchDraft.removeAsset', new Error('network request failed'));
+      }
+      const position = assetRows.findIndex((row) => row.id === assetId);
+      const row = assetRows[position];
+      if (row === undefined) {
+        throw new DataLayerError(
+          'pitchDraft.removeAsset',
+          new Error('pitch asset not found or not yours to remove'),
+        );
+      }
+      if (row.asset_type !== 'photo') {
+        throw new DataLayerError(
+          'pitchDraft.removeAsset',
+          new Error('the introducer voice recording cannot be removed'),
+        );
+      }
+      removedAssets.push(assetId);
+      assetRows.splice(position, 1);
+    },
+    listMyConsentRequests: unexpected,
+    listMyDrafts: unexpected,
+    submitForConsent: async (draftId, _invitation, scene): Promise<ConsentSubmission> => {
+      submittedScenes.push(scene);
+      const rejection = options.rejectScene?.(scene) ?? null;
+      if (rejection !== null) {
+        throw rejection;
+      }
+      return (options.submitForConsent ?? unexpected)(draftId);
+    },
+    updateDraft: async (): Promise<PitchDraftRow> =>
+      options.serverTranscript === undefined
+        ? SERVER_ROW
+        : { ...SERVER_ROW, transcript: options.serverTranscript as PitchDraftRow['transcript'] },
+    requestAssetUpload: async (draftId, fileName): Promise<SignedAssetUpload> => {
+      uploads.push(fileName);
+      return {
+        storagePath: `pitch-media/${draftId}/${fileName}`,
+        signedUrl: `https://storage.test/upload/${fileName}`,
+        token: 'signed-token',
+      };
+    },
+    registerAsset: async (
+      draftId,
+      kind,
+      fileName,
+      sortOrder,
+      dimensions,
+    ): Promise<PitchAssetRow> => {
+      registrations.push({ kind, fileName, dimensions });
+      const row: PitchAssetRow = {
+        id: (options.serverAssetId ?? ((_kind, name) => `asset-${name}`))(
+          kind,
+          fileName,
+          sortOrder ?? 0,
+        ),
+        pitch_draft_id: draftId,
+        uploaded_by_user_id: INTRODUCER_ID,
+        asset_type: kind,
+        storage_path: `pitch-media/${draftId}/${fileName}`,
+        sort_order: sortOrder ?? 0,
+        created_at: '2026-07-29T00:00:00.000Z',
+        updated_at: '2026-07-29T00:00:00.000Z',
+      };
+      assetRows.push(row);
+      return row;
+    },
+  };
+  const validate = async (objectName: string): Promise<MediaValidationOutcome> => {
+    validated.push(objectName);
+    return options.validate(objectName);
+  };
+  const recordingBuilder: PitchSceneBuilder = (input) => {
+    sceneInputs.push({
+      template: input.template,
+      photoAssetIds: input.photoAssetIds,
+      segments: input.segments,
+    });
+    return (options.buildScene ?? (() => null))(input);
+  };
   const service = new HybridPitchDraftService(
     SESSION_CLIENT,
     local,
-    {
-      createDraft: unexpected,
-      getDraft: unexpected,
-      listAssets: async (): Promise<readonly PitchAssetRow[]> => [...assetRows],
-      // Models 0046: photos the caller uploaded, on a still-editable draft.
-      removeAsset: async (assetId): Promise<void> => {
-        if (options.removeAssetFails === true) {
-          throw new DataLayerError('pitchDraft.removeAsset', new Error('network request failed'));
-        }
-        const position = assetRows.findIndex((row) => row.id === assetId);
-        const row = assetRows[position];
-        if (row === undefined) {
-          throw new DataLayerError(
-            'pitchDraft.removeAsset',
-            new Error('pitch asset not found or not yours to remove'),
-          );
-        }
-        if (row.asset_type !== 'photo') {
-          throw new DataLayerError(
-            'pitchDraft.removeAsset',
-            new Error('the introducer voice recording cannot be removed'),
-          );
-        }
-        removedAssets.push(assetId);
-        assetRows.splice(position, 1);
-      },
-      listMyConsentRequests: unexpected,
-      listMyDrafts: unexpected,
-      submitForConsent: async (draftId, _invitation, scene): Promise<ConsentSubmission> => {
-        submittedScenes.push(scene);
-        return (options.submitForConsent ?? unexpected)(draftId);
-      },
-      updateDraft: async (): Promise<PitchDraftRow> =>
-        options.serverTranscript === undefined
-          ? SERVER_ROW
-          : { ...SERVER_ROW, transcript: options.serverTranscript as PitchDraftRow['transcript'] },
-      requestAssetUpload: async (draftId, fileName): Promise<SignedAssetUpload> => {
-        uploads.push(fileName);
-        return {
-          storagePath: `pitch-media/${draftId}/${fileName}`,
-          signedUrl: `https://storage.test/upload/${fileName}`,
-          token: 'signed-token',
-        };
-      },
-      registerAsset: async (
-        draftId,
-        kind,
-        fileName,
-        sortOrder,
-        dimensions,
-      ): Promise<PitchAssetRow> => {
-        registrations.push({ kind, fileName, dimensions });
-        const row: PitchAssetRow = {
-          id: `asset-${fileName}`,
-          pitch_draft_id: draftId,
-          uploaded_by_user_id: INTRODUCER_ID,
-          asset_type: kind,
-          storage_path: `pitch-media/${draftId}/${fileName}`,
-          sort_order: sortOrder ?? 0,
-          created_at: '2026-07-29T00:00:00.000Z',
-          updated_at: '2026-07-29T00:00:00.000Z',
-        };
-        assetRows.push(row);
-        return row;
-      },
-    },
+    repository,
     8_000,
-    async (objectName) => {
-      validated.push(objectName);
-      return options.validate(objectName);
-    },
-    (input) => {
-      sceneInputs.push({ photoAssetIds: input.photoAssetIds, segments: input.segments });
-      return (options.buildScene ?? (() => null))(input);
+    validate,
+    // Undefined leaves the service on its own default builder, which is what the
+    // schema-version tests are checking; injecting one would pass whatever
+    // version the test picked.
+    options.defaultSceneBuilder === true ? undefined : recordingBuilder,
+    (demotion) => {
+      demotions.push(demotion);
     },
   );
   return {
@@ -300,6 +363,7 @@ async function createHarness(options: {
     values,
     assetRows,
     removedAssets,
+    demotions,
     currentDraft: async (): Promise<PitchDraft> => {
       const drafts = await local.getMyDrafts();
       const current = drafts.find((candidate) => candidate.id === draft.id);
@@ -728,15 +792,27 @@ describe('re-recording after the voice is stored', () => {
   });
 });
 
-const STUB_SCENE: PitchSceneV1 = {
-  schemaVersion: 1,
-  canvas: { width: 1080, height: 1920, fps: 30 },
-  durationMs: 4_000,
-  scenes: [
-    { assetId: '50000000-0000-4000-8000-000000000001', startMs: 0, endMs: 2_000 },
-    { assetId: '50000000-0000-4000-8000-000000000002', startMs: 2_000, endMs: 4_000 },
-  ],
-};
+/**
+ * The canonical v2 fixture from contracts, so this file cannot drift from the
+ * frozen schema — what the submit carries is asserted by identity, and the
+ * builder's own rules are tested where the builder lives.
+ */
+const STUB_SCENE: PitchSceneV2 = examplePitchSceneV2();
+
+/**
+ * A real rejection from `private.pitch_scene_violation` (0049), wrapped the way
+ * the repo wraps a PostgREST error: the message the fallback keys off is on the
+ * `cause`, not on the error the submit path catches.
+ *
+ * This particular rule is the one the builder and the DB were measured to
+ * disagree on (builder duration = max shot end, DB = last transcript element's
+ * end), so it is the rejection the fallback exists for.
+ */
+const SCENE_REJECTION_MESSAGE = 'pitch scene duration must match the transcript segments';
+const SCENE_REJECTION = new DataLayerError(
+  'pitchDraft.submitForConsent',
+  new Error(SCENE_REJECTION_MESSAGE),
+);
 
 /** A real /api/transcribe snapshot: seconds, with the text the captions use. */
 const SERVER_TRANSCRIPT = {
@@ -747,6 +823,45 @@ const SERVER_TRANSCRIPT = {
     { start: 1.84, end: 4.002, text: 'Then he unpacked every box.' },
   ],
 };
+
+/**
+ * A longer snapshot for the tests that run the real builder: enough recording
+ * for several shots, so a non-null scene does not depend on the shortest
+ * timeline the shot-length rules allow.
+ */
+const LONG_SERVER_TRANSCRIPT = {
+  text: 'Jordan drove four hours. Then he unpacked every box. He stayed until it was done. We ate cold pizza at midnight.',
+  language: 'en',
+  segments: [
+    { start: 0, end: 3.2, text: 'Jordan drove four hours.' },
+    { start: 3.2, end: 7.4, text: 'Then he unpacked every box.' },
+    { start: 7.4, end: 11.05, text: 'He stayed until it was done.' },
+    { start: 11.05, end: 15.5, text: 'We ate cold pizza at midnight.' },
+  ],
+};
+
+/**
+ * `pitch_assets.id` is a uuid on the server and the v2 builder rejects anything
+ * else, so the tests that run the real builder register these instead of the
+ * readable names the other tests assert on.
+ */
+const PHOTO_ASSET_UUIDS = [
+  '50000000-0000-4000-8000-000000000001',
+  '50000000-0000-4000-8000-000000000002',
+  '50000000-0000-4000-8000-000000000003',
+] as const;
+const VOICE_ASSET_UUID = '50000000-0000-4000-8000-0000000000a1';
+
+function serverAssetUuid(kind: string, fileName: string, sortOrder: number): string {
+  if (kind !== 'photo') {
+    return VOICE_ASSET_UUID;
+  }
+  const id = PHOTO_ASSET_UUIDS[sortOrder];
+  if (id === undefined) {
+    throw new Error(`No test asset uuid for photo ${sortOrder} (${fileName})`);
+  }
+  return id;
+}
 
 describe('the scene a submit sends for approval', () => {
   it('builds it from the saved transcript and the photo assets the submit will snapshot', async () => {
@@ -767,6 +882,9 @@ describe('the scene a submit sends for approval', () => {
     expect(harness.submittedScenes).toEqual([STUB_SCENE]);
     expect(harness.sceneInputs).toEqual([
       {
+        // No template picker exists yet; 'warm' matches the introduction the
+        // introducer just recorded.
+        template: 'warm',
         // Photos only, in sort order — the voice asset is not a scene.
         photoAssetIds: [
           `asset-${await storedPhotoObject(harness, 0)}`,
@@ -780,6 +898,36 @@ describe('the scene a submit sends for approval', () => {
         ],
       },
     ]);
+  });
+
+  it('sends a PitchScene v2 when it builds the scene itself', async () => {
+    const harness = await createHarness({
+      photos: [PHOTO_A, PHOTO_B],
+      validate: alwaysPassed,
+      submitForConsent: CONSENT_SUBMISSION,
+      serverTranscript: LONG_SERVER_TRANSCRIPT,
+      defaultSceneBuilder: true,
+      serverAssetId: serverAssetUuid,
+    });
+    await harness.service.uploadDraftMedia(harness.id);
+
+    await harness.service.finalizeConsent(harness.id);
+
+    // The dater approves the scene this device submits, and a v1 scene has no
+    // shots, crops or looks to approve — the motion pitch would stay flat.
+    expect(harness.submittedScenes[0]?.schemaVersion).toBe(2);
+    // Parsed, not just shaped: the DB rejects a scene the frozen schema refuses,
+    // so a submit that would fail on the server has to fail here.
+    const scene = pitchSceneV2Schema.parse(harness.submittedScenes[0]);
+    expect(scene.template).toBe('warm');
+    expect(scene.assetIds).toEqual([PHOTO_ASSET_UUIDS[0], PHOTO_ASSET_UUIDS[1]]);
+    // No word timings are passed, so no shot may reference one.
+    const wordPops = scene.shots.flatMap((shot) =>
+      shot.level === 'typographic'
+        ? []
+        : shot.effects.filter((effect) => effect.type === 'wordPop'),
+    );
+    expect(wordPops).toEqual([]);
   });
 
   it('sends no scene when the recording was never transcribed', async () => {
@@ -797,6 +945,22 @@ describe('the scene a submit sends for approval', () => {
     // timeline to approve. NULL is the honest answer; the surfaces fall back.
     expect(harness.submittedScenes).toEqual([null]);
     expect(harness.sceneInputs).toEqual([]);
+  });
+
+  it('still sends no scene on the v2 path when there is nothing to build from', async () => {
+    const harness = await createHarness({
+      photos: [PHOTO_A],
+      validate: alwaysPassed,
+      submitForConsent: CONSENT_SUBMISSION,
+      defaultSceneBuilder: true,
+    });
+    await harness.service.uploadDraftMedia(harness.id);
+
+    await harness.service.finalizeConsent(harness.id);
+
+    // Same contract as before v2: a manual pitch carries no transcript, so the
+    // revision gets no scene and the surfaces fall back to play-time windows.
+    expect(harness.submittedScenes).toEqual([null]);
   });
 
   it('leaves a photo the introducer removed out of the scene', async () => {
@@ -819,6 +983,112 @@ describe('the scene a submit sends for approval', () => {
     const keptObject = await storedPhotoObject(harness, 0);
     expect(harness.sceneInputs[0]?.photoAssetIds).toEqual([`asset-${keptObject}`]);
     expect(keptObject).not.toBe(removedObject);
+  });
+
+  it('sends the pitch without its scene when the server rejects the scene', async () => {
+    const harness = await createHarness({
+      photos: [PHOTO_A, PHOTO_B],
+      validate: alwaysPassed,
+      submitForConsent: CONSENT_SUBMISSION,
+      serverTranscript: SERVER_TRANSCRIPT,
+      buildScene: () => STUB_SCENE,
+      rejectScene: (scene) => (scene === null ? null : SCENE_REJECTION),
+    });
+    await harness.service.uploadDraftMedia(harness.id);
+
+    const finalized = await harness.service.finalizeConsent(harness.id);
+
+    // A scene is an enhancement — the surfaces play the pitch from the transcript
+    // without one — so a builder that disagrees with the DB validator on a single
+    // rule must not be able to block the introducer's submit.
+    expect(finalized.status).toBe('consent_pending');
+    expect(harness.submittedScenes).toEqual([STUB_SCENE, null]);
+    // Nothing tells the introducer their motion is gone, so this report is the
+    // only signal a builder regression is stripping motion from every submit.
+    expect(harness.demotions).toEqual([
+      { draftId: SERVER_DRAFT_ID, reason: SCENE_REJECTION_MESSAGE },
+    ]);
+  });
+
+  it('keeps a submit failure that is not the scene a failure', async () => {
+    const harness = await createHarness({
+      photos: [PHOTO_A],
+      validate: alwaysPassed,
+      submitForConsent: CONSENT_SUBMISSION,
+      serverTranscript: SERVER_TRANSCRIPT,
+      buildScene: () => STUB_SCENE,
+      rejectScene: () =>
+        new DataLayerError('pitchDraft.submitForConsent', new Error('network request failed')),
+    });
+    await harness.service.uploadDraftMedia(harness.id);
+
+    await expect(harness.service.finalizeConsent(harness.id)).rejects.toThrow(DataLayerError);
+
+    // Retrying without motion would not fix a dropped connection, an expired
+    // session or the media gate — and would hide them behind a lost scene.
+    expect(harness.submittedScenes).toEqual([STUB_SCENE]);
+    expect(harness.demotions).toEqual([]);
+  });
+
+  it('does not retry an error that only mentions a scene further into its text', async () => {
+    const harness = await createHarness({
+      photos: [PHOTO_A],
+      validate: alwaysPassed,
+      submitForConsent: CONSENT_SUBMISSION,
+      serverTranscript: SERVER_TRANSCRIPT,
+      buildScene: () => STUB_SCENE,
+      rejectScene: () =>
+        new DataLayerError(
+          'pitchDraft.submitForConsent',
+          // A Postgres context line, not a rejection: the fallback is anchored to
+          // the pinned message prefix so this cannot demote a real failure.
+          new Error('permission denied\nCONTEXT: pitch scene validation'),
+        ),
+    });
+    await harness.service.uploadDraftMedia(harness.id);
+
+    await expect(harness.service.finalizeConsent(harness.id)).rejects.toThrow(DataLayerError);
+
+    expect(harness.submittedScenes).toEqual([STUB_SCENE]);
+    expect(harness.demotions).toEqual([]);
+  });
+
+  it('gives up when the sceneless retry is rejected too', async () => {
+    const harness = await createHarness({
+      photos: [PHOTO_A],
+      validate: alwaysPassed,
+      submitForConsent: CONSENT_SUBMISSION,
+      serverTranscript: SERVER_TRANSCRIPT,
+      buildScene: () => STUB_SCENE,
+      rejectScene: () => SCENE_REJECTION,
+    });
+    await harness.service.uploadDraftMedia(harness.id);
+
+    await expect(harness.service.finalizeConsent(harness.id)).rejects.toThrow(DataLayerError);
+
+    // One retry, never a loop: a sceneless submit that still fails is not failing
+    // because of the scene.
+    expect(harness.submittedScenes).toEqual([STUB_SCENE, null]);
+    expect(harness.demotions).toHaveLength(1);
+  });
+
+  it('does not report a demotion for a pitch that never had a scene to lose', async () => {
+    const harness = await createHarness({
+      photos: [PHOTO_A],
+      validate: alwaysPassed,
+      submitForConsent: CONSENT_SUBMISSION,
+      // No transcript, so the scene is null before the submit is attempted.
+      buildScene: () => STUB_SCENE,
+      rejectScene: () => SCENE_REJECTION,
+    });
+    await harness.service.uploadDraftMedia(harness.id);
+
+    await expect(harness.service.finalizeConsent(harness.id)).rejects.toThrow(DataLayerError);
+
+    // A manual pitch always submits sceneless; calling that a demotion would make
+    // the log useless for spotting a builder regression.
+    expect(harness.submittedScenes).toEqual([null]);
+    expect(harness.demotions).toEqual([]);
   });
 
   it('records the pixel size of each photo it registers, and none for the voice', async () => {

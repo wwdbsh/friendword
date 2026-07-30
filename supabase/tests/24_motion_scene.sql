@@ -26,8 +26,14 @@ BEGIN
     RAISE EXCEPTION
       'D24: create_dater_revision(uuid,text,text,uuid[],jsonb,text[],jsonb) RPC missing';
   END IF;
-  IF to_regprocedure('private.assert_scene_definition(jsonb,integer,uuid[])') IS NULL THEN
-    RAISE EXCEPTION 'D24: private.assert_scene_definition(jsonb,integer,uuid[]) missing';
+  -- 0049 widened the validator's argument list: a v2 scene references a
+  -- transcript word and a structure field, so both documents travel with it.
+  -- The v1 rules this suite pins are unchanged behind it.
+  IF to_regprocedure(
+    'private.assert_scene_definition(jsonb,integer,uuid[],jsonb,jsonb)'
+  ) IS NULL THEN
+    RAISE EXCEPTION
+      'D24: private.assert_scene_definition(jsonb,integer,uuid[],jsonb,jsonb) missing';
   END IF;
   IF to_regprocedure('private.pitch_transcript_duration_ms(jsonb)') IS NULL THEN
     RAISE EXCEPTION 'D24: private.pitch_transcript_duration_ms(jsonb) missing';
@@ -297,13 +303,24 @@ BEGIN
     failures := array_append(failures, 'the valid scene was rejected: ' || reason);
   END IF;
 
-  -- Envelope shape.
+  -- Envelope shape. Since 0049 the schemaVersion is a real dispatch key: a
+  -- payload claiming 2 is judged by the v2 rules, and a v1 envelope fails their
+  -- key check. Every other version, 3 included, still lands on v1's refusal.
   reason := pg_temp.submit_reject_reason(
     draft, jsonb_set(valid_scene, '{schemaVersion}', '2'::JSONB)
   );
+  IF reason IS DISTINCT FROM
+     'pitch scene must carry only schemaVersion, template, canvas, durationMs, assetIds, shots, look, chrome and overlays' THEN
+    failures := array_append(failures,
+      'a v1 envelope claiming schemaVersion 2 was not rejected: '
+      || coalesce(reason, 'ACCEPTED'));
+  END IF;
+  reason := pg_temp.submit_reject_reason(
+    draft, jsonb_set(valid_scene, '{schemaVersion}', '3'::JSONB)
+  );
   IF reason IS DISTINCT FROM 'pitch scene schemaVersion must be 1' THEN
     failures := array_append(failures,
-      'schemaVersion 2 was not rejected: ' || coalesce(reason, 'ACCEPTED'));
+      'schemaVersion 3 was not rejected: ' || coalesce(reason, 'ACCEPTED'));
   END IF;
 
   -- An unknown envelope key is refused, not ignored: a tolerated text field

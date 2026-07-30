@@ -2,7 +2,11 @@
 // photo windows it plays. Pure so both the consent preview and the public page
 // can be proven to use the same windows for the same scene.
 
-import { MIN_SCENE_DURATION_MS, type PitchSceneV1 } from '@friendword/contracts';
+import {
+  isPitchSceneV1,
+  MIN_SCENE_DURATION_MS,
+  type PitchSceneAnyVersion,
+} from '@friendword/contracts';
 
 import { activeWindowIndex, distributePhotoScenes, type SceneWindow } from './scenes';
 
@@ -20,15 +24,20 @@ export type MotionWindow = {
  * would leave holes or show a photo that is no longer included. Callers fall
  * back to `legacyMotionWindows` (A4) rather than render a partial timeline.
  *
+ * A v2 scene also returns null: it is a shot list, not a window list, and
+ * flattening it here would throw away the crops and effects the Dater approved.
+ * Its own interpreter is `src/pitch/sceneV2.ts`, and the player checks for it
+ * BEFORE reaching this function.
+ *
  * The windows are used VERBATIM. Recomputing them here from a duration would
  * reintroduce the drift this phase exists to remove: the Dater approves the
  * scene JSON, so playback has to be that JSON and nothing else.
  */
 export function sceneMotionWindows(
-  scene: PitchSceneV1 | null,
+  scene: PitchSceneAnyVersion | null,
   photoAssetIds: readonly (string | null)[],
 ): readonly MotionWindow[] | null {
-  if (scene === null) {
+  if (scene === null || !isPitchSceneV1(scene)) {
     return null;
   }
   const windows: MotionWindow[] = [];
@@ -82,7 +91,9 @@ export function activeMotionPhotoIndex(
  * the measurement differs per browser, and the Dater approved the scene.
  */
 export function sceneDurationDriftMs(
-  scene: PitchSceneV1 | null,
+  // Any scene version: the drift is about the one field every version has, and
+  // the answer is a log line either way.
+  scene: { readonly durationMs: number } | null,
   measuredDurationMs: number | null,
 ): number | null {
   if (scene === null || measuredDurationMs === null || measuredDurationMs <= 0) {

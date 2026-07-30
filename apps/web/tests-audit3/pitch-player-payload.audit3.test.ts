@@ -15,6 +15,8 @@
 // the player draws.
 /* global describe, expect, it */
 
+import { examplePitchSceneV2 } from '@friendword/contracts';
+
 import {
   daterControlLine,
   structureProvenanceLine,
@@ -94,7 +96,43 @@ describe('[D5] the public page ships nothing the reader is not shown', () => {
       // MOTION PHASE 1: asset ids and integer timings. A scene carries no text
       // by construction, so widening the projection with it cannot leak copy.
       'scene',
+      // MOTION PHASE 2: the two things a v2 scene REFERENCES rather than carries.
+      // Both are empty/null here because this row has no scene at all — see the
+      // next test for the rule that decides when they travel.
+      'sceneText',
+      'sceneWords',
     ]);
+  });
+
+  it('ships the referenced copy only when the approved scene prints it', () => {
+    // A v2 text card IS a reviewed sentence, animated, so the player has to be
+    // given that sentence — and a page whose scene has no card must not be. The
+    // deciding fact is the scene, never the row's structure.
+    const withoutScene = toPitchPlayerView(fromPublishedPitch(publishedPitch()));
+
+    expect(withoutScene.sceneText).toBeNull();
+    expect(withoutScene.sceneWords).toEqual([]);
+
+    const cardScene = examplePitchSceneV2();
+    const withCard = toPitchPlayerView(
+      fromPublishedPitch(
+        publishedPitch({
+          scene: cardScene,
+          transcriptWords: [{ segmentIndex: 0, wordIndex: 3, startMs: 10, endMs: 20, text: 'own' }],
+        }),
+      ),
+    );
+
+    // The stored v2 scene reaches the player as v2, unflattened…
+    expect(withCard.scene?.schemaVersion).toBe(2);
+    // …the canonical scene carries a `hook` card, a `quality:0` badge and two
+    // wordPops, so both lists travel…
+    expect(withCard.sceneText?.hook).toBe('Blair, in Blair’s own words.');
+    expect(withCard.sceneWords).toEqual([{ segmentIndex: 0, wordIndex: 3, text: 'own' }]);
+    // …and the flag the page never prints still does not.
+    expect(JSON.stringify(withCard)).not.toContain(HARD_CLAIM);
+    expect(JSON.stringify(withCard)).not.toContain('hard_claims_requiring_confirmation');
+    expect(JSON.stringify(withCard)).not.toContain(APPROVED_BODY);
   });
 
   it('still gives the player the captions it renders', () => {

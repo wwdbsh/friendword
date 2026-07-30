@@ -688,6 +688,8 @@ describe('ConsentRepo', () => {
       // the revision's own frozen snapshot, not the live draft's.
       transcriptText: 'Blair is the best. ',
       transcriptSegments: [],
+      // No segments -> nothing for a word reference to point into (A7).
+      transcriptWords: [],
       // No segments -> no legal scene; the preview falls back (A4).
       scene: null,
       daterEdited: false,
@@ -1800,6 +1802,7 @@ describe('getPublishedPitchBySlug', () => {
       // draftRow has no `scene_definition`: a row published before migration
       // 0048, so the player falls back to the legacy runtime distribution (A4).
       scene: null,
+      transcriptWords: [],
     });
   });
 

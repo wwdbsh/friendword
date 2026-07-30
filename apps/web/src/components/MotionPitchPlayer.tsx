@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-import type { PitchSceneV1 } from '@friendword/contracts';
+import type { PitchSceneAnyVersion } from '@friendword/contracts';
 
 import type { PitchCaption } from '@/fixtures/pitch';
 import {
@@ -15,7 +15,17 @@ import {
   type MotionWindow,
 } from '@/pitch/motion';
 import { activeWindowIndex, type SceneWindow } from '@/pitch/scenes';
+import {
+  asPitchSceneV2,
+  sceneV2ActivePhotoIndex,
+  sceneV2Frame,
+  sceneV2PhotoIndexes,
+  sceneV2ShotSignature,
+  type SceneTextFields,
+  type SceneWord,
+} from '@/pitch/sceneV2';
 
+import { MotionSceneV2 } from './MotionSceneV2';
 import styles from './PitchPlayer.module.css';
 
 // The one player for an approved motion pitch. Both surfaces that must agree —
@@ -26,6 +36,11 @@ import styles from './PitchPlayer.module.css';
 // The <audio> element's metadata duration is used for the clock and the time
 // readout only; it never re-derives a window, because it differs per browser and
 // the Dater approved the scene, not the browser's measurement.
+//
+// A v2 scene (a shot list with crops, effects and text cards) is handed to
+// `MotionSceneV2`; a v1 scene keeps the original crossfade path, and a row with
+// no scene keeps the legacy runtime distribution (A4). Nothing is backfilled: a
+// v1 row plays as v1 forever, because nobody approved a v2 timeline for it.
 
 export type MotionPhoto = {
   /** pitch_assets id, or null for imagery no scene can reference (fixtures). */
@@ -36,9 +51,21 @@ export type MotionPhoto = {
 
 export type MotionPitchPlayerProps = {
   readonly photos: readonly MotionPhoto[];
-  readonly scene: PitchSceneV1 | null;
+  readonly scene: PitchSceneAnyVersion | null;
   /** Segment-level captions with the provider's real timestamps. */
   readonly captions: readonly PitchCaption[];
+  /**
+   * Transcript words with the (segmentIndex, wordIndex) pairs a v2 `wordPop`
+   * references. Absent or short means the accent is silently skipped — never a
+   * placeholder word (see src/pitch/sceneV2.ts).
+   */
+  readonly sceneWords?: readonly SceneWord[];
+  /**
+   * The five reviewed sentences a v2 text card may print. Null skips every card:
+   * a scene names a field, so the text has to come from the revision, and a
+   * revision that carries none must show nothing rather than invent a line.
+   */
+  readonly sceneText?: SceneTextFields | null;
   readonly audioUrl: string | null;
   /** Duration to show before the media reports its own; 0 when unknown. */
   readonly fallbackDurationMs: number;
@@ -80,9 +107,33 @@ function PlayIcon({ paused }: { readonly paused: boolean }) {
   );
 }
 
+/**
+ * Live `prefers-reduced-motion`. Defaults to false so the server render and the
+ * first client render agree, then corrects on mount and tracks changes — a viewer
+ * who turns the setting on mid-page gets the still version without a reload.
+ */
+function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReduced(query.matches);
+    const onChange = (event: MediaQueryListEvent) => setReduced(event.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+
+  return reduced;
+}
+
 export function MotionPitchPlayer({
   photos,
   scene,
+  sceneWords = [],
+  sceneText = null,
   captions,
   audioUrl,
   fallbackDurationMs,
@@ -102,11 +153,25 @@ export function MotionPitchPlayer({
   const audioRef = useRef<HTMLAudioElement>(null);
   const hasRealAudio = audioUrl !== null;
 
+  const reducedMotion = useReducedMotion();
+
   const photoAssetIds = useMemo(() => photos.map((photo) => photo.assetId), [photos]);
+  // v1 and v2 are separate paths on purpose: v1 rows were approved as a
+  // crossfade of photo windows, and re-interpreting them as a shot list would be
+  // handing the Dater's approval to a timeline they never saw (A4). Each reader
+  // returns null for the other's version.
+  const sceneV2 = asPitchSceneV2(scene);
   const approvedWindows = useMemo(
     () => sceneMotionWindows(scene, photoAssetIds),
     [scene, photoAssetIds],
   );
+  // Fails closed exactly like the v1 binding: a scene naming a photo this page
+  // does not render falls back rather than playing a timeline with holes.
+  const sceneV2PhotoIndex = useMemo(
+    () => (sceneV2 === null ? null : sceneV2PhotoIndexes(sceneV2, photoAssetIds)),
+    [sceneV2, photoAssetIds],
+  );
+  const playableSceneV2 = sceneV2 !== null && sceneV2PhotoIndex !== null ? sceneV2 : null;
 
   const segmentWindows: readonly SceneWindow[] = useMemo(
     () => captions.map((caption) => ({ startMs: caption.startMs, endMs: caption.endMs })),
@@ -211,7 +276,29 @@ export function MotionPitchPlayer({
   const progress = durationMs > 0 ? Math.min(1, elapsedMs / durationMs) : 0;
   const progressPercent = Math.round(progress * 100);
 
-  const activePhotoIndex = hasRealAudio ? activeMotionPhotoIndex(windows, elapsedMs) : 0;
+  // The v2 stage recomputes its own frame at animation rate; this one exists for
+  // the QA attribute below and is deliberately driven by the same 4Hz clock the
+  // rest of the shell uses.
+  const shellFrame =
+    playableSceneV2 === null || sceneV2PhotoIndex === null
+      ? null
+      : sceneV2Frame(playableSceneV2, sceneV2PhotoIndex, hasRealAudio ? elapsedMs : 0, {
+          words: sceneWords,
+          text: sceneText,
+          reducedMotion,
+        });
+  const activePhotoIndex =
+    shellFrame !== null
+      ? sceneV2ActivePhotoIndex(shellFrame)
+      : hasRealAudio
+        ? activeMotionPhotoIndex(windows, elapsedMs)
+        : 0;
+  const motionSource =
+    playableSceneV2 !== null ? 'scene-v2' : approvedWindows === null ? 'legacy' : 'scene';
+  const motionWindows =
+    playableSceneV2 !== null && sceneV2PhotoIndex !== null
+      ? sceneV2ShotSignature(playableSceneV2, sceneV2PhotoIndex)
+      : motionWindowSignature(windows);
 
   // Captions are segment-level (real provider timestamps), not fabricated
   // per-word highlights. The active segment is shown as a whole.
@@ -238,9 +325,12 @@ export function MotionPitchPlayer({
       // QA/regression hooks: which timeline is playing, and exactly which
       // windows. The consent preview and the published page must print the same
       // signature for the same approved scene.
-      data-motion-source={approvedWindows === null ? 'legacy' : 'scene'}
-      data-motion-windows={motionWindowSignature(windows)}
+      data-motion-source={motionSource}
+      data-motion-windows={motionWindows}
       data-motion-active-photo={activePhotoIndex}
+      // Accessibility and photosensitivity are the same switch here: with it on,
+      // the v2 stage drops travel, punch, flash and animated grain.
+      data-motion-reduced-motion={reducedMotion ? 'true' : 'false'}
     >
       {audioUrl !== null && (
         <audio
@@ -262,35 +352,50 @@ export function MotionPitchPlayer({
         />
       )}
       <article className={styles.stage}>
-        <div className={styles.photos}>
-          {photos.map((photo, index) =>
-            imageMode === 'plain' ? (
-              <img
-                className={`${styles.photo} ${index === activePhotoIndex ? styles.photoActive : ''}`}
-                key={photo.src}
-                src={photo.src}
-                alt={photo.alt}
-                aria-hidden={index !== activePhotoIndex}
-                data-motion-photo={photo.assetId ?? ''}
-                loading={index === 0 ? 'eager' : 'lazy'}
-                decoding="async"
-              />
-            ) : (
-              <Image
-                className={`${styles.photo} ${index === activePhotoIndex ? styles.photoActive : ''}`}
-                key={photo.src}
-                src={photo.src}
-                alt={photo.alt}
-                aria-hidden={index !== activePhotoIndex}
-                data-motion-photo={photo.assetId ?? ''}
-                fill
-                priority={index === 0}
-                sizes="(max-width: 700px) 100vw, 506px"
-              />
-            ),
-          )}
-          <div className={styles.photoWash} />
-        </div>
+        {playableSceneV2 !== null && sceneV2PhotoIndex !== null ? (
+          <MotionSceneV2
+            scene={playableSceneV2}
+            photoIndexes={sceneV2PhotoIndex}
+            photos={photos}
+            words={sceneWords}
+            text={sceneText}
+            reducedMotion={reducedMotion}
+            elapsedMs={hasRealAudio ? elapsedMs : 0}
+            isPlaying={isPlaying}
+            clock={audioRef}
+            imageMode={imageMode}
+          />
+        ) : (
+          <div className={styles.photos}>
+            {photos.map((photo, index) =>
+              imageMode === 'plain' ? (
+                <img
+                  className={`${styles.photo} ${index === activePhotoIndex ? styles.photoActive : ''}`}
+                  key={photo.src}
+                  src={photo.src}
+                  alt={photo.alt}
+                  aria-hidden={index !== activePhotoIndex}
+                  data-motion-photo={photo.assetId ?? ''}
+                  loading={index === 0 ? 'eager' : 'lazy'}
+                  decoding="async"
+                />
+              ) : (
+                <Image
+                  className={`${styles.photo} ${index === activePhotoIndex ? styles.photoActive : ''}`}
+                  key={photo.src}
+                  src={photo.src}
+                  alt={photo.alt}
+                  aria-hidden={index !== activePhotoIndex}
+                  data-motion-photo={photo.assetId ?? ''}
+                  fill
+                  priority={index === 0}
+                  sizes="(max-width: 700px) 100vw, 506px"
+                />
+              ),
+            )}
+          </div>
+        )}
+        <div className={styles.photoWash} />
 
         {header}
 

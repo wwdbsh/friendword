@@ -75,6 +75,8 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
       <MotionPitchPlayer
         photos={pitch.photos}
         scene={pitch.scene}
+        sceneWords={pitch.sceneWords}
+        sceneText={pitch.sceneText}
         captions={pitch.captions}
         audioUrl={pitch.audioUrl}
         fallbackDurationMs={pitch.durationMs}

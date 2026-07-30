@@ -1,0 +1,192 @@
+/* The v2 stage. Every layer here is positioned by the interpreter's numbers; the
+   only thing this file decides is what a template LOOKS like (colour, type,
+   scrim), because a v2 scene carries no colour and no font by construction. */
+
+.scene {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* The canvas-fitted frame the crop maths is normalized against. Do not change
+     object-fit or transform-origin without a new schemaVersion: the crop rect
+     means "a square of THIS box, about its centre". */
+  object-fit: cover;
+  transform-origin: center;
+  opacity: 0;
+}
+
+.photoVisible {
+  opacity: 1;
+}
+
+/* Reduced motion: the shot list still plays, held still, and the cut is asked to
+   crossfade like v1 did.
+
+   Honest caveat: globals.css collapses every transition to 0s under the system
+   reduce-motion setting (audit D-P1), so in that mode this rule loses and the cut
+   is a hard cut. It is inside the flash budget either way — shots are at least
+   1200ms long — but it is NOT a crossfade, and the only ramp that survives the
+   collapse is the one the interpreter computes per frame (see the text layers). */
+.reduced .photo {
+  transition: opacity var(--motion-slow) var(--motion-ease-out);
+}
+
+.dim,
+.warmth,
+.vignette,
+.grain,
+.lightLeak {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.dim {
+  background: var(--color-stage);
+}
+
+.warmth {
+  mix-blend-mode: soft-light;
+}
+
+.warmthWarm {
+  background: var(--color-pop);
+}
+
+.warmthCool {
+  background: var(--color-fresh);
+}
+
+.vignette {
+  background: radial-gradient(
+    ellipse at center,
+    transparent 42%,
+    color-mix(in srgb, var(--color-ink) 88%, transparent) 100%
+  );
+}
+
+.grain {
+  mix-blend-mode: overlay;
+}
+
+.lightLeak {
+  mix-blend-mode: screen;
+}
+
+.card,
+.badge,
+.wordPop {
+  position: absolute;
+  z-index: 1;
+  margin: 0;
+  color: var(--color-stage-text);
+  text-shadow: 0 2px 0 color-mix(in srgb, var(--color-ink) 70%, transparent);
+}
+
+.card {
+  top: 50%;
+  right: var(--space-lg);
+  left: var(--space-lg);
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(var(--font-size-xl), 6dvh, var(--font-size-hero));
+  line-height: var(--line-tight);
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+  transform: translateY(-50%);
+  transform-origin: left center;
+}
+
+.badge {
+  top: 33%;
+  right: var(--space-lg);
+  left: var(--space-lg);
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(var(--font-size-lg), 4dvh, var(--font-size-xl));
+  line-height: var(--line-tight);
+  text-align: center;
+}
+
+/* TikTok's own creative guidance warns against white text with no backing (the
+   app's chrome is white too), so every text layer here carries a scrim.
+
+   That scrim is why .card, .badge and .wordPop carry NO transition and NO
+   animation: their opacity arrives from the interpreter, already ramped over
+   MIN_TEXT_RAMP_MS on both edges (F3). A CSS transition here would be defeated
+   under reduce-motion anyway, and would otherwise make the fade's real shape
+   depend on the browser's frame pacing — while an approved v2 frame has to be a
+   function of the scene and the clock. */
+.wordPop {
+  right: var(--space-lg);
+  bottom: 16rem;
+  left: var(--space-lg);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-stage) 62%, transparent);
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(var(--font-size-lg), 4.5dvh, var(--font-size-xl));
+  text-align: center;
+  transform-origin: center;
+}
+
+.progressBar {
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  left: 0;
+  background: color-mix(in srgb, var(--color-stage-text) 30%, transparent);
+}
+
+.progressBarTop {
+  top: 0;
+}
+
+.progressBarBottom {
+  bottom: 0;
+}
+
+.progressFill {
+  height: 100%;
+  background: var(--color-flirt);
+}
+
+/* The template's whole visual identity, in one place. `warm` is the zine look
+   the rest of the product already uses; `hype` is louder and higher contrast. */
+.scene[data-motion-template='hype'] .card,
+.scene[data-motion-template='hype'] .badge {
+  color: var(--color-hype);
+}
+
+.scene[data-motion-template='hype'] .wordPop {
+  background: var(--color-flirt);
+  color: var(--color-ink);
+}
+
+.scene[data-motion-template='hype'] .progressFill {
+  background: var(--color-hype);
+}
+
+@media (max-width: 700px) {
+  .card,
+  .badge,
+  .wordPop {
+    right: var(--space-md);
+    left: var(--space-md);
+  }
+
+  .wordPop {
+    bottom: 12rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .photo {
+    transition: opacity var(--motion-slow) var(--motion-ease-out);
+  }
+}

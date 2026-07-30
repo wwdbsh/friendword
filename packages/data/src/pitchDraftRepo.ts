@@ -3,13 +3,19 @@ import { z } from 'zod';
 import {
   pitchStructureSchema,
   type DraftInputs,
-  type PitchSceneV1,
+  type PitchSceneAnyVersion,
   type PitchStructure,
 } from '@friendword/contracts';
 import type { Session } from '@supabase/supabase-js';
 
 import type { BrowserSupabaseClient } from './client';
-import type { ConsentRequestRow, Database, PitchAssetRow, PitchDraftRow } from './database.types';
+import type {
+  ConsentRequestRow,
+  Database,
+  Json,
+  PitchAssetRow,
+  PitchDraftRow,
+} from './database.types';
 import {
   DataLayerError,
   InvalidDraftUpdateError,
@@ -56,15 +62,27 @@ type PitchAssetInsert = Omit<
 
 /**
  * `new_scene` is the 5th parameter migration 0048 adds to
- * `submit_pitch_for_consent`. Declared as the typed scene rather than raw JSON
- * so a caller cannot hand the RPC a shape the DB would reject.
+ * `submit_pitch_for_consent`. The public entry point takes the typed scene so a
+ * caller cannot hand the RPC a shape the DB would reject; the wire form is Json,
+ * because the generated `Json` type cannot express an optional key that is
+ * present-but-undefined (a v2 scene's `chrome.progressBar`) and `sceneAsJson`
+ * removes those keys for real rather than casting the difference away.
  */
 type SubmitPitchForConsentArgs = Omit<
   Database['public']['Functions']['submit_pitch_for_consent']['Args'],
   'new_scene'
 > & {
-  readonly new_scene?: PitchSceneV1 | null;
+  readonly new_scene?: Json;
 };
+
+/**
+ * A parsed scene holds only JSON values, so this is a narrowing rather than a
+ * conversion — the round trip exists to drop keys whose value is `undefined`,
+ * exactly as the request serializer would, so the typed args match what is sent.
+ */
+function sceneAsJson(scene: PitchSceneAnyVersion | null): Json {
+  return scene === null ? null : (JSON.parse(JSON.stringify(scene)) as Json);
+}
 
 export type SignedAssetUpload = {
   readonly storagePath: string;
@@ -322,7 +340,8 @@ export class PitchDraftRepo {
    * Returns the raw consent token exactly once — only its hash is stored,
    * so the caller must hand it to the introducer's share flow immediately.
    *
-   * `scene` is the PitchScene v1 the dater will be asked to approve. It is sent
+   * `scene` is the PitchScene the dater will be asked to approve — v2 from a
+   * current bundle, v1 from an older one, since both stay valid writes. It is sent
    * at submit because a dater who approves without editing never triggers a
    * revision save, and their published page would then carry no motion. `null`
    * is a real answer (no transcript segments, no photos) and leaves the revision
@@ -332,7 +351,7 @@ export class PitchDraftRepo {
   async submitForConsent(
     draftId: string,
     invitation?: ConsentInvitationInput,
-    scene?: PitchSceneV1 | null,
+    scene?: PitchSceneAnyVersion | null,
   ): Promise<ConsentSubmission> {
     await this.getRequiredSession();
     const parsedDraftId = uuidSchema.parse(draftId);
@@ -340,7 +359,7 @@ export class PitchDraftRepo {
       ...(invitation === undefined
         ? { draft_id: parsedDraftId }
         : buildConsentInvitationArgs(parsedDraftId, invitation)),
-      ...(scene === undefined ? {} : { new_scene: scene }),
+      ...(scene === undefined ? {} : { new_scene: sceneAsJson(scene) }),
     };
     const { data, error } = await this.client.rpc('submit_pitch_for_consent', args);
     if (error !== null) {

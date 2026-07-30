@@ -4,10 +4,11 @@ import {
   daterPitchStructureEditSchema,
   deriveDaterPitchBody,
   deriveDaterPitchHeadline,
-  pitchSceneV1Schema,
+  parsePitchScene,
+  pitchSceneSchema,
   pitchStructureSchema,
   type DaterPitchStructureEdit,
-  type PitchSceneV1,
+  type PitchSceneAnyVersion,
 } from '@friendword/contracts';
 
 import type { RelationshipDuration, RelationshipType } from '@friendword/contracts';
@@ -16,6 +17,7 @@ import type { Session } from '@supabase/supabase-js';
 import type { BrowserSupabaseClient } from './client';
 import type { PitchAssetRow } from './database.types';
 import { DataLayerError, UnauthenticatedError } from './errors';
+import { indexTranscriptWords, type IndexedTranscriptWord } from './transcriptWordIndex';
 
 const rawTokenSchema = z
   .string()
@@ -54,8 +56,10 @@ const daterRevisionInputSchema = z.object({
   // ever shrink the list.
   retainedHardClaims: z.array(z.string().trim().min(1)).optional(),
   // The motion timeline this save freezes (migration 0048). Validated here so a
-  // scene that would fail the DB's safety floors never leaves the client.
-  newScene: pitchSceneV1Schema.optional(),
+  // scene that would fail the shared safety floors never leaves the client.
+  // Either version: v2 is what this app builds now, and v1 writes stay accepted
+  // because an older mobile bundle still submits them.
+  newScene: pitchSceneSchema.optional(),
 });
 
 const daterProfileSchema = z
@@ -157,14 +161,24 @@ export type ConsentReview = {
    */
   readonly transcriptSegments: readonly TranscriptSegmentWindow[];
   /**
-   * The motion timeline the Dater is approving, exactly as the server stored it
-   * (migration 0048). Null on a legacy revision, on a recording with no
-   * segments, or when the stored JSON fails the safety floors — the preview then
-   * falls back instead of playing an illegal timeline. The consent UI MUST
-   * render this value and never a locally built scene: "what I saw" only equals
-   * "what was approved" if the bytes came back from the server.
+   * The same snapshot's provider word timings, each carrying the
+   * (segmentIndex, wordIndex) pair a v2 `wordPop` references (A7). Empty on a
+   * recording transcribed before word timings were requested, on a manual pitch,
+   * and whenever the snapshot has no segments to index against — the scene
+   * builder then degrades to segment rhythm and no word accent is built, which
+   * is also the only state the DB accepts a scene without wordPops in.
    */
-  readonly scene: PitchSceneV1 | null;
+  readonly transcriptWords: readonly IndexedTranscriptWord[];
+  /**
+   * The motion timeline the Dater is approving, exactly as the server stored it
+   * (migration 0048), in whichever schemaVersion the row holds. Null on a legacy
+   * revision, on a recording with no segments, or when the stored JSON fails the
+   * safety floors — the preview then falls back instead of playing an illegal
+   * timeline. The consent UI MUST render this value and never a locally built
+   * scene: "what I saw" only equals "what was approved" if the bytes came back
+   * from the server.
+   */
+  readonly scene: PitchSceneAnyVersion | null;
   /**
    * True when the current revision was cut by the Dater editing the copy
    * (third audit P0-NEW-3). The approve gate then requires an explicit
@@ -227,10 +241,11 @@ export type DaterRevisionInput = {
   /**
    * The motion timeline to freeze with this revision. Omit (do not pass null) to
    * let the server forward-copy the previous revision's scene against the new
-   * asset snapshot. Build it with `buildPitchSceneV1` from the revision's own
-   * transcript segments and the included photo ids, in play order.
+   * asset snapshot. Build it with `buildPitchSceneV2` from the revision's own
+   * transcript segments and words and the included photo ids, in play order; a
+   * v1 scene stays accepted for callers that predate v2.
    */
-  readonly newScene?: PitchSceneV1;
+  readonly newScene?: PitchSceneAnyVersion;
 };
 
 export type DaterRevisionResult = {
@@ -474,11 +489,17 @@ export class ConsentRepo {
     const transcriptText =
       transcript === null || transcript.text.trim() === '' ? null : transcript.text;
     const transcriptSegments = transcript === null ? [] : segmentWindows(transcript.segments);
+    // Read off the raw snapshot rather than the parsed one: `words` is additive
+    // (A7) and the parse above only pins the fields this repo needs.
+    const transcriptWords = indexTranscriptWords(
+      (revision as { readonly transcript?: unknown }).transcript ?? null,
+      transcriptSegments,
+    );
 
-    // The scene is read back as stored (migration 0048). A stored scene that
-    // fails the shared safety floors reads as absent, so the surface falls back
-    // to the legacy runtime distribution rather than playing a strobe.
-    const parsedScene = pitchSceneV1Schema.safeParse(
+    // The scene is read back as stored (migration 0048), v1 or v2. A stored scene
+    // that fails the shared safety floors reads as absent, so the surface falls
+    // back to the legacy runtime distribution rather than playing a strobe.
+    const parsedScene = parsePitchScene(
       (revision as { readonly scene_definition?: unknown }).scene_definition ?? null,
     );
 
@@ -493,7 +514,8 @@ export class ConsentRepo {
       editableStructure: parsedEditable.success ? parsedEditable.data : null,
       transcriptText,
       transcriptSegments,
-      scene: parsedScene.success ? parsedScene.data : null,
+      transcriptWords,
+      scene: parsedScene,
       daterEdited,
       structureReviewed,
     };

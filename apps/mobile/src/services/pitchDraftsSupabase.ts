@@ -5,19 +5,27 @@ import {
   type AssetDimensions,
   type BrowserSupabaseClient,
   type ConsentRequestRow,
+  type ConsentSubmission,
   type PitchDraftRow,
 } from '@friendword/data';
 import {
-  buildPitchSceneV1,
+  buildPitchSceneV2,
   type DraftInputs,
-  type PitchSceneV1,
+  type PitchSceneV2,
   type RelationshipDuration as ServerRelationshipDuration,
   type RelationshipType as ServerRelationshipType,
 } from '@friendword/contracts';
 
 import { photoMimeType, photoObjectName, putLocalFile } from './mediaFiles';
 import { requestMediaValidation, type MediaValidationOutcome } from './mediaValidation';
-import { transcriptSegmentWindows, type PitchSceneBuilder } from './pitchSceneInput';
+import {
+  PITCH_SCENE_TEMPLATE,
+  pitchSceneRejectionMessage,
+  reportPitchSceneDemotion,
+  transcriptSegmentWindows,
+  type PitchSceneBuilder,
+  type PitchSceneDemotionReporter,
+} from './pitchSceneInput';
 import { requestPitchTextModeration } from './textModeration';
 import {
   MockPitchDraftService,
@@ -42,7 +50,7 @@ import {
   type UploadedAsset,
 } from './types';
 
-type PitchDraftRepository = Pick<
+export type PitchDraftRepository = Pick<
   PitchDraftRepo,
   | 'createDraft'
   | 'getDraft'
@@ -231,7 +239,8 @@ export class HybridPitchDraftService implements PitchDraftService {
     private readonly validateMedia: (
       objectName: string,
     ) => Promise<MediaValidationOutcome> = requestMediaValidation,
-    private readonly buildScene: PitchSceneBuilder = buildPitchSceneV1,
+    private readonly buildScene: PitchSceneBuilder = buildPitchSceneV2,
+    private readonly reportSceneDemotion: PitchSceneDemotionReporter = reportPitchSceneDemotion,
   ) {}
 
   createDraft(): Promise<PitchDraft> {
@@ -525,7 +534,12 @@ export class HybridPitchDraftService implements PitchDraftService {
         draft.server.draftId,
         savedDraft.transcript,
       );
-      const submission = await this.repo.submitForConsent(draft.server.draftId, invitation, scene);
+      const submission = await this.submitWithSceneFallback(
+        this.repo,
+        draft.server.draftId,
+        invitation,
+        scene,
+      );
       if (draft.server.consentRequestId === null && submission.consentToken === null) {
         throw new PitchDraftSubmissionError('The approval invite was not created. Please retry.');
       }
@@ -550,7 +564,55 @@ export class HybridPitchDraftService implements PitchDraftService {
   }
 
   /**
-   * The PitchScene v1 to send with the consent request, or null when this pitch
+   * Submits the consent request, retrying once without the scene if the server
+   * rejected the scene itself.
+   *
+   * A scene is an enhancement: the surfaces still play the pitch from the
+   * transcript when a revision carries none. So a builder that disagrees with the
+   * DB validator on one rule must not be able to block the introducer's submit —
+   * the only thing that should be lost is the motion.
+   *
+   * Retrying is safe because the rejection happens before the RPC writes
+   * anything: `submit_pitch_for_consent` calls `assert_scene_definition`
+   * (0049:1159) ahead of the `consent_revisions` insert (0049:1183), the
+   * `consent_requests` insert/update (0049:1214) and the draft status update
+   * (0049:1250), and a `RAISE` in a plpgsql function aborts every effect of the
+   * statement that called it. No revision, no request, no status change — so the
+   * second call sees exactly the state the first one did.
+   *
+   * Only the pinned rejection messages trigger this. Network, auth, ownership and
+   * media-gate failures rethrow, because sending the pitch without motion would
+   * not fix any of them.
+   *
+   * One retry, never a loop: if the sceneless submit fails too, the cause is not
+   * the scene.
+   */
+  private async submitWithSceneFallback(
+    repo: PitchDraftRepository,
+    serverDraftId: string,
+    invitation: ReturnType<typeof invitationForFinalize>,
+    scene: PitchSceneV2 | null,
+  ): Promise<ConsentSubmission> {
+    if (scene === null) {
+      return repo.submitForConsent(serverDraftId, invitation, scene);
+    }
+    try {
+      return await repo.submitForConsent(serverDraftId, invitation, scene);
+    } catch (error: unknown) {
+      const reason = pitchSceneRejectionMessage(error);
+      if (reason === null) {
+        throw error;
+      }
+      // The introducer is told nothing — their pitch was sent — so this report is
+      // the only way a builder regression that silently strips motion from every
+      // submit becomes visible.
+      this.reportSceneDemotion({ draftId: serverDraftId, reason });
+      return repo.submitForConsent(serverDraftId, invitation, null);
+    }
+  }
+
+  /**
+   * The PitchScene v2 to send with the consent request, or null when this pitch
    * cannot carry one.
    *
    * The introducer's submit is where the scene has to be built: it is the only
@@ -566,12 +628,15 @@ export class HybridPitchDraftService implements PitchDraftService {
    * `listAssets` failures are not swallowed: they are the same class of failure
    * as the submit that follows, and the reconcile above already depends on that
    * read.
+   *
+   * The server still accepts v1 scenes, so reverting this to the v1 builder is a
+   * safe rollback: only what this device writes changes.
    */
   private async submissionScene(
     repo: PitchDraftRepository,
     serverDraftId: string,
     transcript: PitchDraftRow['transcript'],
-  ): Promise<PitchSceneV1 | null> {
+  ): Promise<PitchSceneV2 | null> {
     const segments = transcriptSegmentWindows(transcript);
     if (segments.length === 0) {
       return null;
@@ -584,7 +649,7 @@ export class HybridPitchDraftService implements PitchDraftService {
     if (photoAssetIds.length === 0) {
       return null;
     }
-    return this.buildScene({ photoAssetIds, segments });
+    return this.buildScene({ template: PITCH_SCENE_TEMPLATE, photoAssetIds, segments });
   }
 
   /**

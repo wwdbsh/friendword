@@ -1,9 +1,15 @@
-import type { PitchSceneV1, PitchStructure } from '@friendword/contracts';
+import type { PitchSceneAnyVersion, PitchStructure } from '@friendword/contracts';
 import type { PublishedPitch } from '@friendword/data';
 
 import type { PitchCaption, PitchFixture, PitchPhoto } from '@/fixtures/pitch';
 
 import { distributePhotoScenes, type SceneWindow } from './scenes';
+import {
+  asPitchSceneV2,
+  sceneV2ReferencesText,
+  sceneV2ReferencesWords,
+  type SceneWord,
+} from './sceneV2';
 
 /**
  * The structure the public page is allowed to print.
@@ -64,12 +70,18 @@ export type PitchView = {
   readonly audioUrl: string | null;
   /**
    * The motion timeline the Dater approved, projected onto the published draft
-   * (migration 0048). The player replays these windows verbatim — it must not
-   * recompute them, or the published page would drift from the preview the Dater
+   * (migration 0048), v1 or v2. The player replays it verbatim — it must not
+   * recompute it, or the published page would drift from the preview the Dater
    * said yes to. Null for a fixture and for a legacy row: the player then falls
    * back to the runtime distribution (A4).
    */
-  readonly scene: PitchSceneV1 | null;
+  readonly scene: PitchSceneAnyVersion | null;
+  /**
+   * Transcript words with the reference pairs a v2 `wordPop` carries. Needed by
+   * the player, not by the page's own copy: an accent resolves to a word here or
+   * it is skipped.
+   */
+  readonly sceneWords: readonly SceneWord[];
 };
 
 const RELATIONSHIP_LABELS: Record<string, string> = {
@@ -146,10 +158,25 @@ export type PitchPlayerView = Pick<
   | 'captions'
   | 'audioUrl'
   | 'scene'
->;
+  | 'sceneWords'
+> & {
+  /**
+   * The sentences a v2 text card prints, and only those. Admitted into the
+   * projection because the player now DRAWS them (a typographic shot IS a
+   * reviewed sentence, animated) — which is the bar this type sets, so it is null
+   * whenever the approved scene has no card and no badge. It is the
+   * `PublicPitchStructure`, so `hard_claims_requiring_confirmation` was already
+   * dropped at the read boundary and cannot ride along here either way.
+   */
+  readonly sceneText: PublicPitchStructure | null;
+};
 
 /** Field-by-field on purpose — see `PitchPlayerView`. Never spread here. */
 export function toPitchPlayerView(pitch: PitchView): PitchPlayerView {
+  // What the approved scene actually references decides what travels. A page whose
+  // scene has no text card ships no sentences to the client component, and one
+  // with no word accent ships no words — the projection stays "what it draws".
+  const sceneV2 = asPitchSceneV2(pitch.scene);
   return {
     campaignSlug: pitch.campaignSlug,
     daterName: pitch.daterName,
@@ -161,9 +188,13 @@ export function toPitchPlayerView(pitch: PitchView): PitchPlayerView {
     photos: pitch.photos,
     captions: pitch.captions,
     audioUrl: pitch.audioUrl,
-    // Asset ids and integer timings only — no text lives on a scene, so this
-    // cannot carry anything the reader is not shown.
+    // Asset ids, integer timings and reference tokens only — no copy lives on a
+    // scene, so this cannot carry anything the reader is not shown.
     scene: pitch.scene,
+    // Transcript words: the same text the page prints in full and runs as
+    // captions, indexed so an approved accent resolves.
+    sceneWords: sceneV2 !== null && sceneV2ReferencesWords(sceneV2) ? pitch.sceneWords : [],
+    sceneText: sceneV2 !== null && sceneV2ReferencesText(sceneV2) ? pitch.structure : null,
   };
 }
 
@@ -194,6 +225,7 @@ export function fromFixture(fixture: PitchFixture): PitchView {
     audioUrl: null,
     // Nobody approved a fixture, so there is no approved scene either.
     scene: null,
+    sceneWords: [],
   };
 }
 
@@ -283,5 +315,13 @@ export function fromPublishedPitch(pitch: PublishedPitch): PitchView {
     // undefined, and an undefined prop disappears from the client payload
     // instead of arriving as an explicit "no approved motion".
     scene: pitch.scene ?? null,
+    // Reference pair plus the word itself, and no timings: an effect carries its
+    // own window, so the player never needs the provider's word clock and the
+    // page's HTML does not have to hold it.
+    sceneWords: (pitch.transcriptWords ?? []).map((word) => ({
+      segmentIndex: word.segmentIndex,
+      wordIndex: word.wordIndex,
+      text: word.text,
+    })),
   };
 }

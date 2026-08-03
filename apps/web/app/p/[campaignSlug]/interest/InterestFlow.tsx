@@ -8,6 +8,7 @@ import {
   DataLayerError,
   ensureUserRow,
   getDisplayNameStatus,
+  InterestIntentRepo,
   InterestRepo,
   trackEvent,
   type BrowserSupabaseClient,
@@ -57,15 +58,35 @@ type UploadedPhoto = {
   readonly uploadedThisSession: boolean;
 };
 
-function errorCopy(error: unknown): string {
+/**
+ * Interest is staged (viral-loop slice, decision D2):
+ *  - S1 `offer`/`saved`: the visitor saves a private interest intent with a
+ *    signed-in account only. Nothing reaches the Dater, and no free text is
+ *    collected at this stage.
+ *  - S2 `profile`: completing the dating profile promotes the intent through
+ *    `promote_interest_intent`, a normal `interests` INSERT behind every
+ *    existing gate. Only then is the interest delivered.
+ * A promotion rejected by the private-beta gate is shown as "not open yet",
+ * never as a failure — the intent stays saved.
+ */
+type IntentStage = 'checking' | 'offer' | 'saved' | 'profile';
+
+function errorDetail(error: unknown): string {
   const cause = error instanceof DataLayerError ? error.cause : error;
-  const detail =
-    typeof cause === 'object' &&
+  return typeof cause === 'object' &&
     cause !== null &&
     'message' in cause &&
     typeof cause.message === 'string'
-      ? cause.message
-      : '';
+    ? cause.message
+    : '';
+}
+
+function isPrivateBetaRejection(error: unknown): boolean {
+  return errorDetail(error).includes('private beta');
+}
+
+function errorCopy(error: unknown): string {
+  const detail = errorDetail(error);
   if (detail.includes('already answered')) {
     return 'This interest was already answered, so it cannot be resubmitted.';
   }
@@ -76,13 +97,16 @@ function errorCopy(error: unknown): string {
     return 'This campaign is not accepting interest right now.';
   }
   if (detail.includes('private beta')) {
-    return 'Friendword is in a private beta. Expressing interest is not open yet — check back soon.';
+    return 'Friendword is in a private beta. Expressing interest is not open yet — check back later.';
   }
   if (detail.includes('adult birth date')) {
     return 'Friendword is 18+. Add your real birth date to continue.';
   }
   if (detail.includes('complete your dating profile')) {
     return 'Finish your profile first: a bio, an intent, and at least 2 photos.';
+  }
+  if (detail.includes('rate limit')) {
+    return 'That is a lot of saved interest in a short window. Give it an hour and try again.';
   }
   return 'Something went wrong on our side. Try again in a moment.';
 }
@@ -108,6 +132,9 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
   const [submitting, setSubmitting] = useState(false);
   const [prefillDone, setPrefillDone] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [intentStage, setIntentStage] = useState<IntentStage>('checking');
+  const [intentBusy, setIntentBusy] = useState(false);
+  const [betaClosed, setBetaClosed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // own_content AI consent gate (P0-NEW-2): affirmative, current-revision
   // consent must precede the first upload/moderation (external AI) request.
@@ -117,10 +144,19 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
   const [aiConsentBusy, setAiConsentBusy] = useState(false);
   const aiConsentGranted = canProcessOwnContentMedia(aiConsentState);
 
+  // Stage S1: is there already a saved intent for this campaign? A lookup
+  // failure (including the intent RPCs not being deployed yet) falls back to
+  // the offer stage — saving will then surface its own honest error.
+  //
+  // The run-once guard is a ref, NOT state: a state guard listed in the deps
+  // and set synchronously inside the effect re-fires the effect, whose cleanup
+  // cancels the in-flight lookup — the page then sticks on 'checking' forever.
+  const intentCheckStartedRef = useRef(false);
   useEffect(() => {
-    if (client === null || session === null || prefillDone) {
+    if (client === null || session === null || intentCheckStartedRef.current) {
       return;
     }
+    intentCheckStartedRef.current = true;
 
     trackEvent(client, 'interest_started', {
       campaign_id: campaignId,
@@ -128,9 +164,33 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
     });
 
     let cancelled = false;
-    const repo = new InterestRepo(client);
     void (async () => {
       await ensureUserRow(client);
+      const intent = await new InterestIntentRepo(client).getMyIntent(campaignId);
+      if (!cancelled) {
+        setIntentStage(intent === null ? 'offer' : 'saved');
+      }
+    })().catch(() => {
+      if (!cancelled) {
+        setIntentStage('offer');
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [client, session, campaignId]);
+
+  // Stage S2: the profile form loads only after the visitor chooses to
+  // complete their profile — S1 must stay a single fast step.
+  useEffect(() => {
+    if (client === null || session === null || intentStage !== 'profile' || prefillDone) {
+      return;
+    }
+
+    let cancelled = false;
+    const repo = new InterestRepo(client);
+    void (async () => {
       const nameStatus = await getDisplayNameStatus(client);
       if (cancelled) {
         return;
@@ -185,7 +245,27 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
     return () => {
       cancelled = true;
     };
-  }, [client, session, prefillDone]);
+  }, [client, session, intentStage, prefillDone]);
+
+  async function handleSaveIntent() {
+    if (client === null) {
+      return;
+    }
+    setIntentBusy(true);
+    setError(null);
+    try {
+      await ensureUserRow(client);
+      // S1 takes no free text: the intent RPC receives only the campaign id.
+      // The RPC is idempotent, so a re-tap on a stored intent is success.
+      await new InterestIntentRepo(client).saveIntent(campaignId);
+      trackEvent(client, 's1_intent_created', { campaign_id: campaignId });
+      setIntentStage('saved');
+    } catch (saveError: unknown) {
+      setError(errorCopy(saveError));
+    } finally {
+      setIntentBusy(false);
+    }
+  }
 
   async function handleAiConsent() {
     if (client === null || aiDisclosureRevision === null || !aiConsentChecked) {
@@ -364,9 +444,20 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
         );
         return;
       }
-      await repo.submitInterest(campaignId, trimmedNote === '' ? null : trimmedNote);
+      // S2 promotion: the intent becomes a real `interests` row behind every
+      // existing delivery gate. This is the moment the interest is delivered.
+      await new InterestIntentRepo(client).promoteIntent(
+        campaignId,
+        trimmedNote === '' ? null : trimmedNote,
+      );
       setSubmitted(true);
     } catch (submitError: unknown) {
+      // The private-beta gate is a scheduled state, not a failure: the intent
+      // and profile stay saved, and delivery is honestly "not open yet".
+      if (isPrivateBetaRejection(submitError)) {
+        setBetaClosed(true);
+        return;
+      }
       // Rethrowing here would reject this handler's promise, which React never
       // consumes: the failure would become an unhandled rejection and the form
       // would go silent with the button simply re-enabled. Every failure shape
@@ -416,8 +507,9 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
             <span className={styles.badgeFresh}>Sent!</span>
             <h1 className={styles.title}>Your interest is with {daterName}.</h1>
             <p className={styles.lede}>
-              {daterName} will review your profile and decide. If they accept, a private intro room
-              opens for the two of you — your email and phone number stay hidden either way.
+              What happens next is up to {daterName} — a reply is not promised, and there is no
+              timeline. If they accept, a private intro room opens for the two of you — your email
+              and phone number stay hidden either way.
             </p>
             <Link className={styles.secondary} href={`/p/${campaignSlug}`}>
               Back to the pitch
@@ -425,9 +517,18 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
           </section>
         )}
 
-        {client !== null && !loading && session !== null && !submitted && !prefillDone && (
-          <section className={styles.card} aria-live="polite">
-            <h1 className={styles.title}>Loading your profile…</h1>
+        {client !== null && !loading && session !== null && !submitted && betaClosed && (
+          <section className={styles.card}>
+            <span className={styles.badge}>Private beta</span>
+            <h1 className={styles.title}>Not open yet — your interest is saved.</h1>
+            <p className={styles.lede}>
+              Friendword is in a private beta, so delivering interest is not open yet. Nothing has
+              been sent to {daterName}. Your interest and profile are saved — nothing is sent
+              automatically, so if Friendword opens up, come back here to send them yourself.
+            </p>
+            <Link className={styles.secondary} href={`/p/${campaignSlug}`}>
+              Back to the pitch
+            </Link>
           </section>
         )}
 
@@ -435,6 +536,86 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
           !loading &&
           session !== null &&
           !submitted &&
+          !betaClosed &&
+          intentStage === 'checking' && (
+            <section className={styles.card} aria-live="polite">
+              <h1 className={styles.title}>One second…</h1>
+            </section>
+          )}
+
+        {client !== null &&
+          !loading &&
+          session !== null &&
+          !submitted &&
+          !betaClosed &&
+          intentStage === 'offer' && (
+            <section className={styles.card}>
+              <span className={styles.badge}>Step 1 of 2</span>
+              <h1 className={styles.title}>Want to meet {daterName}?</h1>
+              <p className={styles.muted}>
+                Save your interest first. It stays private — nothing reaches {daterName} unless you
+                go on to complete a dating profile with 2 current photos, a short bio, and what
+                you&apos;re looking for, and then send it.
+              </p>
+              <button
+                className={styles.primary}
+                type="button"
+                disabled={intentBusy}
+                onClick={() => {
+                  void handleSaveIntent();
+                }}
+              >
+                {intentBusy ? 'Saving…' : 'Save my interest'}
+              </button>
+              {error !== null && <p className={styles.error}>{error}</p>}
+            </section>
+          )}
+
+        {client !== null &&
+          !loading &&
+          session !== null &&
+          !submitted &&
+          !betaClosed &&
+          intentStage === 'saved' && (
+            <section className={styles.card}>
+              <span className={styles.badgeFresh}>Saved</span>
+              <h1 className={styles.title}>Saved — not delivered to {daterName} yet.</h1>
+              <p className={styles.lede}>
+                Your interest is saved privately. Complete your profile — 2 current photos, a short
+                bio, and your dating intent — to send it. What {daterName} does with it is their
+                call; sending promises nothing, not even a reply.
+              </p>
+              <button
+                className={styles.primary}
+                type="button"
+                onClick={() => setIntentStage('profile')}
+              >
+                Complete my profile
+              </button>
+              <Link className={styles.secondary} href={`/p/${campaignSlug}`}>
+                Back to the pitch
+              </Link>
+            </section>
+          )}
+
+        {client !== null &&
+          !loading &&
+          session !== null &&
+          !submitted &&
+          !betaClosed &&
+          intentStage === 'profile' &&
+          !prefillDone && (
+            <section className={styles.card} aria-live="polite">
+              <h1 className={styles.title}>Loading your profile…</h1>
+            </section>
+          )}
+
+        {client !== null &&
+          !loading &&
+          session !== null &&
+          !submitted &&
+          !betaClosed &&
+          intentStage === 'profile' &&
           prefillDone &&
           !displayNameLoaded && (
             <section className={styles.card}>
@@ -447,6 +628,8 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
           !loading &&
           session !== null &&
           !submitted &&
+          !betaClosed &&
+          intentStage === 'profile' &&
           prefillDone &&
           displayNameLoaded &&
           !aiConsentGranted && (
@@ -492,11 +675,13 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
           !loading &&
           session !== null &&
           !submitted &&
+          !betaClosed &&
+          intentStage === 'profile' &&
           prefillDone &&
           displayNameLoaded &&
           aiConsentGranted && (
             <section className={styles.card}>
-              <span className={styles.badge}>Profile-backed interest</span>
+              <span className={styles.badge}>Step 2 of 2 — deliver it</span>
               <h1 className={styles.title}>Introduce yourself to {daterName}.</h1>
               <p className={styles.muted}>
                 {daterName} sees this profile before deciding. Contact details are never shared.

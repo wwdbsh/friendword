@@ -38,9 +38,10 @@ export function WaitlistForm() {
     }
     setStatus('submitting');
 
-    // Referral: the first campaign that sent this visitor (sessionStorage).
-    // Source: the acquisition channel captured by the attribution script.
-    const referralSlug = readStoredReferral();
+    // Referral: the first campaign that sent this visitor (localStorage,
+    // first-touch, 30-day TTL). Source: the acquisition channel captured by
+    // the attribution script.
+    const referralSlug = readStoredReferral()?.slug ?? null;
     const source =
       typeof window === 'undefined' ? null : window.sessionStorage.getItem('fw_attribution');
 

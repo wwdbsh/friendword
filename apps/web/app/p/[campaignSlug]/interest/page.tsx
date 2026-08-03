@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 
 import { getPublishedPitchBySlug } from '@friendword/data';
 
+import { ReferralTracker } from '@/components/ReferralTracker';
 import { getPitchFixture } from '@/fixtures/pitch';
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
 import flowStyles from '@/styles/flowCard.module.css';
@@ -57,10 +58,18 @@ export default async function InterestPage({ params }: InterestPageProps) {
   }
 
   return (
-    <InterestFlow
-      campaignId={pitch.campaignId}
-      campaignSlug={pitch.campaignSlug}
-      daterName={pitch.daterDisplayName}
-    />
+    <>
+      {/* Sign-in returns the visitor to THIS page (EmailSignIn defaults
+          emailRedirectTo to the current URL), so attribution must be seeded and
+          claimable here — not only on the pitch page. recordVisit is off: the
+          interest flow is a deeper step, not a funnel entry, and it reports
+          `interest_started` itself. */}
+      <ReferralTracker seedSlug={pitch.campaignSlug} recordVisit={false} />
+      <InterestFlow
+        campaignId={pitch.campaignId}
+        campaignSlug={pitch.campaignSlug}
+        daterName={pitch.daterDisplayName}
+      />
+    </>
   );
 }

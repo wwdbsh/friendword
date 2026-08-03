@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import Script from 'next/script';
 
-import { ReferralTracker } from '@/components/ReferralTracker';
 import { WaitlistForm } from '@/components/WaitlistForm';
 
 import styles from './page.module.css';
@@ -52,7 +51,7 @@ export default function HomePage() {
       <Script id="friendword-attribution" strategy="afterInteractive">
         {attributionScript}
       </Script>
-      <ReferralTracker />
+      {/* Referral storage/claiming is mounted globally in app/layout.tsx. */}
       <main className={styles.page}>
         <header className={styles.nav}>
           <Link className={styles.wordmark} href="/" aria-label="Friendword home">

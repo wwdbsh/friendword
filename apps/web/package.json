@@ -9,6 +9,7 @@
     "test:audit": "pnpm --filter @friendword/contracts exec vitest run --config ../../apps/web/vitest.audit.config.ts",
     "test:audit2": "pnpm --filter @friendword/contracts exec vitest run --config ../../apps/web/vitest.audit2.config.ts",
     "test:audit3": "pnpm --filter @friendword/contracts exec vitest run --config ../../apps/web/vitest.audit3.config.ts",
+    "test:ui": "vitest run --config vitest.ui.config.ts",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit"
   },
@@ -34,9 +35,13 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.2.0",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "typescript": "^5.7.0"
+    "jsdom": "^26.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
   }
 }

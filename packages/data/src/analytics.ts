@@ -6,6 +6,15 @@ import type { Json } from './database.types';
  * knows (publish, interest decisions, purchases, safety actions) are
  * recorded by database triggers (0033) and the RPC rejects them from
  * clients — see docs/ANALYTICS_PLAN.md.
+ *
+ * Viral-loop funnel: `reel_visit` (arrival on a campaign page, with the
+ * `channel` property) and `s1_intent_created` (a private interest intent was
+ * saved) are client interactions. The later stages are server-recorded
+ * outcomes and must NOT be sent from clients: S2 delivery is the existing
+ * `interest_submitted` trigger event on the `interests` INSERT, and S3 match
+ * is `interest_accepted` / `intro_room_created`. Both new names require the
+ * server-side track_event allowlist to accept them (reel_visit anonymously)
+ * before they land in analytics_events; until then they are dropped.
  */
 export type AnalyticsEventName =
   | 'introducer_started'
@@ -14,7 +23,9 @@ export type AnalyticsEventName =
   | 'consent_invite_shared'
   | 'campaign_shared'
   | 'pitch_viewed_unique'
+  | 'reel_visit'
   | 'interest_started'
+  | 's1_intent_created'
   | 'creator_launch_paywall_viewed'
   | 'campaign_pass_paywall_viewed';
 

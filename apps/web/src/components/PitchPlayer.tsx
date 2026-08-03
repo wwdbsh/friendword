@@ -7,6 +7,7 @@ import { trackEvent } from '@friendword/data';
 
 import { MotionPitchPlayer } from '@/components/MotionPitchPlayer';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
+import { normalizeChannel } from '@/lib/waitlist';
 import type { PitchPlayerView } from '@/pitch/view';
 
 import styles from './PitchPlayer.module.css';
@@ -32,7 +33,8 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
   const [isFooterVisible, setIsFooterVisible] = useState(false);
 
   useEffect(() => {
-    const source = new URLSearchParams(window.location.search).get('src');
+    const search = new URLSearchParams(window.location.search);
+    const source = search.get('src');
     if (source !== null && source.length > 0) {
       // Preserved for the verified-interest flow to attach after authentication lands.
       window.sessionStorage.setItem('fw_attribution', source);
@@ -44,6 +46,8 @@ export function PitchPlayer({ pitch }: PitchPlayerProps) {
       trackEvent(getSupabaseBrowserClient(), 'pitch_viewed_unique', {
         campaign_slug: pitch.campaignSlug,
         source: source ?? window.sessionStorage.getItem('fw_attribution'),
+        // Which acquisition channel brought this view (viral-loop slice).
+        channel: normalizeChannel(search.get('ch')),
       });
     }
   }, [pitch.campaignSlug]);

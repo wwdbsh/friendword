@@ -15,6 +15,8 @@ import { EmailSignIn } from '@/components/EmailSignIn';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { useSession } from '@/lib/useSession';
 
+import { PitchExportCard } from './PitchExportCard';
+
 import styles from '@/styles/flowCard.module.css';
 
 type KitState =
@@ -64,6 +66,13 @@ export function KitView({ draftId }: { readonly draftId: string }) {
   const [state, setState] = useState<KitState>({ step: 'loading' });
   const [unlocking, setUnlocking] = useState(false);
   const [copied, setCopied] = useState<number | null>(null);
+  // Kept outside KitState: the MP4 export card needs the campaign id in every
+  // step (the free render is per-campaign, not gated on the paid share kit),
+  // and the needs-credit transition would otherwise drop it.
+  const [campaign, setCampaign] = useState<{
+    readonly id: string;
+    readonly slug: string | null;
+  } | null>(null);
 
   const load = useCallback(async () => {
     if (client === null) {
@@ -71,12 +80,13 @@ export function KitView({ draftId }: { readonly draftId: string }) {
     }
     try {
       const draft = await new PitchDraftRepo(client).getDraft(draftId);
-      const { data: campaign } = await client
+      const { data: campaignRow } = await client
         .from('campaigns')
-        .select('slug')
+        .select('id, slug')
         .eq('pitch_draft_id', draftId)
         .maybeSingle();
-      const slug = campaign?.slug ?? null;
+      const slug = campaignRow?.slug ?? null;
+      setCampaign(campaignRow ?? null);
       const { data: kit } = await client
         .from('share_kits')
         .select('id')
@@ -263,6 +273,23 @@ export function KitView({ draftId }: { readonly draftId: string }) {
             </section>
           </>
         )}
+
+        {/* MP4 export (Phase 4). Independent of the paid share-kit unlock —
+            the campaign's first finished render is free — so it renders in
+            every post-load step that has a campaign, including needs-credit. */}
+        {client !== null &&
+          session !== null &&
+          campaign !== null &&
+          (state.step === 'locked' ||
+            state.step === 'unlocked' ||
+            state.step === 'needs-credit') && (
+            <PitchExportCard
+              client={client}
+              draftId={draftId}
+              campaignId={campaign.id}
+              campaignSlug={campaign.slug}
+            />
+          )}
       </div>
     </main>
   );

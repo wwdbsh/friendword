@@ -9,6 +9,7 @@ export * from './interestRepo';
 export * from './introRoomRepo';
 export * from './pitchDraftRepo';
 export * from './publishedPitchRepo';
+export * from './renderJobRepo';
 export * from './transcriptWordIndex';
 export * from './safetyRepo';
 export * from './benefitsRepo';

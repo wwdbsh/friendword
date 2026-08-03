@@ -53,10 +53,21 @@ test('renders the honest waitlist and preserves referral attribution', async ({ 
   await expect(page.getByRole('textbox', { name: 'Email' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Join the waitlist' })).toBeVisible();
 
-  // ?ref is preserved as the first-touch referral for a later claim.
+  // ?ref is preserved as the first-touch referral for a later claim. It lives in
+  // localStorage, not sessionStorage: a reel viewer closes the tab between
+  // landing and signing in, and a referral that dies with the tab measures
+  // nothing. The stored record carries the channel and a timestamp so the claim
+  // can expire (see the 2026-08-03 attribution decision).
   await expect
-    .poll(() => page.evaluate(() => window.sessionStorage.getItem('fw_referral')))
-    .toBe('demo-blair');
+    .poll(() => page.evaluate(() => window.localStorage.getItem('fw_referral')))
+    .not.toBeNull();
+  const stored = JSON.parse(
+    (await page.evaluate(() => window.localStorage.getItem('fw_referral'))) ?? 'null',
+  );
+  expect(stored.slug).toBe('demo-blair');
+  expect(typeof stored.ts).toBe('number');
+  // Nothing is left behind in the storage this used to live in.
+  expect(await page.evaluate(() => window.sessionStorage.getItem('fw_referral'))).toBeNull();
 
   // The waitlist CTA meets the 44px touch target minimum.
   const height = await page

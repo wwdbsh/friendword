@@ -2408,6 +2408,16 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                   order. You control the words and photos here; the voice recording itself can’t be
                   trimmed, but you can request changes or decline below.
                 </p>
+                {/* MP4 end-card disclosure (docs/DECISIONS.md 2026-08-03): the
+                    end card is renderer chrome appended AFTER the approved
+                    timeline — the brand constant plus the canonical page URL,
+                    never authored content — so it is not part of what
+                    "approve" covers and is disclosed here instead. */}
+                <p className={styles.muted} data-consent-endcard-note>
+                  If this pitch is exported as a video file, a short Friendword card — the
+                  Friendword name and your page’s address — plays after the end of everything you
+                  approve here.
+                </p>
               </div>
 
               <div className={styles.controlNote}>

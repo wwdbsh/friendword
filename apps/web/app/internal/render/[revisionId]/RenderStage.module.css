@@ -1,0 +1,61 @@
+/* The capture stage: exactly one MP4 frame. The viewport is 1080x1920 at DPR 1
+   (browser.ts) and this box pins the scene to it. */
+
+.stage {
+  position: fixed;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  width: 1080px;
+  height: 1920px;
+  background: var(--color-stage);
+}
+
+/* P2: a captured frame must be a pure function of (scene, t). CSS transitions
+   interpolate on the WALL CLOCK, so under discrete seeks they would smear
+   frames by capture speed. Every opacity ramp the scene needs is already
+   computed by the interpreter (see MotionSceneV2.module.css:120), so killing
+   browser-time smoothing here removes nothing that was approved. */
+.stage :global(*) {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Renderer chrome appended after the approved timeline (P4): platform brand and
+   the canonical campaign URL, nothing a Dater or Introducer wrote. */
+.endCard {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  align-items: center;
+  justify-content: center;
+  background: var(--color-stage);
+  color: var(--color-stage-text);
+  text-align: center;
+}
+
+.endCardBrand {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: var(--font-size-hero);
+  letter-spacing: -0.04em;
+}
+
+.endCardUrl {
+  margin: 0;
+  color: var(--color-flirt);
+  font-family: var(--font-body), sans-serif;
+  font-size: var(--font-size-xl);
+}
+
+/* Offscreen but LAID OUT (visibility keeps layout, display:none would not), so
+   both self-hosted families begin loading before the first captured frame —
+   the P3 gate awaits document.fonts.ready against these. */
+.fontWarmup {
+  position: absolute;
+  top: 0;
+  left: -9999px;
+  visibility: hidden;
+}

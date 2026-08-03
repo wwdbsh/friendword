@@ -1,0 +1,287 @@
+import { z } from 'zod';
+
+import type { Session } from '@supabase/supabase-js';
+
+import type { BrowserSupabaseClient, ServiceSupabaseClient } from './client';
+import { DataLayerError, UnauthenticatedError } from './errors';
+
+const uuidSchema = z.string().uuid();
+
+/**
+ * MP4 render of the approved motion pitch (migration 0054). Enqueue is LAZY:
+ * nothing renders at approval — `request_pitch_render` at export time is the
+ * only enqueue path, idempotent per approved consent revision (the job row is
+ * the cache). The campaign's first successful render is free; the free unlock
+ * is consumed at job SUCCESS server-side, and later revisions require the
+ * Campaign Pass. This repo never touches the render tables directly: they are
+ * service-role only, and the two member RPCs below are the whole client
+ * surface.
+ *
+ * These names are the pinned 0054 server contract; rpcContract.test.ts checks
+ * them (and their argument names) against the migration SQL itself. They are
+ * not in the generated database types yet, so calls go through a narrow
+ * untyped envelope.
+ */
+export const PITCH_RENDER_RPCS = ['request_pitch_render', 'get_pitch_render_state'] as const;
+
+/**
+ * Worker-side lifecycle RPCs, callable with the service key only. Exposed
+ * here so the render worker's route shares one pinned contract with the
+ * member surface instead of spelling raw strings.
+ */
+export const PITCH_RENDER_SERVICE_RPCS = [
+  'claim_media_render_job',
+  'complete_media_render_job',
+] as const;
+
+export type PitchRenderJobStatus = 'queued' | 'leased' | 'done' | 'failed';
+
+export type PitchRenderRequest = {
+  readonly jobId: string;
+  readonly jobStatus: PitchRenderJobStatus;
+  readonly revisionId: string;
+  readonly outputStoragePath: string | null;
+  readonly alreadyRequested: boolean;
+};
+
+export type PitchRenderState = {
+  readonly jobId: string | null;
+  readonly jobStatus: PitchRenderJobStatus | null;
+  readonly revisionId: string | null;
+  readonly outputStoragePath: string | null;
+  readonly lastError: string | null;
+  readonly freeRenderUsed: boolean;
+  readonly passActive: boolean;
+  readonly updatedAt: string | null;
+};
+
+export type ClaimedRenderJob = {
+  readonly jobId: string;
+  readonly leaseToken: string;
+  readonly campaignId: string;
+  readonly pitchDraftId: string;
+  readonly revisionId: string;
+  readonly sceneHash: string;
+  readonly attempts: number;
+  readonly leaseExpiresAt: string;
+};
+
+export type RenderCompletion =
+  | {
+      readonly outcome: 'succeeded';
+      readonly outputStoragePath: string;
+      readonly outputBytes: number;
+      readonly outputDurationMs: number;
+    }
+  | { readonly outcome: 'failed'; readonly reason: string };
+
+const jobStatusSchema = z.enum(['queued', 'leased', 'done', 'failed']);
+
+// 0054: request_pitch_render returns TABLE (job_id, job_status, revision_id,
+// output_storage_path, already_requested).
+const requestRowsSchema = z.array(
+  z.object({
+    job_id: z.string().uuid(),
+    job_status: jobStatusSchema,
+    revision_id: z.string().uuid(),
+    output_storage_path: z.string().nullish(),
+    already_requested: z.boolean(),
+  }),
+);
+
+// 0054: get_pitch_render_state always returns one row; the job fields are
+// NULL while no render was ever requested.
+const stateRowsSchema = z.array(
+  z.object({
+    job_id: z.string().uuid().nullish(),
+    job_status: jobStatusSchema.nullish(),
+    revision_id: z.string().uuid().nullish(),
+    output_storage_path: z.string().nullish(),
+    last_error: z.string().nullish(),
+    free_render_used: z.boolean(),
+    pass_active: z.boolean(),
+    updated_at: z.string().nullish(),
+  }),
+);
+
+const claimRowsSchema = z.array(
+  z.object({
+    job_id: z.string().uuid(),
+    lease_token: z.string().uuid(),
+    campaign_id: z.string().uuid(),
+    pitch_draft_id: z.string().uuid(),
+    revision_id: z.string().uuid(),
+    scene_hash: z.string(),
+    attempts: z.number().int(),
+    lease_expires_at: z.string(),
+  }),
+);
+
+export class RenderJobRepo {
+  constructor(private readonly client: BrowserSupabaseClient) {}
+
+  /**
+   * Asks the server to render (or hand back) the MP4 of the campaign's
+   * current approved revision. Idempotent: a repeat request returns the
+   * stored job and consumes nothing. Server-side gates decide everything —
+   * membership, campaign openness, and whether the Campaign Pass is required
+   * — so a refusal here is the product answer, not an error to retry around.
+   */
+  async requestRender(campaignId: string): Promise<PitchRenderRequest> {
+    await this.getRequiredSession();
+    const { data, error } = await callRenderRpc(this.client, 'request_pitch_render', {
+      target_campaign_id: uuidSchema.parse(campaignId),
+    });
+    if (error !== null) {
+      throw new DataLayerError('render.request', error);
+    }
+    const parsed = requestRowsSchema.safeParse(data);
+    if (!parsed.success) {
+      throw new DataLayerError('render.request', parsed.error);
+    }
+    const row = parsed.data.at(0);
+    if (row === undefined) {
+      throw new DataLayerError('render.request', new Error('RPC returned no render job'));
+    }
+    return {
+      jobId: row.job_id,
+      jobStatus: row.job_status,
+      revisionId: row.revision_id,
+      outputStoragePath: row.output_storage_path ?? null,
+      alreadyRequested: row.already_requested,
+    };
+  }
+
+  /**
+   * The member view of the campaign's render: the latest job (all fields null
+   * when none was requested yet), whether the free render is spent, and
+   * whether the Campaign Pass is live. The only client-reachable read of the
+   * render tables.
+   */
+  async getRenderState(campaignId: string): Promise<PitchRenderState> {
+    await this.getRequiredSession();
+    const { data, error } = await callRenderRpc(this.client, 'get_pitch_render_state', {
+      target_campaign_id: uuidSchema.parse(campaignId),
+    });
+    if (error !== null) {
+      throw new DataLayerError('render.getState', error);
+    }
+    const parsed = stateRowsSchema.safeParse(data);
+    if (!parsed.success) {
+      throw new DataLayerError('render.getState', parsed.error);
+    }
+    const row = parsed.data.at(0);
+    if (row === undefined) {
+      throw new DataLayerError('render.getState', new Error('RPC returned no state row'));
+    }
+    return {
+      jobId: row.job_id ?? null,
+      jobStatus: row.job_status ?? null,
+      revisionId: row.revision_id ?? null,
+      outputStoragePath: row.output_storage_path ?? null,
+      lastError: row.last_error ?? null,
+      freeRenderUsed: row.free_render_used,
+      passActive: row.pass_active,
+      updatedAt: row.updated_at ?? null,
+    };
+  }
+
+  private async getRequiredSession(): Promise<Session> {
+    const { data, error } = await this.client.auth.getSession();
+    if (error !== null) {
+      throw new DataLayerError('render.getSession', error);
+    }
+    if (data.session === null) {
+      throw new UnauthenticatedError();
+    }
+    return data.session;
+  }
+}
+
+/**
+ * Leases one render job for the worker, or null when nothing is claimable
+ * (empty queue, concurrency cap reached, or every campaign paused). Service
+ * key only — the RPC refuses every other role.
+ */
+export async function claimMediaRenderJob(
+  client: ServiceSupabaseClient,
+  leaseSeconds?: number,
+): Promise<ClaimedRenderJob | null> {
+  const { data, error } = await callRenderRpc(client, 'claim_media_render_job', {
+    lease_seconds: leaseSeconds ?? 900,
+  });
+  if (error !== null) {
+    throw new DataLayerError('render.claim', error);
+  }
+  const parsed = claimRowsSchema.safeParse(data);
+  if (!parsed.success) {
+    throw new DataLayerError('render.claim', parsed.error);
+  }
+  const row = parsed.data.at(0);
+  if (row === undefined) {
+    return null;
+  }
+  return {
+    jobId: row.job_id,
+    leaseToken: row.lease_token,
+    campaignId: row.campaign_id,
+    pitchDraftId: row.pitch_draft_id,
+    revisionId: row.revision_id,
+    sceneHash: row.scene_hash,
+    attempts: row.attempts,
+    leaseExpiresAt: row.lease_expires_at,
+  };
+}
+
+/**
+ * Reports a render result under the held lease. A succeeded completion must
+ * carry the full output (the server refuses partial success and consumes the
+ * campaign's free render exactly once); a failed one must carry the reason.
+ */
+export async function completeMediaRenderJob(
+  client: ServiceSupabaseClient,
+  jobId: string,
+  leaseToken: string,
+  completion: RenderCompletion,
+): Promise<void> {
+  const { error } = await callRenderRpc(client, 'complete_media_render_job', {
+    job_id: uuidSchema.parse(jobId),
+    lease_token: uuidSchema.parse(leaseToken),
+    outcome: completion.outcome,
+    output_storage_path: completion.outcome === 'succeeded' ? completion.outputStoragePath : null,
+    output_bytes: completion.outcome === 'succeeded' ? completion.outputBytes : null,
+    output_duration_ms: completion.outcome === 'succeeded' ? completion.outputDurationMs : null,
+    reason: completion.outcome === 'failed' ? completion.reason : null,
+  });
+  if (error !== null) {
+    throw new DataLayerError('render.complete', error);
+  }
+}
+
+type RenderRpcName =
+  (typeof PITCH_RENDER_RPCS)[number] | (typeof PITCH_RENDER_SERVICE_RPCS)[number];
+
+// The 0054 RPCs are not in the generated database types yet, so the calls go
+// through this narrow untyped envelope (interestIntentRepo precedent).
+// rpcContract.test.ts recognizes this wrapper's call shape and verifies every
+// name and argument key against the migration SQL.
+async function callRenderRpc(
+  client: BrowserSupabaseClient | ServiceSupabaseClient,
+  functionName: RenderRpcName,
+  params: Record<string, unknown>,
+): Promise<{ readonly data: unknown; readonly error: unknown | null }> {
+  const rpc: unknown = Reflect.get(client, 'rpc');
+  if (typeof rpc !== 'function') {
+    throw new DataLayerError('render.rpc', new Error('Supabase RPC client is unavailable'));
+  }
+  const result: unknown = await Reflect.apply(rpc, client, [functionName, params]);
+  if (
+    typeof result !== 'object' ||
+    result === null ||
+    !('data' in result) ||
+    !('error' in result)
+  ) {
+    throw new DataLayerError('render.rpc', new Error('Supabase returned an invalid result'));
+  }
+  return { data: Reflect.get(result, 'data'), error: Reflect.get(result, 'error') };
+}

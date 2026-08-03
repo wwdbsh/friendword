@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 2,
+  "template": "warm",
+  "canvas": { "width": 1080, "height": 1920, "fps": 30 },
+  "durationMs": 15000,
+  "assetIds": ["97000000-0000-0000-0000-00000000000b", "97000000-0000-0000-0000-00000000000c"],
+  "shots": [
+    {
+      "level": "wide",
+      "assetId": "97000000-0000-0000-0000-00000000000b",
+      "startMs": 0,
+      "endMs": 3000,
+      "crop": { "x": 0, "y": 0, "width": 1, "height": 1 },
+      "effects": [
+        {
+          "type": "kenBurns",
+          "to": { "x": 0.035, "y": 0, "width": 0.965, "height": 0.965 },
+          "easing": "easeInOut"
+        }
+      ]
+    },
+    {
+      "level": "punchIn",
+      "assetId": "97000000-0000-0000-0000-00000000000b",
+      "startMs": 3000,
+      "endMs": 6000,
+      "crop": { "x": 0.07, "y": 0, "width": 0.86, "height": 0.86 },
+      "effects": [
+        {
+          "type": "kenBurns",
+          "to": { "x": 0.08, "y": 0, "width": 0.9, "height": 0.9 },
+          "easing": "easeInOut"
+        },
+        { "type": "punch", "atMs": 3900, "durationMs": 320, "scale": 1.04, "easing": "easeOut" }
+      ]
+    },
+    {
+      "level": "wide",
+      "assetId": "97000000-0000-0000-0000-00000000000c",
+      "startMs": 6000,
+      "endMs": 8400,
+      "crop": { "x": 0, "y": 0, "width": 1, "height": 1 },
+      "effects": [
+        {
+          "type": "kenBurns",
+          "to": { "x": 0, "y": 0, "width": 0.965, "height": 0.965 },
+          "easing": "easeInOut"
+        }
+      ]
+    },
+    {
+      "level": "punchIn",
+      "assetId": "97000000-0000-0000-0000-00000000000c",
+      "startMs": 8400,
+      "endMs": 12500,
+      "crop": { "x": 0.07, "y": 0, "width": 0.86, "height": 0.86 },
+      "effects": [
+        {
+          "type": "kenBurns",
+          "to": { "x": 0.02, "y": 0, "width": 0.9, "height": 0.9 },
+          "easing": "easeInOut"
+        }
+      ]
+    },
+    {
+      "level": "detail",
+      "assetId": "97000000-0000-0000-0000-00000000000b",
+      "startMs": 12500,
+      "endMs": 15000,
+      "crop": { "x": 0.11, "y": 0, "width": 0.78, "height": 0.78 },
+      "effects": [
+        {
+          "type": "kenBurns",
+          "to": { "x": 0.16, "y": 0, "width": 0.74, "height": 0.74 },
+          "easing": "easeInOut"
+        }
+      ]
+    }
+  ],
+  "look": {
+    "grade": { "warmth": 0.3, "contrast": 1.08, "saturation": 1.05, "vignette": 0.28 },
+    "grain": { "intensity": 0.06, "sizePx": 2, "seed": 1464579498, "animationHz": 24 }
+  },
+  "chrome": { "progressBar": { "thicknessPx": 3, "opacity": 0.45, "anchor": "bottom" } },
+  "overlays": []
+}

@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { INTEREST_INTENT_RPCS } from './interestIntentRepo';
+import { PITCH_RENDER_RPCS, PITCH_RENDER_SERVICE_RPCS } from './renderJobRepo';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const MIGRATIONS_DIR = join(REPO_ROOT, 'supabase', 'migrations');
@@ -200,6 +201,7 @@ function listTypeScriptFiles(dir: string): string[] {
  *   client.rpc('name', {...})          (typed supabase client)
  *   looseRpc(client)('name', {...})    (apps/web untyped envelope)
  *   this.callIntentRpc('name', {...})  (interestIntentRepo wrapper)
+ *   callRenderRpc(client, 'name', {...})  (renderJobRepo wrapper)
  * A new wrapper shape must be added here — the anchor assertions below fail
  * loudly if the extractor goes blind.
  */
@@ -207,6 +209,7 @@ const CALL_PATTERNS = [
   /\.rpc\(\s*['"]([a-z0-9_]+)['"]/g,
   /looseRpc\([^)]*\)\(\s*['"]([a-z0-9_]+)['"]/g,
   /callIntentRpc\(\s*['"]([a-z0-9_]+)['"]/g,
+  /callRenderRpc\(\s*[\w$.]+,\s*['"]([a-z0-9_]+)['"]/g,
 ];
 
 function parseInlineParamKeys(source: string, afterIndex: number): readonly string[] | null {
@@ -294,6 +297,8 @@ describe('client RPC calls exist in the migration SQL', () => {
       'claim_referral',
       'submit_interest',
       'track_event',
+      'request_pitch_render',
+      'claim_media_render_job',
     ]) {
       expect(seenNames, `extractor no longer sees ${anchor}`).toContain(anchor);
     }
@@ -344,6 +349,12 @@ describe('client RPC calls exist in the migration SQL', () => {
         serverFunctions.has(name),
         `INTEREST_INTENT_RPCS entry '${name}' not in migrations`,
       ).toBe(true);
+    }
+  });
+
+  it('the pinned render RPC lists themselves exist server-side', () => {
+    for (const name of [...PITCH_RENDER_RPCS, ...PITCH_RENDER_SERVICE_RPCS]) {
+      expect(serverFunctions.has(name), `render RPC '${name}' not in migrations`).toBe(true);
     }
   });
 });

@@ -172,10 +172,15 @@ test('routes the pitch footer CTA into the waitlist with referral attribution', 
 }) => {
   await page.goto('/p/demo-blair');
 
-  // The public pitch seeds its own slug as the first-touch referral.
+  // The public pitch seeds its own slug as the first-touch referral, in
+  // localStorage so it survives the closed tab between viewing and signing in.
   await expect
-    .poll(() => page.evaluate(() => window.sessionStorage.getItem('fw_referral')))
-    .toBe('demo-blair');
+    .poll(() => page.evaluate(() => window.localStorage.getItem('fw_referral')))
+    .not.toBeNull();
+  const seeded = JSON.parse(
+    (await page.evaluate(() => window.localStorage.getItem('fw_referral'))) ?? 'null',
+  );
+  expect(seeded.slug).toBe('demo-blair');
 
   const pitchFriend = page.getByRole('link', { name: 'Pitch a friend' });
   await expect(pitchFriend).toHaveAttribute('href', '/?src=public-pitch&ref=demo-blair#start');

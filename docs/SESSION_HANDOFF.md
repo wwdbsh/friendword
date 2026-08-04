@@ -25,21 +25,25 @@
 
 |             |                                                                                                                                                       |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 코드        | `bc1c492` on `main`, `origin/main`과 동일, 워킹 트리 깨끗                                                                                             |
-| hosted DB   | **0053까지 적용**. `0054`는 **로컬 전용 — 의도적 보류**(§3 참조)                                                                                      |
+| 코드        | `26ebd6e` on `main` (렌더 워커 기동 슬라이스)                                                                                                         |
+| hosted DB   | **0053까지 적용**. `0054`는 **로컬 전용 — 의도적 보류**(§3 참조). 시드 교정: `media_render_concurrency_cap` 2→**1**                                   |
 | 런치 게이트 | `public_beta_enabled=off` · `real_payments_enabled=off` · `identity_enforcement=off` · `media_validation_enforcement=off` — **전부 사용자 결정 대기** |
-| 전 게이트   | green (아래 수치)                                                                                                                                     |
+| 해커톤      | **Final Official Rules 공개·전면 대조 완료**([`HACKATHON_RULES.md`](HACKATHON_RULES.md) 2026-08-04). 한국 참가 확정, 웹 선공개 무해 확정              |
+| 전 게이트   | green (아래 수치, Advisor 재실행)                                                                                                                     |
 
 ```
 DB 01~29 exit 0 (canonical runner: bash scripts/test-db.sh)
 contracts 293 · data 135 · mobile 231
-web  audit3 173 · ui 13 · render 32(+gated) · e2e 75
+web  audit3 182 · ui 17 · render 38(+gated 43, 벤치 e2e 포함) · e2e 75
 build ✓ · typecheck 0 errors · lint/format clean
 ```
 
 **green test ≠ 완료 증거입니다.** 이 리포에서 전 게이트 green인 채로 프로덕션이 깨져 있던 사고가 세 번 났습니다(`CLAUDE.md` §14).
 
-### 최근 두 슬라이스
+### 최근 슬라이스
+
+**`26ebd6e` — 큐를 집어갈 손 (렌더 워커 기동, hosted 무관 — 코드만)**
+0054의 큐는 완성돼 있었지만 아무것도 워커를 부르지 않았습니다. kit 카드가 내보내기 요청·폴 틱마다 세션 게이트 릴레이(`/api/media/render-kick`)를 기회주의적으로 kick하고(ingest 패턴, cron 없음 유지), 워커는 잡이 남아 있으면 pass 종료 시 **self-kick**합니다(claim 창 90초 < 렌더 1건 ~150초 — 이것 없으면 두 번째 잡이 영원히 방치). `vercel.json`에 render-run·render-bench 등록(300s/2048MB). **DB·스토리지 0의 시크릿 게이트 벤치**(`/api/media/render-bench`)가 워스트케이스(60초/1,845프레임)를 실엔진으로 돌려 리눅스 실측을 0054 이전에 가능하게 합니다. 동시 상한 시드 2→**1**(Fluid 인스턴스 공유 시 1.2GB×2가 2048MB에서 공존 불가 — 실측 후 app_config UPDATE로 상향). 트리거의 5초 abort는 "Vercel이 클라이언트 절단 후에도 invocation을 지속한다"는 가정에 의존합니다(§5).
 
 **`5cef761` — 퍼널 종착지와 채널 귀속 (0053, hosted 적용됨)**
 릴스가 트래픽을 데려와도 받을 곳이 없었습니다(베타 게이트가 관심 표현을 거부). 관심을 **단계화**했습니다: S1(의사를 비공개 저장, Dater 도달 0건) → S2(프로필 검증 통과 시 `submit_interest`로 승격) → S3(기존 Dater 승인). S1은 `interests`의 상태 컬럼이 아니라 **별도 테이블 `interest_intents`** 입니다 — 기존 소비자 전부가 "행 = 전달된 관심"을 가정하므로 읽기 하나만 놓쳐도 미검증 관심이 Dater 표면에 뜹니다. 귀속은 `sessionStorage` → `localStorage` `{slug, ch, ts}` + 30일 만료로 옮기고 **모든 로그인 복귀 표면**(root layout)에서 클레임합니다.
@@ -51,24 +55,31 @@ build ✓ · typecheck 0 errors · lint/format clean
 
 ## 2. 사용자 결정 대기 (Advisor가 임의로 정하지 않음)
 
-1. **렌더 함수 메모리** — `apps/web/vercel.json`에 **`ingest-run`만** 등록돼 있습니다(`maxDuration 300`, `memory 2048`). **`render-run` 항목이 없어 기본 메모리를 받습니다.** 렌더 피크가 1.2GB라 이대로 배포하면 첫 렌더가 OOM으로 죽습니다.
-2. **리눅스 실측** — 1.2GB는 **macOS RSS 합산 프록시**이고 여유가 7%뿐입니다. Chrome 공유 페이지 중복 계산이 사라져 리눅스에서 낮아질 근거는 있으나 **검증 안 됐습니다**. 넘치면 실행처(Vercel Fluid, U6) 재협상이 필요하고 그건 사용자 결정입니다.
-3. **`friendword.com` 취득** — 아직 등록 가능. 엔드카드 URL이 환경 설정값이라 코드는 안 막히지만, **영상은 한번 나가면 회수가 안 됩니다**.
-4. **`public_beta_enabled`** — S2 파이프라인이 완성돼 있어 켜는 즉시 전달이 활성화됩니다. **릴스 배포는 이 스위치 이후**(`CLAUDE.md` §16).
+1. **`FRIENDWORD_MEDIA_RENDER_SECRET` / `FRIENDWORD_MEDIA_INGEST_SECRET`** — 둘 다 Vercel 미설정이라 해당 라우트가 501을 반환합니다. **키 값은 사용자가 직접 입력하며 Claude는 수신하지 않습니다.** 렌더 시크릿이 설정돼야 §3의 벤치·기동이 시작됩니다.
+2. **리눅스 실측 판정** — 벤치 도구는 배포돼 있습니다(§3-2에 실행 절차). 1.2GB는 **macOS RSS 합산 프록시**이고 여유가 7%뿐입니다. 기준 초과 시 실행처(Vercel Fluid, U6) 재협상이 필요하고 그건 사용자 결정입니다. 동시 벤치 2회의 `instanceId`가 같으면 Fluid 인스턴스 공유가 실증된 것이므로 **cap=1을 유지해야 합니다**(상향은 app_config UPDATE).
+3. **도메인 / `FRIENDWORD_SHARE_ORIGIN` — 0054 push 전에 결정해야 합니다.** `resolveShareOrigin`은 vercel.app을 거부하지 않으므로(2026-08-04 Deputy 확인 — 'not configured' 501은 실질 데드 코드), 도메인 미확정 상태의 **첫 실렌더는 vercel.app URL을 다운로드 MP4에 영구히 굽습니다**(같은 revision은 재렌더되지 않음). 선택지: `friendword.com` 취득 + `FRIENDWORD_SHARE_ORIGIN` 설정, 또는 QA 전용 파일(배포 안 함)에 한해 vercel.app 엔드카드를 명시적으로 수용.
+4. **`public_beta_enabled`** — S2 파이프라인이 완성돼 있어 켜는 즉시 전달이 활성화됩니다. **릴스 배포는 이 스위치 이후**(`CLAUDE.md` §16). 해커톤 규칙상 Grand Prize shortlist가 **RevenueCat 계측 제출-기간-내(~9/30) 매출**로 결정되므로 `real_payments_enabled` 시점도 같은 축에서 판단이 필요합니다(`HACKATHON_RULES.md`).
 5. **릴스 음소거 문제(미해결, 열린 제품 질문)** — MP4에 플레이어의 **자막 트랙이 빠져** 있습니다. 장면 자체의 텍스트(wordPop, 헤드라인)는 들어갑니다. 승인 대상이 scene JSON이라는 원칙상 맞는 결정이지만, **릴스는 음소거로 소비되고 Introducer의 목소리가 콘텐츠의 핵심**이라 전달이 반쪽입니다. 사용자가 정한 메커니즘의 효과에 직결되므로 Advisor가 단독으로 바꾸지 않았습니다.
-6. **`FRIENDWORD_MEDIA_INGEST_SECRET` / `FRIENDWORD_MEDIA_RENDER_SECRET`** — 둘 다 Vercel 미설정이라 해당 라우트가 501을 반환합니다. **키 값은 사용자가 직접 입력하며 Claude는 수신하지 않습니다.**
+6. **Ship Kit participant form** — Devpost 등록 이메일로 온 폼을 작성해야 스폰서 퍽이 풀립니다(해커톤 자격과 무관, 혜택만).
 
 ---
 
 ## 3. 다음에 할 일 (권장 순서)
 
-이 순서에는 이유가 있습니다. **뒤집지 마십시오.**
+이 순서에는 이유가 있습니다. **뒤집지 마십시오.** (§3-1·§3-3의 코드는 `26ebd6e`로 완료 — 남은 것은 사용자 액션과 검증입니다.)
 
-1. **렌더 함수 메모리 설정** — `apps/web/vercel.json`에 `app/api/media/render-run/route.ts`를 `ingest-run`과 같은 `maxDuration 300` / `memory 2048`로 추가.
-2. **리눅스 실측** — 배포 후 60초 최악 케이스(1,845프레임)로 처리량·피크 메모리·콜드스타트(Chromium brotli 전개 시간 포함)를 실측. 기준: p95 ≤ 180s, 메모리 ≤ 한도의 80%.
-3. **렌더 워커 기동 경로** — **지금은 큐에 잡을 넣어도 아무것도 집어가지 않습니다.** `vercel.json`에 cron이 없고 `render-run`을 부르는 것이 없습니다. 시크릿 설정 + 주기 실행(또는 명시적 트리거)이 필요합니다.
-4. **그 다음에 `0054`를 hosted에 적용.** 순서를 뒤집으면 내보내기 버튼이 살아나 잡이 쌓이는데 처리할 워커가 없어 **"Rendering your MP4…"가 영원히 떠 있습니다** — 아무 일도 안 일어나는데 진행 중이라고 말하는 화면이며, 이번 슬라이스 내내 없애온 바로 그 패턴(§12)입니다. 지금은 kit 화면에 "상태를 불러오지 못했습니다"가 뜨는데 보기엔 나빠도 **정직합니다**.
-5. 도메인 → 6. 베타 스위치 → 7. 릴스 배포.
+1. **[사용자] Vercel에 `FRIENDWORD_MEDIA_RENDER_SECRET` 설정**(≥16자; `FRIENDWORD_MEDIA_INGEST_SECRET`도 같이 — ingest 워커도 이것 때문에 한 번도 돈 적이 없습니다). 값은 Claude에게 주지 않습니다.
+2. **[사용자] 리눅스 실측** — 배포된 프로덕션에 대해(프리뷰 불가 — deployment protection이 캡처 페이지를 막음):
+   ```
+   # cold(첫 호출) 1회 + warm 1회 + 동시 2회:
+   curl -X POST "$ORIGIN/api/media/render-bench" \
+     -H "authorization: Bearer $FRIENDWORD_MEDIA_RENDER_SECRET"
+   ```
+   판독: `renderMs` p95 ≤ 180,000 · `peakMemoryBytes` ≤ 1,717,986,918(2048MB의 80%) · `coldStart:true` 응답의 추가 소요가 콜드스타트 비용 · **동시 2회의 `instanceId`가 같으면 Fluid 인스턴스 공유 실증 → cap=1 유지 필수**. `memorySource`가 `cgroup-v2-peak`인지 확인(자식 프로세스 포함 수치).
+3. **[사용자 결정] 도메인 / `FRIENDWORD_SHARE_ORIGIN`** — §2-3. 첫 실렌더 전에 정해야 엔드카드 URL이 MP4에 올바르게 박힙니다.
+4. **그 다음에 `0054`를 hosted에 적용**(클린 트리에서 `supabase db push --linked`). 순서를 뒤집으면 내보내기 버튼이 살아나 잡이 쌓이는데 처리할 워커가 없어 **"Rendering your MP4…"가 영원히 떠 있습니다** — 아무 일도 안 일어나는데 진행 중이라고 말하는 화면이며, 이 트랙 내내 없애온 바로 그 패턴(§12)입니다. 지금 kit 화면의 "상태를 불러오지 못했습니다"는 보기엔 나빠도 **정직합니다**.
+5. **push 직후 실렌더 1건 end-to-end QA** — 내보내기 요청 → kick 체인(요청 kick → 워커 claim → self-kick) → MP4 다운로드까지. **기회주의 트리거 패턴은 프로덕션에서 실행된 적이 없습니다**(ingest는 시크릿 미설정으로 한 번도 안 돌았음) — 이 QA가 최초 실증입니다.
+6. 베타 스위치 → 7. 릴스 배포 (해커톤 시퀀싱은 `HACKATHON_RULES.md` — 9/30 스토어 출시 마감 역산 유지).
 
 ### 미착수·보류 (범위 밖으로 명시적으로 남긴 것)
 
@@ -90,18 +101,14 @@ Node 22(.nvmrc) · corepack → pnpm 11.12.0 · pnpm install
 - **`.env`는 git에 없습니다. 이전 머신에서 직접 복사하십시오**(변수 목록 `.env.example`). **Claude에게 값을 주지 마십시오** — 형식·연결성만 확인합니다.
 - DB 테스트에 **brew Postgres 17** 필요. 러너는 `bash scripts/test-db.sh`(plain Postgres + hosted 권한 에뮬레이션 `supabase/tests/helpers/auth_stub.sql`). `supabase start` 스택과는 별개입니다.
 - hosted push는 supabase CLI 로그인 필요. 시뮬레이터 QA는 Xcode.
-- **`test:e2e` 실행 절차** (이 전제를 모르면 57개가 전부 죽습니다):
+- **`test:e2e` 실행 절차** (2026-08-04 교정 — 본질은 "**env가 실린 dev 서버가 :3000에 떠 있어야 한다**"입니다):
   ```
-  # 1) 로컬 스택
-  supabase start
-  # 2) 로컬 env를 실어 dev 서버를 :3000에 띄운다
-  #    (supabase status --output json 의 API_URL/ANON_KEY/SERVICE_ROLE_KEY 사용)
-  #    apps/web 에 .env.local 이 없으므로 셸 env로 주입해야 한다
-  pnpm --filter @friendword/web dev
-  # 3) 그 상태에서
+  # dev 서버가 이미 :3000에 있으면 그대로 재사용. 없으면:
+  pnpm --filter @friendword/web dev   # (tmux 세션 권장)
+  # 그 상태에서
   pnpm --filter @friendword/web test:e2e
   ```
-  `playwright.config.ts`가 `reuseExistingServer: true`라 **떠 있는 서버를 재사용**합니다. 서버가 없으면 Playwright가 env 없는 서버를 스스로 띄우고 전 스펙이 `missing its Supabase configuration`에서 실패합니다.
+  `apps/web/.env → ../../.env` **심볼릭 링크가 이미 존재**해 dev 서버는 루트 `.env`에서 env를 받습니다(셸 주입 불필요). e2e 스펙은 **네트워크 호출을 전부 mock**하므로(playwright.config.ts:15) 로컬 Supabase 스택도 불필요 — 이 머신에는 컨테이너 런타임이 없어 `supabase start`가 애초에 불가합니다. 57-failure 함정의 본질: 서버가 없으면 Playwright가 `reuseExistingServer: true` 설정으로 **env 없는 서버를 스스로 띄워** 전 스펙이 `missing its Supabase configuration`에서 죽습니다.
 - **렌더 e2e**(선택): `NEXT_DIST_DIR=.next-build pnpm exec next start -p 3120` 후 `PITCH_RENDER_E2E=1 pnpm exec vitest run --config vitest.render.config.ts`. `pnpm build`는 `NEXT_DIST_DIR=.next-build`를 쓰므로 `next start`도 같은 값이어야 합니다.
 
 ---
@@ -132,7 +139,8 @@ moderation 텍스트 해싱 · scene 해시 직렬화 · 분수 `pulseHz` 나눗
 - **오디오는 Introducer 원본 그대로**(§8-1). AAC면 `-c:a copy`, 아니면 순수 AAC. `loudnorm` 등 **파형을 바꾸는 필터 전면 금지**. 엔드카드 구간은 무음 패딩이고 `-shortest`를 쓰지 않습니다.
 - **엔드카드는 scene 스키마가 아니라 렌더러 크롬**입니다 — 브랜드 상수 + canonical 캠페인 URL을 승인 타임라인 **뒤에 순수 append**(1.5초). Dater 저작 텍스트 0. URL은 **환경 설정값**(하드코딩 금지). 동의 화면에 고지 1줄이 같은 슬라이스에 나갔습니다.
 - **번들 예산**: 렌더 라우트 ≈153MB / 250MB. `ffprobe`와 BlazeFace는 **렌더에 불필요하므로 넣지 마십시오**. `outputFileTracingIncludes`는 라우트별입니다.
-- **`serverExternalPackages: ['ffmpeg-static', 'ffprobe-static']`를 지우지 마십시오.** 두 패키지는 `path.join(__dirname, …)`로 바이너리를 찾는데, 번들되면 `__dirname`이 청크 디렉터리로 재작성돼 spawn ENOENT가 납니다.
+- **`serverExternalPackages: ['ffmpeg-static', 'ffprobe-static']`를 지우지 마십시오.** 두 패키지는 `path.join(__dirname, …)`로 바이너리를 찾는데, 번들되면 `__dirname`이 청크 디렉터리로 재작성돼 spawn ENOENT가 납니다. `outputFileTracingIncludes`는 **라우트별**입니다 — Chromium/ffmpeg를 exec하는 라우트를 새로 만들면 그 라우트의 엔트리도 추가해야 합니다(render-run·render-bench에 각각 있음).
+- **워커 기동은 kick 체인입니다 (cron 없음, `26ebd6e`)**: kit 카드 → `/api/media/render-kick`(세션 게이트 릴레이) → `after()`로 `triggerRenderRun` → 시크릿을 실어 render-run POST. 트리거는 **5초 abort로 응답 대기만 취소**합니다(패스는 계속 돈다는 Vercel 동작 가정 — client-disconnect 취소 설정이 켜지면 이 가정이 깨집니다). 워커는 `processed>0`이면 pass 종료 시 self-kick해 큐를 마저 비웁니다. **queued인 채 claim되지 않는 잡은 ops_alert를 울리지 않습니다**(알림은 터미널 실패에만) — 정체된 큐의 백스톱은 운영자 curl입니다(trigger.ts 주석에 명령 기재).
 
 ### 과금 경계 (Phase 4)
 

@@ -1,67 +1,177 @@
 # PROJECT HANDOFF
 
-> 갱신: 2026-07-19 KST. **acceptance source of truth = [`docs/FRIENDWORD_FOURTH_AUDIT_HANDOFF_2026-07-15.md`](FRIENDWORD_FOURTH_AUDIT_HANDOFF_2026-07-15.md)(4차 감사)** — 1~3차는 역사적 기준. 결정 이력 [`docs/DECISIONS.md`](DECISIONS.md), 작업 소유권 [`docs/TASKS.md`](TASKS.md).
+> 갱신: **2026-08-04 KST**. 작업 규칙은 [`CLAUDE.md`](../CLAUDE.md)(매 세션 자동 로드), 결정 이력과 근거는 [`docs/DECISIONS.md`](DECISIONS.md)(50건, 각 항목에 날짜·이유·검토한 대안·영향). **이 문서는 "지금 어디에 서 있는가"만 다룹니다** — 왜 그렇게 결정했는지는 DECISIONS를 읽으십시오.
 >
-> **새 머신(클론) 부트스트랩**: Node 22(.nvmrc)·corepack로 pnpm 11.12.0·`pnpm install`. **`.env`는 git에 없으므로 이전 머신에서 직접 복사**(변수 목록은 `.env.example`). DB 테스트는 brew Postgres 17 필요. hosted push는 supabase CLI(로그인 필요). 시뮬레이터 QA는 Xcode. Claude 메모리(~/.claude)는 머신 로컬이라 이 문서가 유일한 인계 수단이다.
+> 이 문서는 **세션이 바뀌어도, 기계가 바뀌어도 살아남는 유일한 인계 수단**입니다. Claude의 `~/.claude` 메모리는 머신 로컬이라 따라오지 않습니다. 새 세션은 `CLAUDE.md` → 이 문서 → `DECISIONS.md` 최신 3건 순으로 읽으면 됩니다.
 
-## CURRENT STATE
+---
 
-- 판정: **기능성 내부 베타**. 3차 감사 Slice 0~~7 해소 완료. **4차 감사가 새 기준이며 대응 미착수** — 새 P0 10건+GP-P0 4건+H 17건, 실행 계획 §10 Slice 0~~9. 배포 판정: 본인 단독 내부 QA만 조건부 허용(테스트 계정·gate off), 외부 테스터 초대·공개·Grand Prize 제출 차단.
-- 게이트: `real_payments_enabled=off`·`public_beta_enabled=off` (publish·공개 read·interest 차단). QA 예외는 draft 단위 `qa_preview_allowlist`뿐 — 운영 도구 `scripts/qa-preview-allowlist.mjs`(find/add/remove/list).
-- 인프라 (전부 가동, 계정 소유는 사용자):
-  - **DB**: Supabase hosted `oknolcxsvogrhnxnyosr`, migrations **0001~0042 배포**(0040은 의도적 미사용 갭 — c11 참조).
-  - **웹**: Vercel `https://friendword-web-nmsi.vercel.app` — GitHub `wwdbsh/friendword` main push마다 자동 배포(Root=`apps/web`, `vercel.json`의 `buildCommand: next build`). env: Supabase 4종 등록됨, `OPENAI_API_KEY`·`REVENUECAT_WEBHOOK_AUTH_TOKEN`은 사용자 등록 상태 확인 필요.
-  - **모바일**: EAS `@wwdbsh/friendword` → TestFlight 내부 배포 가동(실기기 설치 2회 성공). `eas.json`에 pnpm 11.12.0 핀 필수. 반복 릴리스 절차 `docs/OPS.md`.
-  - **RevenueCat**: 프로젝트 연동 완료 — iOS 앱(`com.friendword.app`)+IAP 키, 상품 `creator_launch_credit_499`·`campaign_pass_30d_1999`(ASC 둘 다 **Consumable**), default offering 패키지 2개, 웹훅→`/api/revenuecat`, SDK 키 EAS env. ASC 샌드박스 테스터 생성됨.
-  - **scheduled-ops cron**: GH Actions 시크릿(`SUPABASE_URL`·`SUPABASE_SERVICE_ROLE_KEY`) 등록 전까지 매시간 fail-fast 메일 — 등록 여부 미확인.
-- 회귀: DB base · audit 7/7 · audit2 14/14 · **audit3 c01~c11(11/11)** · unit 219(mobile 106 포함) · web 유닛 49 · Playwright 46/46. green test ≠ 완료 증거.
-- 작업 체제: Advisor(오케스트레이터)+Opus 워커(작업 단위 생성, 승인 후 종료). 워커 결과는 Advisor가 diff·동일 테스트 재실행으로 검증 후에만 승인.
+## 0. 이 제품이 하려는 일 (여기서 벗어나면 안 됩니다)
 
-## DONE
+친구(**Introducer**)가 자기 목소리로 싱글인 친구(**Dater**)를 소개하는 **세로형 모션 피치**를 만들고, Dater가 **공개 전에 개별 승인**하며, 그 영상이 **릴스/틱톡에 올라가 낯선 사람에게 도달**하고, 마음이 동한 시청자가 **가입 없이 보고 검증 후 관심을 표현**하면, Dater가 응할 때만 매칭·채팅이 열립니다.
 
-- **3차 감사 Slice 6**(`90e9516`, migration 0041): 데모 정직화(structure scene·segment 타이밍·age/vouch 제거), judge-safe flow(c09·c11, ON CONFLICT 우회 실증 기각), Dater 통제(실 프리뷰·18+ fail-closed·canonical location·voice 자동 포함), recap 이원화, 커머스 계약 단일화·kit/OG 가짜 waveform 제거.
-- **3차 감사 Slice 7**(`69efcf3`): Trust Layer 수치 스펙·contrast matrix(red-first 2건 해소), consent 6단계+sticky rail, 44px 실측, §11 browser 회귀, app/ 테스트 라우트 번들 크래시(Expo Go 부팅 불가 잠복 결함) 수정.
-- **TestFlight 채널 개통**: EAS 셋업(아이콘/스플래시 생성 포함)→빌드→제출→실기기 설치. 함정 해결: pnpm 핀, 크리덴셜 TTY, 암호화 면제 선언.
-- **웹 프로덕션 배포**: Vercel + 스모크 전 통과(landing/demo 200, 404 게이트, OG png, noindex, transcribe 401 graceful).
-- **RevenueCat/ASC 셋업**(위 상태 표) + **제품 ID rename**(`3dd6c1a`, migration 0042 — ASC ID 영구잠금 사고 대응, RPC 5개 재정의, 전 스위트 green).
-- **모바일 사인인·헤더 수정**(`03a8adf`): signed-out 카드에 SignInSheet 연결 CTA(4차 H-6·CP-7 코드분 선반영), 미등록 화면 헤더·"index" 백라벨 누출 제거.
-- 운영 도구: `scripts/qa-preview-allowlist.mjs`, 실기기 QA 체크리스트 `docs/DEVICE_QA.md`, 데모 실음성 seed `scripts/seed-demo-pitch.mjs`(파일 대기).
+**사용자가 2026-08-03에 성장 메커니즘을 명시 확정했습니다** (Advisor가 제안한 "메신저 전달 중심 재정의"는 **기각**):
 
-## IN PROGRESS
+```
+릴스 업로드 → 낯선 사람이 봄 → 그 Dater가 마음에 듦
+           → 액션 발화 → 유입 → Dater가 응하면 매칭·채팅
+```
 
-- **실기기 풀 플로우 QA**: 준비 완료(도구·체크리스트·계정), 실행 전. `03a8adf` 반영 재빌드+submit이 됐는지부터 확인 필요(마지막 설치 빌드는 그 이전).
+바꿀 대상이 아니라 **작동시킬 대상**입니다. `CLAUDE.md` §8의 다섯 경쟁 경계를 훼손하는 변경은 금지입니다.
 
-## TODO
+---
 
-1. (P0) `03a8adf` 반영 **재빌드+submit** 확인 → `docs/DEVICE_QA.md` 체크리스트로 실기기 QA 실행(draft 생성 시 allowlist 등록은 Advisor가 스크립트로).
-2. (P0) **OpenAI 키**: platform.openai.com 키+budget alert → Vercel `OPENAI_API_KEY` → Redeploy (ChatGPT 구독으로는 API 호출 불가 — 별도 과금, 최소 $5 크레딧). 미등록 시 AI 플로우 501.
-3. (P0) **GH Actions 시크릿** 등록 확인(`SUPABASE_URL`·`SUPABASE_SERVICE_ROLE_KEY`) → scheduled-ops 수동 트리거로 green 확인(실패 메일 중단 + 만료/삭제 runtime 가동).
-4. (P0) **sandbox 결제 드릴**: Advisor 주도 — `real_payments_enabled` on(SQL) → 앱에서 sandbox 구매/복원 왕복 → 웹훅·원장 검증 → off 원복·기록. 그 전까지 구매 버튼 금지.
-5. (P0) **4차 감사 대응 착수**: §10 Slice 0(기준 동결·truth reset)부터. GP-P0-1(structured motion 원계약 복원 vs 07-13 축소 유지)은 사용자 재결정 필요.
-6. (P0) **데모 실음성**: 권리 확보 30~60초 영어 녹음(TTS 금지) → seed 1회 실행.
-7. (P1) 실기기 QA 발견사항을 4차 Slice 8 입력으로 정리.
-8. (P1) prod Supabase 분리 결정은 4차 Slice 9에서(신규 prod 프로젝트 A안 우선 검토 — DECISIONS 예정).
-9. (P2) identity 벤더·Resend 도메인은 Slice 9 시점.
+## 1. 지금 상태 (2026-08-04)
 
-## IMPORTANT DECISIONS
+|             |                                                                                                                                                       |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 코드        | `bc1c492` on `main`, `origin/main`과 동일, 워킹 트리 깨끗                                                                                             |
+| hosted DB   | **0053까지 적용**. `0054`는 **로컬 전용 — 의도적 보류**(§3 참조)                                                                                      |
+| 런치 게이트 | `public_beta_enabled=off` · `real_payments_enabled=off` · `identity_enforcement=off` · `media_validation_enforcement=off` — **전부 사용자 결정 대기** |
+| 전 게이트   | green (아래 수치)                                                                                                                                     |
 
-- **4차 감사 = acceptance 기준** 승격. TestFlight 내부 QA 허용 / 외부 노출 전면 차단 판정 준수.
-- **RevenueCat은 단일 프로젝트 + Apple sandbox**: 환경 구분은 이벤트의 SANDBOX/PRODUCTION 태그, 서버 게이트가 PRODUCTION 효익만 차단(SANDBOX 처리) — 개발용 별도 프로젝트 없음. H-14(sandbox/production namespace 분리)는 4차 대응에서 하드닝.
-- **상품 계약 스토어 반영**: 두 상품 모두 ASC **Consumable**(신 UI에 갱신 안 함 구독 없음, 기간은 서버 상태기계 전담, 자동 갱신 금지). Campaign Pass ID는 `campaign_pass_30d_1999`(구 ID는 ASC 영구잠금 — migration 0042).
-- **운영 교훈(불변)**: ASC IAP ID는 삭제 시 영구 소각 — 삭제 금지 / EAS는 eas.json에 pnpm 버전 핀 / EAS·Vercel 크리덴셜 1회 셋업은 진짜 TTY 필요 / Vercel은 `buildCommand: next build`(로컬 `.next-build` 리다이렉트는 dev 서버 충돌 방지용이므로 유지).
-- (기존 유지) TTS/합성 데모 음성 금지 · 게이트 전역 토글 금지(allowlist만) · 키·시크릿 값은 사용자 직접 입력(Claude 미수신) · 감사 §13 금지 표현 준수.
+```
+DB 01~29 exit 0 (canonical runner: bash scripts/test-db.sh)
+contracts 293 · data 135 · mobile 231
+web  audit3 173 · ui 13 · render 32(+gated) · e2e 75
+build ✓ · typecheck 0 errors · lint/format clean
+```
 
-## ISSUES / RISKS
+**green test ≠ 완료 증거입니다.** 이 리포에서 전 게이트 green인 채로 프로덕션이 깨져 있던 사고가 세 번 났습니다(`CLAUDE.md` §14).
 
-- **4차 감사 P0 미해소**: 승인 snapshot 불일치(공개 structure 미검토·moderation 우회), verified interest 프로필 교체 우회, 미디어 검증 경로 신뢰, provider retry 비용 누락, 음성 길이 서버 invariant 부재, RevenueCat 복구·Pass 이중 시간축 — 외부 노출 차단의 근거이므로 QA 중 실사용자 유입 금지.
-- scheduled-ops 시크릿 미등록이면 매시간 실패 메일 지속(의도된 fail-fast).
-- OPENAI/identity/Resend 키 부재 플로우는 mock/차단 상태 — 완료로 기록 금지.
-- hosted 실계정 `wwdbsh@gmail.com` 삭제·조작 금지.
-- 운영 함정: DB push는 클린 트리에서만 · :3000 dev 서버 중 `web build` 금지 · Playwright는 편집 멈춘 창에서 · RPC 재정의는 최신본(0042 포함) 통째 복사 · `apps/mobile/app/` 하위 `*.test.*` 금지(라우트로 번들됨 — 가드 테스트 존재) · plpgsql `NOT IN`+NULL · 웹 수동 QA 인증은 localStorage `friendword-web-auth`.
+### 최근 두 슬라이스
 
-## LOG SUMMARY
+**`5cef761` — 퍼널 종착지와 채널 귀속 (0053, hosted 적용됨)**
+릴스가 트래픽을 데려와도 받을 곳이 없었습니다(베타 게이트가 관심 표현을 거부). 관심을 **단계화**했습니다: S1(의사를 비공개 저장, Dater 도달 0건) → S2(프로필 검증 통과 시 `submit_interest`로 승격) → S3(기존 Dater 승인). S1은 `interests`의 상태 컬럼이 아니라 **별도 테이블 `interest_intents`** 입니다 — 기존 소비자 전부가 "행 = 전달된 관심"을 가정하므로 읽기 하나만 놓쳐도 미검증 관심이 Dater 표면에 뜹니다. 귀속은 `sessionStorage` → `localStorage` `{slug, ch, ts}` + 30일 만료로 옮기고 **모든 로그인 복귀 표면**(root layout)에서 클레임합니다.
 
-- 2026-07-14: 3차 감사 Slice 0~5(`358a2ae`)에 이어 **Slice 6·7 완주**(`90e9516`·`69efcf3`, 0041 배포, 프로덕션 E2E 2연속 PASS). 워커 5명 체제, Advisor 검증이 voice 보존 구멍·E2E 18+ 파손·우회 의혹 실증 기각 등을 처리.
-- 2026-07-15: **TestFlight 개통**(첫 빌드→설치). **4차 감사 수령**.
-- 2026-07-16: **Vercel 웹 프로덕션 배포**+스모크(`35c60aa`), scheduled-ops 시크릿 안내.
-- 2026-07-18: **RevenueCat/ASC 전체 셋업**, 제품 ID rename+0042(`3dd6c1a`), allowlist 도구(`84efa8b`), 모바일 사인인 CTA·헤더 수정(`03a8adf`) — 실기기 QA 직전 상태로 인계.
+**`bc1c492` — 승인된 피치가 MP4가 된다 (0054, hosted 미적용)**
+`media-worker/render/index.ts`가 9줄 주석이라 **올릴 파일 자체가 없었습니다**. 브라우저를 합성기로 씁니다 — 웹과 동일한 scene JSON을 동일 컴포넌트로 헤드리스 페이지에 그려 프레임을 캡처하고 ffmpeg로 인코딩합니다(ffmpeg는 인코더이지 합성기가 아닙니다). 해석기는 이미 `(scene, t)` 순수 함수였고 애니메이션 루프가 재생 여부로 게이트돼 있어 **리팩터링이 불필요했습니다**.
+
+---
+
+## 2. 사용자 결정 대기 (Advisor가 임의로 정하지 않음)
+
+1. **렌더 함수 메모리** — `apps/web/vercel.json`에 **`ingest-run`만** 등록돼 있습니다(`maxDuration 300`, `memory 2048`). **`render-run` 항목이 없어 기본 메모리를 받습니다.** 렌더 피크가 1.2GB라 이대로 배포하면 첫 렌더가 OOM으로 죽습니다.
+2. **리눅스 실측** — 1.2GB는 **macOS RSS 합산 프록시**이고 여유가 7%뿐입니다. Chrome 공유 페이지 중복 계산이 사라져 리눅스에서 낮아질 근거는 있으나 **검증 안 됐습니다**. 넘치면 실행처(Vercel Fluid, U6) 재협상이 필요하고 그건 사용자 결정입니다.
+3. **`friendword.com` 취득** — 아직 등록 가능. 엔드카드 URL이 환경 설정값이라 코드는 안 막히지만, **영상은 한번 나가면 회수가 안 됩니다**.
+4. **`public_beta_enabled`** — S2 파이프라인이 완성돼 있어 켜는 즉시 전달이 활성화됩니다. **릴스 배포는 이 스위치 이후**(`CLAUDE.md` §16).
+5. **릴스 음소거 문제(미해결, 열린 제품 질문)** — MP4에 플레이어의 **자막 트랙이 빠져** 있습니다. 장면 자체의 텍스트(wordPop, 헤드라인)는 들어갑니다. 승인 대상이 scene JSON이라는 원칙상 맞는 결정이지만, **릴스는 음소거로 소비되고 Introducer의 목소리가 콘텐츠의 핵심**이라 전달이 반쪽입니다. 사용자가 정한 메커니즘의 효과에 직결되므로 Advisor가 단독으로 바꾸지 않았습니다.
+6. **`FRIENDWORD_MEDIA_INGEST_SECRET` / `FRIENDWORD_MEDIA_RENDER_SECRET`** — 둘 다 Vercel 미설정이라 해당 라우트가 501을 반환합니다. **키 값은 사용자가 직접 입력하며 Claude는 수신하지 않습니다.**
+
+---
+
+## 3. 다음에 할 일 (권장 순서)
+
+이 순서에는 이유가 있습니다. **뒤집지 마십시오.**
+
+1. **렌더 함수 메모리 설정** — `apps/web/vercel.json`에 `app/api/media/render-run/route.ts`를 `ingest-run`과 같은 `maxDuration 300` / `memory 2048`로 추가.
+2. **리눅스 실측** — 배포 후 60초 최악 케이스(1,845프레임)로 처리량·피크 메모리·콜드스타트(Chromium brotli 전개 시간 포함)를 실측. 기준: p95 ≤ 180s, 메모리 ≤ 한도의 80%.
+3. **렌더 워커 기동 경로** — **지금은 큐에 잡을 넣어도 아무것도 집어가지 않습니다.** `vercel.json`에 cron이 없고 `render-run`을 부르는 것이 없습니다. 시크릿 설정 + 주기 실행(또는 명시적 트리거)이 필요합니다.
+4. **그 다음에 `0054`를 hosted에 적용.** 순서를 뒤집으면 내보내기 버튼이 살아나 잡이 쌓이는데 처리할 워커가 없어 **"Rendering your MP4…"가 영원히 떠 있습니다** — 아무 일도 안 일어나는데 진행 중이라고 말하는 화면이며, 이번 슬라이스 내내 없애온 바로 그 패턴(§12)입니다. 지금은 kit 화면에 "상태를 불러오지 못했습니다"가 뜨는데 보기엔 나빠도 **정직합니다**.
+5. 도메인 → 6. 베타 스위치 → 7. 릴스 배포.
+
+### 미착수·보류 (범위 밖으로 명시적으로 남긴 것)
+
+- **Phase 3b**: 클립을 scene에 넣기, 얼굴 블러 토글. v3 스키마는 있으나 **렌더는 v2 전용**이고 v1/v3는 핀된 에러로 거부합니다.
+- **Phase 5**: 비용 가드레일 확장, 사람 검토 큐.
+- **Instagram Private Replies 연동** — 낯선 시청자를 옮기는 유일한 공식 수단(댓글 → 자동 DM, 팔로우 무관, 7일·1건). **Meta App Review 필요**(`instagram_manage_comments`, `pages_messaging`).
+- **Play Install Referrer**: `apps/mobile/android` 디렉터리 자체가 없어 불가.
+- MP4 렌더러의 엔드카드는 완성됐으나, **모바일 앱 쪽 내보내기 표면은 없습니다**(웹 kit 화면만).
+- 알려진 미해결: `0044` NULL-digest grandfathering, `enforce_message_rate_limit`(0025)의 비직렬화 카운트 경합.
+
+---
+
+## 4. 새 기계 부트스트랩
+
+```
+Node 22(.nvmrc) · corepack → pnpm 11.12.0 · pnpm install
+```
+
+- **`.env`는 git에 없습니다. 이전 머신에서 직접 복사하십시오**(변수 목록 `.env.example`). **Claude에게 값을 주지 마십시오** — 형식·연결성만 확인합니다.
+- DB 테스트에 **brew Postgres 17** 필요. 러너는 `bash scripts/test-db.sh`(plain Postgres + hosted 권한 에뮬레이션 `supabase/tests/helpers/auth_stub.sql`). `supabase start` 스택과는 별개입니다.
+- hosted push는 supabase CLI 로그인 필요. 시뮬레이터 QA는 Xcode.
+- **`test:e2e` 실행 절차** (이 전제를 모르면 57개가 전부 죽습니다):
+  ```
+  # 1) 로컬 스택
+  supabase start
+  # 2) 로컬 env를 실어 dev 서버를 :3000에 띄운다
+  #    (supabase status --output json 의 API_URL/ANON_KEY/SERVICE_ROLE_KEY 사용)
+  #    apps/web 에 .env.local 이 없으므로 셸 env로 주입해야 한다
+  pnpm --filter @friendword/web dev
+  # 3) 그 상태에서
+  pnpm --filter @friendword/web test:e2e
+  ```
+  `playwright.config.ts`가 `reuseExistingServer: true`라 **떠 있는 서버를 재사용**합니다. 서버가 없으면 Playwright가 env 없는 서버를 스스로 띄우고 전 스펙이 `missing its Supabase configuration`에서 실패합니다.
+- **렌더 e2e**(선택): `NEXT_DIST_DIR=.next-build pnpm exec next start -p 3120` 후 `PITCH_RENDER_E2E=1 pnpm exec vitest run --config vitest.render.config.ts`. `pnpm build`는 `NEXT_DIST_DIR=.next-build`를 쓰므로 `next start`도 같은 값이어야 합니다.
+
+---
+
+## 5. 아키텍처에서 반드시 알아야 할 것
+
+### 권한 모델
+
+**전역 `users.role` 필드가 없습니다.** Creator/Dater/Interested Person 같은 계정 유형도 없습니다. 권한은 **campaign membership · resource ownership · pitch creator · interest sender 관계**로만 판정합니다(`CLAUDE.md` §7). 집행은 3층입니다: **SECURITY DEFINER RPC + BEFORE 트리거 + RLS**.
+
+`0052`가 public 스키마 blanket ACL을 회수하고 컬럼 단위로 재부여했습니다. **anon은 테이블 권한이 0이어야 합니다.** 신규 테이블에는 필요한 GRANT를 컬럼 단위로 명시하고 anon에게는 아무것도 주지 마십시오 — 놓치면 hosted에서 404/403이 납니다. service 전용 RPC는 `REVOKE ... FROM PUBLIC, anon, authenticated`(`0051` 선례)를 반드시 겁니다.
+
+### PitchScene 스키마 (동결됨)
+
+v1(사진 크로스페이드) / **v2(크롭 사다리 + 비트 그리드 + 11효과 닫힌 union + warm/hype)** / v3(클립 샷). **각 버전은 동결이며 시각적 변경은 새 schemaVersion을 요구합니다.** MP4는 다운로드된 파일이라 위반이 영구적이므로, 이 규칙은 이제 **웹·모바일·MP4 세 표면 모두**를 덮습니다.
+
+골든 벡터(scene JSON + 기대 판정)가 vitest와 SQL 하니스에 **바이트 동일**로 공유되고 드리프트 테스트가 지킵니다.
+
+### 언어 간 산술 함정 (네 번 사고남)
+
+moderation 텍스트 해싱 · scene 해시 직렬화 · 분수 `pulseHz` 나눗셈 · 초→ms 반올림. 원인은 **DB `NUMERIC` vs JS IEEE double**입니다. scene 해시는 반드시 `scene_definition::text`를 **재직렬화 없이** 다뤄야 합니다 — JS에서 `JSON.parse` 후 `stringify`로 되돌리면 키 순서·수치 표현이 달라져 절대 일치하지 않습니다.
+
+### 렌더 파이프라인 (Phase 4)
+
+- **프레임은 디스크에 쌓지 않습니다.** 리눅스에서 Chromium이 /tmp에 209MB를 전개하고 남는 게 ~300MB인데, 1080×1920 PNG 1,800장은 GB 단위입니다. ffmpeg stdin 스트리밍이 최적화가 아니라 **제약**입니다.
+- **캡처 중 CSS `transition`은 무력화**합니다. 벽시계로 보간되므로 캡처 속도에 따라 출력이 달라져 결정론이 깨집니다. 불투명도 램프는 이미 해석기가 계산하므로 꺼도 승인된 해석만 남습니다. **픽셀 동일성은 약속하지 않습니다**(§12).
+- **`elapsedMs` 반영이 한 커밋 늦습니다.** 주입 직후 찍으면 전 구간이 1프레임 밀립니다. "같은 t 두 번 = 동일" 검사로는 **일관되게 밀린 상태를 못 잡으므로** 샷 경계 검사가 따로 있습니다.
+- **오디오는 Introducer 원본 그대로**(§8-1). AAC면 `-c:a copy`, 아니면 순수 AAC. `loudnorm` 등 **파형을 바꾸는 필터 전면 금지**. 엔드카드 구간은 무음 패딩이고 `-shortest`를 쓰지 않습니다.
+- **엔드카드는 scene 스키마가 아니라 렌더러 크롬**입니다 — 브랜드 상수 + canonical 캠페인 URL을 승인 타임라인 **뒤에 순수 append**(1.5초). Dater 저작 텍스트 0. URL은 **환경 설정값**(하드코딩 금지). 동의 화면에 고지 1줄이 같은 슬라이스에 나갔습니다.
+- **번들 예산**: 렌더 라우트 ≈153MB / 250MB. `ffprobe`와 BlazeFace는 **렌더에 불필요하므로 넣지 마십시오**. `outputFileTracingIncludes`는 라우트별입니다.
+- **`serverExternalPackages: ['ffmpeg-static', 'ffprobe-static']`를 지우지 마십시오.** 두 패키지는 `path.join(__dirname, …)`로 바이너리를 찾는데, 번들되면 `__dirname`이 청크 디렉터리로 재작성돼 spawn ENOENT가 납니다.
+
+### 과금 경계 (Phase 4)
+
+무료 렌더 1회는 **구매가 아니라 grant**라서 `purchase_credit_ledger`가 아닌 별도 테이블(`pitch_render_unlocks`, 캠페인당 UNIQUE)에 있습니다. **소비는 성공 시점**입니다 — 실패는 아무것도 태우지 않습니다. 재렌더는 기존 `campaign_pass_30d_1999`로 열립니다(**신규 SKU 없음**).
+
+거절 문구 **두 개는 의미가 다릅니다. 절대 합치지 마십시오**:
+
+- `campaign pass required` — 무료 1회를 **정말로** 썼습니다. 참인 주장입니다.
+- `a render for this campaign is already in progress` — **아직 아무것도 소비되지 않았습니다.** 이 사용자는 결제가 아니라 기다리면 되고, 진행 중인 렌더가 실패하면 다음은 무료입니다. 여기서 결제를 권하면 **거짓이자 부당한 결제 유도**입니다.
+
+---
+
+## 6. 반복해서 틀렸던 것 (같은 실수를 다시 하지 마십시오)
+
+- **하니스가 프로덕션보다 약하면 자기가 잡으려던 걸 숨깁니다** — 세 번 발생, `CLAUDE.md` §14.
+- **식별자를 기억으로 쓰지 마십시오.** Advisor가 컬럼명·RPC 인자·기본값을 틀리게 지시한 사례가 이 프로젝트에서만 **8건**이고, 그중 하나(`structure_reviewed`를 `dater_reviewed_structure`로 착각)는 **잘못된 이름이 배포까지 갔습니다**. 지시 전에 소스에서 확인하십시오.
+- **Worker가 근거를 갖춰 반대하면 대체로 Worker가 맞았습니다.** 상태 전이 조건, ms 반올림(비트 레벨 반례 제시), 과금 경합의 방향, 재시도 분기의 도달 가능성 — 전부 Worker가 Advisor를 실행 증거로 뒤집었습니다.
+- **커밋 전에 hosted DB를 먼저** — `CLAUDE.md` §15.
+- **문구는 코드가 주는 것만 말합니다**(§12). 과대약속 감사에서 실제로 걷어낸 표현: `will review`, `will reply`, `when Friendword opens`, `beyond their review`, `check back soon`. 렌더 소요 시간 추정도 금지입니다(큐 대기가 무한정).
+- **개인정보·동의·identity·moderation·결제를 mock만으로 완료 처리 금지**(§9).
+- **hosted 실계정 `wwdbsh@gmail.com` 삭제·조작 금지.**
+- **TTS/합성 음성은 공개 데모에서 금지.**
+
+### 운영 함정
+
+DB push는 클린 트리에서만 · `:3000` dev 서버가 떠 있는 채로 `web build` 금지 · RPC 재정의는 최신본 통째 복사 · `apps/mobile/app/` 하위 `*.test.*` 금지(라우트로 번들됨, 가드 테스트 있음) · plpgsql `NOT IN` + NULL · 웹 수동 QA 인증은 localStorage `friendword-web-auth` · ASC IAP ID는 삭제 시 영구 소각(삭제 금지) · EAS는 `eas.json`에 pnpm 버전 핀 · Vercel은 `buildCommand: next build`.
+
+---
+
+## 7. 인프라 (계정 소유는 사용자)
+
+- **DB**: Supabase hosted `oknolcxsvogrhnxnyosr`, **Free 플랜**(파일당 50MB 상한 — Pro 업그레이드 예정). 마이그레이션 `0001~0053` 배포, `0054` 로컬 보류. `0040`은 의도적 미사용 갭.
+- **웹**: Vercel, GitHub `wwdbsh/friendword` **`main` push마다 자동 배포**(Root=`apps/web`).
+- **모바일**: EAS `@wwdbsh/friendword` → TestFlight 내부 배포 가동.
+- **RevenueCat**: 프로젝트 연동 완료, 상품 `creator_launch_credit_499` · `campaign_pass_30d_1999`(ASC 둘 다 **Consumable**), 웹훅 → `/api/revenuecat`.
+- **scheduled-ops cron**: GH Actions 시크릿(`SUPABASE_URL` · `SUPABASE_SERVICE_ROLE_KEY`) 등록 여부 미확인 — 미등록이면 매시간 fail-fast 메일(의도된 동작).
+
+---
+
+## 8. 판정
+
+**기능성 내부 베타.** 외부 노출은 런치 게이트가 막고 있으며 그 스위치는 사용자 결정입니다. 릴스 배포는 베타 스위치 이후, 그리고 렌더 워커가 실제로 도는 것을 확인한 이후여야 합니다.

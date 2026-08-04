@@ -1,63 +1,53 @@
-# 에이전트 작업 규칙
+# Friendword 에이전트 작업 규칙
+
+## 정책 경계
+
+- 이 파일은 저장소 작업 규칙만 정의합니다. 모델 선택, effort, 에이전트 수, 오케스트레이션과 에스컬레이션은 현재 활성화된 하네스가 소유합니다.
+- 특정 모델, 고정 워커 수, 고정 세션 이름 또는 과거 Advisor/Worker 체제를 이 파일에서 강제하지 않습니다.
 
 ## 기본 원칙
 
-1. 사용자를 `상헌 님`으로 호칭하고 한국어로는 항상 존댓말을 사용합니다.
-2. Advisor와 `friendword-codex-1`, `friendword-codex-2`, `friendword-codex-3`은 같은 파일을 동시에 수정하지 않습니다.
-3. 각 Worker의 session, owned paths, dependency, acceptance criteria와 상태를 [`docs/TASKS.md`](docs/TASKS.md)에 기록합니다.
-4. Worker 완료 보고를 그대로 승인하지 않습니다. Advisor가 diff·test·matching-surface manual QA를 직접 재실행합니다.
-5. 검증 실패 시 원 Worker에게 원인, 재현 증거, 기대 결과와 검증 명령이 포함된 수정 브리프를 전달합니다.
-6. 작업 전에 관련 제품 문서, schema, contract와 call site를 읽습니다.
-7. TypeScript는 strict로 유지하고 `any`, `@ts-ignore`, `@ts-expect-error`, 근거 없는 type assertion을 사용하지 않습니다.
-8. DB schema 변경에는 migration과 RLS test를 함께 작성합니다.
-9. 동일 User가 서로 다른 캠페인에서 여러 역할을 가질 수 있음과 동일 캠페인에서 `DATER_OWNER`와 `INTRODUCER`를 겸할 수 없음을 테스트로 보호합니다.
-10. UI 변경은 실제 기기 또는 브라우저에서 manual QA합니다.
-11. 결제는 sandbox purchase, restore, expiration, refund 경로를 검증합니다. consumable credit은 서버 ledger와 webhook에서 idempotent하게 처리합니다.
-12. UGC 기능은 신고, 차단, moderation 경로 없이 merge하지 않습니다.
-13. 사용자 데이터와 secret을 로그, 스크린샷, fixture 또는 Devpost 자료에 노출하지 않습니다.
-14. 완료 시 변경 파일과 동작, 실행한 검증, 결과와 남은 위험을 기록합니다.
-15. Worker는 owned paths 밖의 문제를 임의 수정하지 않고 증거와 함께 반환합니다.
+1. 사용자를 상헌 님으로 호칭하고 한국어로는 항상 존댓말을 사용합니다.
+2. 작업 전에 관련 제품 문서, schema, contract와 모든 주요 call site를 읽습니다.
+3. 동시에 진행하는 작업은 겹치지 않는 파일 소유 범위를 가져야 합니다. 동일 migration, route, contract 또는 핵심 UI를 동시에 수정하지 않습니다.
+4. 범위 밖 문제는 임의로 수정하지 않고 파일 경로, 재현 증거와 영향도를 보고합니다.
+5. 공통 contract나 schema를 바꾸면 모든 소비자와 migration 영향을 확인합니다.
+6. TypeScript strict, DB/RLS, 개인정보, 결제, UGC와 QA 규칙은 CLAUDE.md를 따릅니다.
+7. 기존 migration은 수정하지 않고 새 번호 migration과 회귀 테스트를 추가합니다.
+8. 사용자 변경을 보존하고 승인 없이 commit, push, 배포 또는 프로덕션 설정 변경을 하지 않습니다.
 
-## Worker brief 필수 형식
+## 작업 계약
 
-모든 Worker brief에는 다음 항목을 빠짐없이 포함합니다.
+작업을 위임할 때 필요한 항목만 간결하게 포함합니다.
 
-```text
 TASK
 한 문장으로 정의한 결과물
 
 WHY / CONTEXT
-제품 목표, 사용자 흐름, 이미 내린 결정, 관련 위험
+제품 목표, 사용자 흐름, 이미 내린 결정과 관련 위험
 
-SCOPE
-수정 가능한 정확한 파일 경로와 소유 범위
+SCOPE / OUT OF SCOPE
+수정 가능한 정확한 경로와 보호해야 할 영역
 
-OUT OF SCOPE
-건드리면 안 되는 기능·파일·정책
-
-CONVENTIONS
-프로젝트 구조, 타입·오류 처리·테스트·로그 규칙
-
-KNOWN TRAPS
-동의, RLS, idempotency, 비용 호출, 기존 실패 등 알려진 함정
+INVARIANTS / KNOWN TRAPS
+동의, RLS, idempotency, 비용 호출, 기존 실패와 호환성
 
 ACCEPTANCE CRITERIA
 관찰 가능한 완료 조건
 
 REQUIRED VERIFICATION
-통과해야 할 명령, 테스트, manual QA surface
+테스트 명령과 실제 manual QA surface
 
 RETURN FORMAT
-changed files, diff summary, test output, residual risks
-```
+changed files, decisions, test results, deviations, residual risks
 
-브리프는 Worker에게 제품 결정을 떠넘기지 않도록 decision-complete해야 합니다. 남은 설계 선택은 Advisor가 먼저 결정하거나 선택지와 판단 기준을 명시한 조사 태스크로 분리합니다.
+제품·보안 결정을 작업자에게 암묵적으로 떠넘기지 않습니다. 증거가 승인된 계약과 충돌하면 임의로 재설계하지 말고 중단하여 보고합니다.
 
-## 세 Worker 세션 운영 규칙
+## 검증과 완료
 
-1. 세 세션에 겹치는 파일을 동시에 배정하지 않습니다.
-2. `docs/TASKS.md`에 session, owned paths, dependency, acceptance criteria와 상태를 남깁니다.
-3. dependency가 있는 작업은 선행 diff를 Advisor가 승인한 뒤 시작합니다.
-4. 공통 contract나 schema를 바꾸는 Worker의 브리프에는 소비자 목록과 migration 영향을 포함합니다.
-5. 범위 밖 문제는 수정하지 않고 증거와 함께 반환합니다.
-6. 장시간 작업의 중간 산출물이나 Worker의 자체 테스트 성공은 Advisor 승인 전까지 완료 또는 통합으로 간주하지 않습니다.
+- 완료 보고만으로 승인하지 않고 실제 diff, 테스트 결과와 사용자 표면을 증거로 판단합니다.
+- 새 테스트는 변경 전 실패 또는 mutation red가 실제로 발생하는지 확인합니다.
+- UI는 실제 앱·브라우저, API는 실제 요청, 결제는 sandbox와 webhook, media는 실제 render 결과로 검증합니다.
+- 테스트가 통과해도 동의, 개인정보, 비용, RLS, product invariant를 위반하면 완료가 아닙니다.
+- 검증 실패 시 재현 명령, 기대 결과, 실제 결과와 최소 증거를 보존합니다.
+- 완료 시 변경 파일, 사용자-visible 동작, 실행한 검증, 정확한 결과와 남은 위험을 보고합니다.

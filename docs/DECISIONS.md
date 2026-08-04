@@ -393,3 +393,10 @@
 - **Deputy가 교정한 Advisor 전제 (9번째 식별자 사고 예방)**: `resolveShareOrigin`은 vercel.app을 거부하지 **않는다** — 'share origin not configured' 501은 실질 데드 코드이고, 도메인 미확정 상태의 첫 실렌더는 **vercel.app URL을 다운로드 MP4에 영구히 굽는다**(같은 revision은 재렌더 안 됨). 따라서 **0054 push 전 도메인/`FRIENDWORD_SHARE_ORIGIN` 결정이 사용자 게이트**로 추가됐다.
 - **검증 (Advisor 직접 재실행)**: DB 01~29 exit 0 · contracts 293 · data 135(rpcContract 포함) · mobile 231 · domain 13 · ui-tokens 20 · adapters 11 · web audit3 182(2회, 워커의 1회성 flake 미재현) · ui 17 · render 38(+게이트 43, 벤치 e2e 139.3초/1,845프레임 재현) · e2e 75 · build(3라우트 매니페스트 확인)·typecheck·lint·format. 뮤테이션 red: 워커 6종 보고 + Advisor가 self-kick 조건 반전으로 1종 직접 재현. 벤치 darwin 실측 148.3초는 0054 당시 기준선 148.5초와 정합.
 - **범위 밖 발견 (워커 보고, Advisor 확인)**: ① `apps/web/.env → ../../.env` 심볼릭 링크가 이미 존재해 dev 서버가 env를 받는다 — e2e 절차의 "셸 env 주입 필수" 서술은 이 머신에선 과잉(컨테이너 런타임 자체가 없어 `supabase start` 불가인데도 e2e는 전 스펙 mock이라 무관). SESSION_HANDOFF §4 교정. ② next.config `outputFileTracingIncludes`는 라우트별이라 벤치 라우트에 Chromium/ffmpeg 트레이싱 엔트리 추가(소유 범위 밖 1파일, 근거 보고됨 — 없으면 배포된 벤치가 spawn ENOENT).
+
+## 2026-08-04: Fable Control Plane을 단일 오케스트레이션 정책으로 채택
+
+- **결정**: 기존 Advisor + 고정 Worker 2~3명, 임시 Fable 워커, 매 작업 Fable xhigh Deputy, Advisor 직접 전체 검증 체제를 폐기합니다. 이후 Claude Code의 모델 선택, effort, 에이전트 역할, 병렬성, 독립 리뷰와 에스컬레이션은 사용자 범위 `fable-control-plane` 1.0.0 플러그인이 단독으로 소유합니다. 저장소의 `CLAUDE.md`와 `AGENTS.md`는 Friendword의 프로젝트 사실, 제품·보안·데이터 불변 조건, 검증 명령과 운영 안전 경계만 정의합니다.
+- **이유**: 기존 프로젝트 지침이 플러그인의 Fable High 제어, Opus 전문 구현·리뷰, Sonnet 탐색·검증, evidence-gated xhigh와 최대 2개 정상 동시 실행 정책을 덮어써 Fable·xhigh 사용량과 중복 검증을 늘렸습니다. 프로젝트 지식과 모델 라우팅의 소유권을 분리해야 어떤 작업에서도 같은 최적화 정책이 일관되게 적용됩니다.
+- **검토 대안**: 기존 프로젝트 오케스트레이션과 플러그인을 병행(지시 충돌로 기각), Friendword 전용 에이전트를 계속 유지(플러그인 역할과 중복되어 기각), 과거 결정과 작업 기록 삭제(감사 추적성을 훼손하므로 기각).
+- **영향**: `.claude/agents/opus-worker.md`를 제거하고 고유 migration·RLS·QA 규칙은 `CLAUDE.md`로 이동합니다. `FRIENDWORD_HANDOFF.md`와 `docs/TASKS.md`의 과거 Advisor/Worker 서술은 역사 기록으로만 유지하며 현재 정책이 아니라는 표지를 추가합니다. 과거 `docs/DECISIONS.md` 항목은 당시 사실로 보존되지만 이 결정 이후의 작업에는 적용하지 않습니다. 제품 불변 조건, 전체 웹 게이트, mutation red, hosted DB 우선 배포와 사용자 전용 launch gate는 그대로 유지합니다.

@@ -5,6 +5,8 @@
 > 작성 언어: 한국어 / 제품·스토어·마케팅 기본 언어: 영어  
 > 프로젝트 상태: 아이디어 및 핵심 정책 확정, 개발 시작 전
 
+> **2026-08-04 운영 정책 공지:** 이 문서의 과거 Advisor/Worker·Codex·고정 모델 오케스트레이션 서술은 역사 기록이며 현재 정책이 아닙니다. 현재 모델 라우팅, 에이전트 구성, 병렬성, 검증과 에스컬레이션은 사용자 범위 `fable-control-plane` 플러그인이 단독으로 소유합니다. 이 문서는 제품 계약과 역사적 맥락에만 사용합니다.
+
 ## Overview
 
 **Friendword는 친구의 30~60초 음성 추천을 당사자가 승인한 사진·문구와 결합해 공유 가능한 세로형 모션 피치로 만들고, 이를 본 사람이 검증된 프로필로 관심을 표현한 뒤 당사자가 수락하면 안전한 인앱 대화를 시작하는 18세 이상 대상의 friend-led dating campaign 앱이다.**
@@ -1007,7 +1009,9 @@ open → left | blocked | closed
 - 현재 MVP 범위와 제외 범위
 - 공식 Shipaton 링크와 final-rules pending 경고
 
-### CLAUDE.md 초안에 반드시 포함할 내용
+### CLAUDE.md 초안 (역사 기록 — 2026-08-04 폐기)
+
+> 아래 목록은 최초 개발 체제의 기록입니다. 현재 `CLAUDE.md`는 Friendword의 프로젝트 사실과 불변 조건만 담고, 모델·에이전트·검증 라우팅은 `fable-control-plane` 플러그인이 소유합니다.
 
 - Claude(Fable 5)는 Advisor(orchestrator)이자 worker이며 요구사항 분석·작업 분해·설계 결정·최종 검증을 소유한다.
 - tmux Codex Worker는 `friendword-codex-1`, `friendword-codex-2`, `friendword-codex-3`으로 고정한다.
@@ -1023,7 +1027,9 @@ open → left | blocked | closed
 - 불확실한 시장 사실이나 사용자 인터뷰를 만들어내지 않는다.
 - Devpost 최종 규칙이 기존 문서와 충돌하면 규칙을 우선하고 변경을 기록한다.
 
-### AGENTS.md 초안에 반드시 포함할 내용
+### AGENTS.md 초안 (역사 기록 — 2026-08-04 폐기)
+
+> 아래 고정 Codex 세션과 Advisor 재검증 체제는 더 이상 활성 정책이 아닙니다. 현재 `AGENTS.md`는 모델 독립적인 저장소 안전 규칙만 정의합니다.
 
 - 호칭은 `상헌 님`, 한국어는 존댓말
 - Advisor와 세 Codex Worker가 같은 파일을 동시에 수정하지 않음
@@ -1042,7 +1048,9 @@ open → left | blocked | closed
 
 ---
 
-## Advisor + Worker 실행 방식
+## Advisor + Worker 실행 방식 (역사 기록 — 2026-08-04 폐기)
+
+> 이 절 전체는 당시 실행 이력을 보존하기 위한 것입니다. 새 작업에 적용하지 않습니다. 현재 오케스트레이션의 단일 source of truth는 설치된 `fable-control-plane` 플러그인입니다.
 
 ### 모델 역할 분담
 

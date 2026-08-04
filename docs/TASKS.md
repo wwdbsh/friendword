@@ -1,5 +1,7 @@
 # 작업 소유권 및 상태
 
+> **현재 정책(2026-08-04):** 이 문서는 과거 작업 소유권과 검증 이력을 보존하는 기록입니다. 아래 Advisor, Codex, Opus 워커 수와 세션 명칭은 현재 오케스트레이션 지시가 아닙니다. 새 작업의 모델 라우팅, 에이전트 수, 리뷰와 에스컬레이션은 사용자 범위 `fable-control-plane` 플러그인이 소유합니다.
+
 ## 기록 형식
 
 | Session   | Owned paths             | Dependency                        | Acceptance criteria               | Status                                                                              | Updated    |

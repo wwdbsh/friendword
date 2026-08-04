@@ -151,6 +151,28 @@ export function PitchExportCard({
     }
   }, [client, campaignId, draftId]);
 
+  // Best-effort push of the render worker (the queue has no cron): the kick
+  // route relays to the secret-gated worker on our behalf, because a browser
+  // must never hold that secret. Fired once per successful export request and
+  // once per poll tick while a render is in flight. Strictly fire-and-forget —
+  // a kick failure changes nothing here (the next tick kicks again), and the
+  // 202 never says whether a worker actually started.
+  const kickRenderWorker = useCallback(async () => {
+    try {
+      const { data, error } = await client.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (error !== null || accessToken === undefined) {
+        return;
+      }
+      await fetch('/api/media/render-kick', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+    } catch {
+      // Best-effort by design; the poll (or an operator) pushes again.
+    }
+  }, [client]);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -173,6 +195,9 @@ export function PitchExportCard({
     let delay = POLL_INITIAL_MS;
     const schedule = () => {
       timer = window.setTimeout(() => {
+        // Each tick that still sees a render in flight also pushes the worker
+        // once — the same opportunistic pattern the ingest poll uses.
+        void kickRenderWorker();
         void load().finally(() => {
           if (!cancelled) {
             delay = Math.min(Math.round(delay * POLL_BACKOFF), POLL_MAX_MS);
@@ -188,7 +213,7 @@ export function PitchExportCard({
         window.clearTimeout(timer);
       }
     };
-  }, [rendering, load]);
+  }, [rendering, load, kickRenderWorker]);
 
   async function handleExport() {
     setRequesting(true);
@@ -197,6 +222,8 @@ export function PitchExportCard({
     setPassNeeded(false);
     try {
       await new RenderJobRepo(client).requestRender(campaignId);
+      // The job is durable in the queue; now give the worker its first push.
+      void kickRenderWorker();
       await load();
     } catch (error: unknown) {
       const detail = errorDetail(error);

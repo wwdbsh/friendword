@@ -61,6 +61,14 @@ const nextConfig = {
       './node_modules/ffmpeg-static/ffmpeg',
       './node_modules/@sparticuz/chromium/bin/**',
     ],
+    // The render bench (same engine, no DB/storage) execs the same two
+    // binaries; without its own entry the deployed bench function would ship
+    // without Chromium/ffmpeg and die at spawn — tracing includes are
+    // per-route.
+    '/api/media/render-bench': [
+      './node_modules/ffmpeg-static/ffmpeg',
+      './node_modules/@sparticuz/chromium/bin/**',
+    ],
   },
   outputFileTracingExcludes: {
     '*': [

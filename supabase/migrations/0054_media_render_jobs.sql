@@ -247,8 +247,14 @@ REVOKE ALL ON public.pitch_render_unlocks FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.pitch_render_unlocks TO service_role;
 
 -- ── 3. Concurrency cap configuration (decision 6) ────────────────────────
+-- Seeded at 1 — a single render at a time — until a Linux 실측 proves
+-- headroom: one render peaks ~1.2GB against a 2048MB function budget, and
+-- Vercel Fluid can serve concurrent invocations from ONE shared instance, so
+-- two leased renders can co-reside in the same memory budget and OOM each
+-- other. Raise later via an app_config UPDATE once the bench has measured the
+-- real Linux peak.
 INSERT INTO public.app_config (key, value)
-VALUES ('media_render_concurrency_cap', '2')
+VALUES ('media_render_concurrency_cap', '1')
 ON CONFLICT (key) DO NOTHING;
 
 -- The cost ceiling on RESETS of a terminally failed job (Advisor correction

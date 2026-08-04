@@ -1,8 +1,9 @@
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
 
 import { resolveShareOrigin } from '@/lib/pitchRender/endCard';
 import { runRenderPass } from '@/lib/pitchRender/jobRunner';
 import { renderRunSecret, renderSecretMatches } from '@/lib/pitchRender/secret';
+import { triggerRenderRun } from '@/lib/pitchRender/trigger';
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
 
 export const dynamic = 'force-dynamic';
@@ -41,5 +42,21 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const summary = await runRenderPass(serviceClient, { baseUrl, shareOrigin });
+
+  // Pass-end self-kick: runRenderPass stops CLAIMING 90s in (its claim
+  // window) while one render alone takes ~150s, so a pass that rendered job A
+  // exits without ever claiming queued job B — and if the user has closed the
+  // kit page by then, nothing kicks again and B stalls forever, turning the
+  // kit card's "it keeps running" copy into a lie (§12 class). A processed>0
+  // re-kick chains passes until one claims nothing (processed 0 → no re-kick
+  // → the chain terminates; the DB's 3-attempt budget ends failure loops).
+  if (summary.processed > 0) {
+    try {
+      after(() => triggerRenderRun(requestOrigin));
+    } catch {
+      // Not in a request scope (unit tests); a kick or operator pushes instead.
+    }
+  }
+
   return NextResponse.json(summary);
 }

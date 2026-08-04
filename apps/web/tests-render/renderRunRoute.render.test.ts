@@ -8,6 +8,7 @@
 const mocks = vi.hoisted(() => ({
   getSupabaseServiceClient: vi.fn<() => unknown>(() => ({})),
   runRenderPass: vi.fn(async () => ({ processed: 0, jobs: [] })),
+  triggerRenderRun: vi.fn(async () => undefined),
 }));
 
 vi.mock('@/lib/supabaseServer', () => ({
@@ -16,6 +17,13 @@ vi.mock('@/lib/supabaseServer', () => ({
 
 vi.mock('@/lib/pitchRender/jobRunner', () => ({
   runRenderPass: mocks.runRenderPass,
+}));
+
+// The real trigger imports 'server-only', which this node test env (no shim,
+// unlike vitest.audit3) refuses; the self-kick behavior itself is pinned in
+// renderRunSelfKick.render.test.ts.
+vi.mock('@/lib/pitchRender/trigger', () => ({
+  triggerRenderRun: mocks.triggerRenderRun,
 }));
 
 import { POST } from '../app/api/media/render-run/route';

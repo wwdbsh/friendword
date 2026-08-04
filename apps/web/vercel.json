@@ -5,6 +5,14 @@
     "app/api/media/ingest-run/route.ts": {
       "maxDuration": 300,
       "memory": 2048
+    },
+    "app/api/media/render-run/route.ts": {
+      "maxDuration": 300,
+      "memory": 2048
+    },
+    "app/api/media/render-bench/route.ts": {
+      "maxDuration": 300,
+      "memory": 2048
     }
   }
 }

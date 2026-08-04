@@ -1,0 +1,269 @@
+import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
+
+import ffmpegPath from 'ffmpeg-static';
+import { NextResponse } from 'next/server';
+
+import { buildPitchSceneV2, type PitchSceneV2 } from '@friendword/contracts';
+
+import type { SceneTextFields, SceneWord } from '@/pitch/sceneV2';
+import { resolveShareOrigin } from '@/lib/pitchRender/endCard';
+import { renderScene, type RenderPhotoAsset } from '@/lib/pitchRender/renderScene';
+import { renderRunSecret, renderSecretMatches } from '@/lib/pitchRender/secret';
+
+export const dynamic = 'force-dynamic';
+
+/** Same Hobby-plan ceiling as render-run; the worst case measures ~150s. */
+export const maxDuration = 300;
+
+// The Linux 실측 instrument (SESSION_HANDOFF §3-2): one POST renders the
+// measured worst case — a 60s schemaVersion 2 scene at 30fps plus the 1.5s end
+// card = 1,845 frames — through the REAL engine (renderScene: headless
+// Chromium capture + ffmpeg encode) and answers with throughput and memory
+// metrics. It must be usable BEFORE migration 0054 exists on hosted, so it
+// touches ZERO database and ZERO storage: every input is synthesized in code
+// (ffmpeg test patterns and a sine-sweep AAC — no user data anywhere), and the
+// MP4 is byte-counted and discarded.
+//
+// TWO OPERATIONAL CAVEATS:
+//   1. Bench against PRODUCTION only. The pass loads /internal/render over the
+//      network from its own origin, and Vercel deployment protection blocks
+//      that page on preview deployments — a preview bench dies at page.goto.
+//   2. Once 0054 is live on hosted, do NOT bench while real renders may be in
+//      flight: a bench is itself a ~1.2GB render pass and shares the instance
+//      memory budget with them (see INSTANCE_ID below).
+//
+// Operator invocation (same secret as render-run):
+//
+//   curl -X POST "$ORIGIN/api/media/render-bench" \
+//     -H "authorization: Bearer $FRIENDWORD_MEDIA_RENDER_SECRET"
+
+/**
+ * Module-scope on purpose: Vercel Fluid can serve CONCURRENT invocations from
+ * ONE shared instance, and two concurrent bench calls returning the SAME
+ * instanceId is the proof that they co-resided — i.e. that two leased renders
+ * would share one memory budget. That measurement is this field's entire
+ * point.
+ */
+const INSTANCE_ID = randomUUID();
+/** First invocation of this module instance = the cold start being measured. */
+let invokedBefore = false;
+
+const execFileAsync = promisify(execFile);
+
+async function ffmpeg(args: readonly string[]): Promise<void> {
+  if (ffmpegPath === null) {
+    throw new Error('ffmpeg-static did not resolve a binary for this platform');
+  }
+  await execFileAsync(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', ...args]);
+}
+
+/** Synthetic reviewed sentences — fixture text, never user data. */
+const BENCH_TEXT: SceneTextFields = {
+  hook: 'The friend who never cancels',
+  relationship_context: 'Roommates for three years',
+  three_specific_qualities: ['Loyal', 'Curious', 'Funny'],
+  evidence_or_anecdote: 'Drove four hours for a birthday dinner',
+  good_match_for: 'Someone who loves slow mornings',
+};
+
+function benchAssetId(index: number): string {
+  return `98000000-0000-0000-0000-0000000000${String(10 + index)}`;
+}
+
+/**
+ * The measured worst case, byte-identical in construction to the render
+ * suite's worstCaseScene fixture (tests-render/fixtures.ts): a full 60s scene
+ * from the REAL builder — cards, badges, word pops and leaks at the density
+ * the builder actually emits — never a hand-tiled document the validator
+ * might refuse.
+ */
+function benchScene(): {
+  scene: PitchSceneV2;
+  assetIds: readonly string[];
+  words: readonly SceneWord[];
+  text: SceneTextFields;
+} {
+  const assetIds = [0, 1, 2, 3].map(benchAssetId);
+  const segments = Array.from({ length: 12 }, (_, index) => ({
+    startMs: index * 5_000,
+    endMs: (index + 1) * 5_000,
+  }));
+  const words = segments.map((segment, index) => ({
+    segmentIndex: index,
+    wordIndex: 0,
+    startMs: segment.startMs + 400,
+    endMs: segment.startMs + 900,
+  }));
+  const scene = buildPitchSceneV2({
+    template: 'warm',
+    photoAssetIds: assetIds,
+    segments,
+    words,
+    structure: BENCH_TEXT,
+  });
+  if (scene === null) {
+    throw new Error('builder refused the worst-case bench input');
+  }
+  if (scene.durationMs !== 60_000) {
+    throw new Error(`expected a 60s bench scene, got ${scene.durationMs}ms`);
+  }
+  return {
+    scene,
+    assetIds,
+    words: words.map((word) => ({
+      segmentIndex: word.segmentIndex,
+      wordIndex: word.wordIndex,
+      text: `Word${word.segmentIndex}`,
+    })),
+    text: BENCH_TEXT,
+  };
+}
+
+/** A distinct 1440x2560 JPEG per index — realistic photo dimensions. */
+async function benchPhoto(
+  workDir: string,
+  assetId: string,
+  index: number,
+): Promise<RenderPhotoAsset> {
+  const file = path.join(workDir, `bench-photo-${index}.jpg`);
+  await ffmpeg([
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=1440x2560:rate=1:duration=1',
+    '-vf',
+    `hue=h=${index * 70}`,
+    '-frames:v',
+    '1',
+    '-q:v',
+    '3',
+    file,
+  ]);
+  return { assetId, bytes: await readFile(file), mimeType: 'image/jpeg' };
+}
+
+/** 60s AAC-in-m4a (sine sweep): exercises the product's `-c:a copy` path. */
+async function benchAudio(workDir: string): Promise<{ bytes: Buffer; mimeType: string }> {
+  const file = path.join(workDir, 'bench-audio.m4a');
+  await ffmpeg([
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=330:duration=60',
+    '-c:a',
+    'aac',
+    '-b:a',
+    '96k',
+    file,
+  ]);
+  return { bytes: await readFile(file), mimeType: 'audio/mp4' };
+}
+
+/**
+ * The pass's memory high-water mark, read ONCE after the render. Preferred
+ * source is cgroup v2's memory.peak — the kernel-tracked maximum the OOM
+ * killer actually enforces, and it counts the Chromium and ffmpeg CHILDREN.
+ * The fallback, process.resourceUsage().maxRSS, sees this Node process alone
+ * (libuv reports kilobytes), so memorySource says honestly which one answered.
+ */
+async function peakMemory(): Promise<{ bytes: number; source: string }> {
+  try {
+    const raw = await readFile('/sys/fs/cgroup/memory.peak', 'utf8');
+    const parsed = Number.parseInt(raw.trim(), 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return { bytes: parsed, source: 'cgroup-v2-peak' };
+    }
+  } catch {
+    // Not on cgroup v2 (macOS dev box, older kernel); fall through.
+  }
+  return { bytes: process.resourceUsage().maxRSS * 1024, source: 'self-maxrss' };
+}
+
+export async function POST(request: Request): Promise<NextResponse> {
+  const secret = renderRunSecret();
+  if (secret === null) {
+    return NextResponse.json({ error: 'not configured' }, { status: 501 });
+  }
+  const provided = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? '';
+  if (!renderSecretMatches(provided, secret)) {
+    return NextResponse.json({ error: 'authentication required' }, { status: 401 });
+  }
+
+  const coldStart = !invokedBefore;
+  invokedBefore = true;
+
+  const requestOrigin = new URL(request.url).origin;
+  const baseUrl = process.env.PITCH_RENDER_BASE_URL ?? requestOrigin;
+  const shareOrigin = resolveShareOrigin(baseUrl);
+  if (shareOrigin === null) {
+    return NextResponse.json({ error: 'share origin not configured' }, { status: 501 });
+  }
+
+  // Unique per invocation: two concurrent benches on one shared instance (the
+  // very case INSTANCE_ID exists to expose) must not collide on work files.
+  const benchKey = `bench-${randomUUID()}`;
+  const workDir = path.join(os.tmpdir(), `friendword-render-${benchKey}`);
+  const startedAt = Date.now();
+  try {
+    await mkdir(workDir, { recursive: true });
+    const { scene, assetIds, words, text } = benchScene();
+    const photos: RenderPhotoAsset[] = [];
+    for (const [index, assetId] of assetIds.entries()) {
+      photos.push(await benchPhoto(workDir, assetId, index));
+    }
+    const audio = await benchAudio(workDir);
+
+    const { stats } = await renderScene(
+      scene,
+      { photos, audio },
+      {
+        // The capture page /internal/render/<key> is payload-agnostic — the
+        // scene arrives via page.evaluate and the URL segment is only a key —
+        // so this deployment's own origin serves the bench capture too.
+        baseUrl,
+        renderKey: benchKey,
+        campaignSlug: 'bench',
+        shareOrigin,
+        words,
+        text,
+        workDir,
+        timeBudgetMs: 270_000,
+      },
+    );
+
+    const memory = await peakMemory();
+    return NextResponse.json({
+      instanceId: INSTANCE_ID,
+      coldStart,
+      frames: stats.sceneFrames + stats.endCardFrames,
+      fps: stats.fps,
+      renderMs: stats.totalMs,
+      captureMs: stats.captureMs,
+      encodeMs: stats.encodeTailMs,
+      outputBytes: stats.outputBytes,
+      peakMemoryBytes: memory.bytes,
+      memorySource: memory.source,
+      audio: true,
+      platform: `${process.platform}-${process.arch}`,
+    });
+  } catch (error) {
+    // Synthetic inputs only, so the message carries no personal data.
+    return NextResponse.json(
+      {
+        instanceId: INSTANCE_ID,
+        coldStart,
+        error: error instanceof Error ? error.message : 'bench render failed',
+        elapsedMs: Date.now() - startedAt,
+      },
+      { status: 500 },
+    );
+  } finally {
+    // Discard everything: the MP4 was counted, never kept.
+    await rm(workDir, { recursive: true, force: true });
+  }
+}

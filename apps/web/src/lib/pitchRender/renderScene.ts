@@ -8,6 +8,7 @@ import type { Page } from 'puppeteer-core';
 import type { SceneTextFields, SceneWord } from '@/pitch/sceneV2';
 
 import { launchRenderBrowser } from './browser';
+import type { RenderDiagnostics, RenderStage } from './diagnostics';
 import { audioFileExtension, buildEncoderArgs, startEncoder, type FrameSink } from './encode';
 import { END_CARD_MS, buildEndCard } from './endCard';
 import type { RenderPayload, RenderPayloadPhoto } from './payload';
@@ -57,6 +58,12 @@ export type RenderSceneOptions = {
   readonly keepWorkFiles?: boolean;
   readonly jpegQuality?: number;
   readonly onFrame?: (frameIndex: number, totalFrames: number) => void;
+  /**
+   * Instrumentation sinks (T012). Purely observational: with no diagnostics the
+   * pass makes the same calls in the same order, and no sink can influence what
+   * is captured or encoded.
+   */
+  readonly diagnostics?: RenderDiagnostics;
 };
 
 export type RenderStats = {
@@ -175,6 +182,12 @@ export async function renderScene(
   options: RenderSceneOptions,
 ): Promise<RenderSceneResult> {
   const startedAt = Date.now();
+  // Marks the stage being ENTERED, so a throw names where the pass was.
+  const stage = (entered: RenderStage): void => {
+    options.diagnostics?.onStage?.(entered);
+  };
+
+  stage('scene-prepare');
   const scene = assertRenderableScene(sceneJson);
 
   const photoByAssetId = new Map(assets.photos.map((photo) => [photo.assetId, photo]));
@@ -218,17 +231,21 @@ export async function renderScene(
     endCard: buildEndCard(options.shareOrigin, options.campaignSlug),
   };
 
-  const browser = await launchRenderBrowser(options.executablePath);
+  stage('browser-launch');
+  const browser = await launchRenderBrowser(options.executablePath, options.diagnostics?.launch);
   try {
     const page = await browser.newPage();
     const captureUrl = `${options.baseUrl.replace(/\/$/, '')}/internal/render/${options.renderKey}`;
+    stage('page-goto');
     await page.goto(captureUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    stage('harness-ready');
     await page.waitForFunction(() => window.__friendwordRenderReady === true, {
       timeout: 60_000,
     });
     // First-frame gate (P3): loadPayload resolves only after every photo has
     // decoded and document.fonts.ready settled — a downloaded file with a
     // fallback font or a blank frame cannot be recalled.
+    stage('payload-load');
     await page.evaluate(async (p) => {
       if (window.__friendwordRender === undefined) {
         throw new Error('render harness missing');
@@ -236,6 +253,7 @@ export async function renderScene(
       await window.__friendwordRender.loadPayload(p);
     }, payload);
 
+    stage('encode');
     const encoder = startEncoder(
       ffmpegPath,
       buildEncoderArgs({
@@ -248,6 +266,7 @@ export async function renderScene(
 
     const captureStart = Date.now();
     let bytesPiped = 0;
+    stage('capture');
     try {
       bytesPiped = await captureFrames(page, encoder.sink, {
         sceneFrames,
@@ -269,9 +288,11 @@ export async function renderScene(
       throw encoderError ?? error;
     }
     const captureMs = Date.now() - captureStart;
+    stage('encode');
     await encoder.done;
     const encodeTailMs = Date.now() - captureStart - captureMs;
 
+    stage('output-read');
     const mp4 = await readFile(outputPath);
     const stats: RenderStats = {
       sceneFrames,

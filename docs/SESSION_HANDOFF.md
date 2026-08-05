@@ -23,6 +23,15 @@
 
 ## 1. 지금 상태 (2026-08-04)
 
+> **2026-08-05 갱신 (fcp Goal `render-launch-path` — Issue #1, 상세는 각 PR·DECISIONS 당일 항목):**
+>
+> - 코드는 `88cc9e3` on `main`. 알려진 미해결 2건 종결: `0055`(NULL-digest fail-closed, PR #12) · `0056`(메시지 rate limit 경합 + 인덱스, PR #13) — **둘 다 로컬 전용, hosted 반영은 0054와 함께 T008에서**.
+> - **Vercel 배포 3일 중단(bc1c492~) 복구** (PR #15): 원인은 `serverExternalPackages`가 pnpm 심링크를 함수 엔트리로 만들어 심링크 관통 tracing include와 충돌(ENOTDIR→silent ENOENT 가면화). 불변식: 실의존성 include는 `storeGlob`(실경로) 경유 — `./node_modules/` 형태 금지. **아래 §2-1의 "라우트 501" 서술은 당시에도 부정확했다** — 라우트는 배포된 적 자체가 없었다. 지금은 배포·실존한다.
+> - **§2-1 해소**: `FRIENDWORD_MEDIA_RENDER_SECRET`·`FRIENDWORD_MEDIA_INGEST_SECRET`·`FRIENDWORD_SHARE_ORIGIN` Vercel Production 설정 완료(사용자). 실증: `friendword.com`의 render-bench/ingest-run/render-run 무토큰·오토큰 **401**(501 소멸).
+> - **§2-3 해소**: `friendword.com` 취득(08-04)·Vercel 연결·NS 위임 전파·SSL 정상, apex canonical + www→apex redirect. 홈 200.
+> - `vercel.json`의 `memory` 키는 제거됨(Active CPU 과금에서 플랫폼이 무시 — §3-2 벤치 판독 시 2048MB 상한 전제 재검토 필요). `maxDuration: 300` 유지.
+> - 다음 사용자 액션은 **§3-2 리눅스 실측 벤치**(T002)뿐이며, 이후 0054+0055+0056 hosted push(T008) → 실렌더 E2E(T009)로 이어진다.
+
 |             |                                                                                                                                                       |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 코드        | `26ebd6e` on `main` (렌더 워커 기동 슬라이스)                                                                                                         |

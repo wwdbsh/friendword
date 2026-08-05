@@ -76,9 +76,16 @@
 -- CREATE OR REPLACE, and DROP INDEX public.messages_sender_room_created_at_idx.
 -- Both are reversible in place; neither touches data.
 --
--- ROLLOUT: rides with the pending 0054/0055 push. Data no-op — no rows are
--- read, written or migrated, and the refusal message is byte-identical to
--- 0025's so 18_ugc_limits.sql and any client string match are unaffected.
+-- ROLLOUT: rides with the pending 0054/0055 push — and that coupling has a
+-- cost worth naming: 0054 is deliberately held behind unrelated user gates
+-- (worker secrets, the Linux render benchmark, the share-origin decision —
+-- docs/SESSION_HANDOFF.md §2-3), and `supabase db push --linked` applies
+-- 0054..0056 together, so THE PRODUCTION CHAT-CAP RACE THIS FILE FIXES STAYS
+-- OPEN until those gates clear. Accepted by the goal's sequencing decision
+-- (fcp render-launch-path, T008); recorded in docs/DECISIONS.md 2026-08-05.
+-- The migration itself is a data no-op — no rows are read, written or
+-- migrated, and the refusal message is byte-identical to 0025's so
+-- 18_ugc_limits.sql and any client string match are unaffected.
 
 CREATE OR REPLACE FUNCTION private.enforce_message_rate_limit()
 RETURNS TRIGGER

@@ -10,6 +10,23 @@
 --        inserts without waiting. A room-wide lock would pass R-A and fail
 --        here, so the two guards together pin the granularity.
 --
+-- Observation caveats (reviewer-noted, deliberate):
+--   * await_racer_state reads pg_stat_activity; a backend dispatched via
+--     dblink_send_query but not yet scheduled can still report the previous
+--     statement's state, so a bare "done" verdict is in principle a stale
+--     read. Every guard therefore backstops the state verdict with the
+--     collected result (b_error / exact refusal string), which is what the
+--     mutation runs actually tripped on — a misread here fails loudly, it
+--     cannot pass vacuously.
+--   * The guards run against the real 60s window on the wall clock. On a
+--     pathologically slow machine the fixture can age out and the final
+--     count lands BELOW 20 — the <> 20 assertion then fails loudly with a
+--     row-count message; read that as "machine too slow", not "cap broken".
+--   * pg_stat_activity state/wait_event columns are masked for roles without
+--     pg_read_all_stats on other users' backends; this harness runs as the
+--     database owner/superuser. Ported elsewhere, the poll would only ever
+--     see "undecided" and fail loudly at the deadline.
+--
 -- 18_ugc_limits.sql already pins the cap itself in a single session. What a
 -- single session cannot exhibit is the count-then-insert race, so this file
 -- drives two real connections through dblink and interleaves them by hand:

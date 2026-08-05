@@ -11,6 +11,14 @@ import { NextResponse } from 'next/server';
 import { buildPitchSceneV2, type PitchSceneV2 } from '@friendword/contracts';
 
 import type { SceneTextFields, SceneWord } from '@/pitch/sceneV2';
+import {
+  DIAGNOSTIC_LIMITS,
+  createStageTracker,
+  createStderrTail,
+  describeError,
+  type BrowserExit,
+  type LaunchProbe,
+} from '@/lib/pitchRender/diagnostics';
 import { resolveShareOrigin } from '@/lib/pitchRender/endCard';
 import { renderScene, type RenderPhotoAsset } from '@/lib/pitchRender/renderScene';
 import { renderRunSecret, renderSecretMatches } from '@/lib/pitchRender/secret';
@@ -209,6 +217,21 @@ export async function POST(request: Request): Promise<NextResponse> {
   const benchKey = `bench-${randomUUID()}`;
   const workDir = path.join(os.tmpdir(), `friendword-render-${benchKey}`);
   const startedAt = Date.now();
+
+  // T012 instrumentation. A production bench failure is observable ONLY through
+  // this response — the first one said "NetworkError: A network error occurred."
+  // and nothing else, which named neither the stage nor a cause. Everything
+  // below is collected as the pass runs so the catch can answer even when the
+  // browser process is already gone.
+  const stages = createStageTracker('input-synthesis');
+  const stderrTail = createStderrTail(DIAGNOSTIC_LIMITS.stderrTailBytes);
+  // A holder, not two `let`s: these are written only from callbacks, and the
+  // narrowing of a closure-assigned `let` would read as permanently null.
+  const browserFacts: { probe: LaunchProbe | null; exit: BrowserExit | null } = {
+    probe: null,
+    exit: null,
+  };
+
   try {
     await mkdir(workDir, { recursive: true });
     const { scene, assetIds, words, text } = benchScene();
@@ -233,6 +256,20 @@ export async function POST(request: Request): Promise<NextResponse> {
         text,
         workDir,
         timeBudgetMs: 270_000,
+        diagnostics: {
+          onStage: stages.mark,
+          launch: {
+            onProbe: (probe) => {
+              browserFacts.probe = probe;
+            },
+            onStderr: (chunk) => {
+              stderrTail.append(chunk);
+            },
+            onExit: (exit) => {
+              browserFacts.exit = exit;
+            },
+          },
+        },
       },
     );
 
@@ -252,13 +289,32 @@ export async function POST(request: Request): Promise<NextResponse> {
       platform: `${process.platform}-${process.arch}`,
     });
   } catch (error) {
-    // Synthetic inputs only, so the message carries no personal data.
+    // Synthetic inputs only, so nothing below carries personal data: the stack
+    // is code paths, the stderr tail is Chromium's own output, and the probe is
+    // filesystem facts about a binary the platform extracted. Every
+    // variable-length field is capped in diagnostics.ts.
+    const detail = describeError(error, 'bench render failed');
+    const stderr = stderrTail.read();
+    const memory = await peakMemory();
     return NextResponse.json(
       {
         instanceId: INSTANCE_ID,
         coldStart,
-        error: error instanceof Error ? error.message : 'bench render failed',
+        error: detail.message,
         elapsedMs: Date.now() - startedAt,
+        stage: stages.current(),
+        errorName: detail.name,
+        errorStack: detail.stack,
+        errorTruncated: detail.truncated,
+        chromiumStderrTail: stderr.text,
+        chromiumStderrBytes: stderr.totalBytes,
+        chromiumStderrTruncated: stderr.truncated,
+        browserExitCode: browserFacts.exit?.code ?? null,
+        browserExitSignal: browserFacts.exit?.signal ?? null,
+        launchProbe: browserFacts.probe,
+        peakMemoryBytes: memory.bytes,
+        memorySource: memory.source,
+        platform: `${process.platform}-${process.arch}`,
       },
       { status: 500 },
     );

@@ -407,3 +407,10 @@
 - **이유**: `resolveShareOrigin`(apps/web/src/lib/pitchRender/endCard.ts:19-29)은 env 미설정 시 `VERCEL_PROJECT_PRODUCTION_URL`(vercel.app)로 폴백하고, 같은 revision은 재렌더되지 않으므로 도메인 미확정 상태의 첫 실렌더는 vercel.app URL을 다운로드 MP4에 영구히 굽습니다(2026-08-04 Deputy 확인). 첫 실렌더 전에 origin이 확정되어야 합니다.
 - **검토 대안**: vercel.app 엔드카드를 QA 전용 파일에 한해 수용(도메인이 이미 취득되어 불필요 — 기각), 다른 도메인 후보 탐색(사용자가 friendword.com 취득으로 종결), www를 canonical로(관례상 apex 채택).
 - **영향**: 기록 시점(2026-08-05) `friendword.com`은 아직 HTTPS 미응답 — Vercel 도메인 연결과 env 설정이 사용자 잔여 액션이며, 렌더 파이프라인 hosted 활성화(0054 push) 전 확인 항목에 포함됩니다. 반영 확인 전까지 실렌더를 시작하지 않습니다. 코드 변경 없음(엔드카드 URL은 이미 환경 설정값).
+
+## 2026-08-05: 0025 메시지 rate limit 경합 종결 — 락 선행 count와 수용 위험 (T007, fcp Issue #8, PR #13)
+
+- **결정**: 2026-07-29 결정에서 미해결로 남겼던 `enforce_message_rate_limit`(0025:27-46)의 무락 count 경합을 `0056`으로 종결합니다. count **이전에** `pg_advisory_xact_lock(hashtextextended(sender||':'||room, 250025))`를 잡고(0024/0045 확립 패턴, 함수는 VOLATILE 유지 — 락 획득 후 count 재스냅샷이 원자성의 근거), `messages (sender_user_id, intro_room_id, created_at)` 인덱스를 신설합니다(messages에 보조 인덱스가 전무해 count가 락 임계구역 안에서 seq scan이 되는 것을 방지). cap 20·60초 창·거절 문구는 바이트 동일. 하니스는 dblink 2연결 실경합 재현 테스트(`30_`)로 보강했고, red에서 캡 20에 21행 착지를 직접 재현한 뒤 green 전환·mutation red 3방향(락 제거/room-키/STABLE)을 증명했습니다.
+- **이유**: 0045가 같은 클래스의 신고 경합을 고치며 이 버그를 "별도 버그, 여기서 안 고침"으로 명시 예약했고(0045:16-18), 릴스 유입이 열리기 전에 채팅 남용 상한이 실제로 참이어야 합니다.
+- **검토 대안**: room 단위 락(상대 참여자까지 직렬화 — R-B 가드가 기각을 고정), 카운터 테이블 UPSERT(불필요한 기계 장치), lock_timeout만 쓰는 약한 테스트(락 삭제 회귀를 못 잡음 — 21번 테스트의 기록된 함정, 기각).
+- **영향·수용 위험**: (1) **위조 참여자-명의 락 점유(수용)** — `sender_user_id`가 클라이언트 공급(0052:95)이고 RLS WITH CHECK는 BEFORE 트리거 이후 평가되므로, room UUID를 아는 호출자가 상대 명의 INSERT로 피해자의 버킷 락을 문장 단위로 잠깐 잡을 수 있습니다. 행은 절대 착지하지 않고(RLS 거절) 예산도 소모되지 않으며 v4 room id 비추측성으로 한정 — 0056 헤더에 기록. (2) **롤아웃 결합** — 0056은 보류 중인 0054·0055와 함께만 push되므로(단독 push 금지), 사용자 게이트(시크릿·벤치·도메인)가 풀릴 때까지 **프로덕션의 채팅 캡 경합은 열린 채 유지**됩니다. Goal render-launch-path의 T008 시퀀싱 결정으로 수용. (3) 기존 21번 테스트의 pg_stat_activity 폴에 스냅샷 클리어가 없어 관찰이 운 의존 — 후속 정리 후보로 기록.

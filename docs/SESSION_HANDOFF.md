@@ -30,7 +30,16 @@
 > - **§2-1 해소**: `FRIENDWORD_MEDIA_RENDER_SECRET`·`FRIENDWORD_MEDIA_INGEST_SECRET`·`FRIENDWORD_SHARE_ORIGIN` Vercel Production 설정 완료(사용자). 실증: `friendword.com`의 render-bench/ingest-run/render-run 무토큰·오토큰 **401**(501 소멸).
 > - **§2-3 해소**: `friendword.com` 취득(08-04)·Vercel 연결·NS 위임 전파·SSL 정상, apex canonical + www→apex redirect. 홈 200.
 > - `vercel.json`의 `memory` 키는 제거됨(Active CPU 과금에서 플랫폼이 무시 — §3-2 벤치 판독 시 2048MB 상한 전제 재검토 필요). `maxDuration: 300` 유지.
-> - 다음 사용자 액션은 **§3-2 리눅스 실측 벤치**(T002)뿐이며, 이후 0054+0055+0056 hosted push(T008) → 실렌더 E2E(T009)로 이어진다.
+> - ~~다음 사용자 액션은 §3-2 리눅스 실측 벤치(T002)뿐~~ → **벤치 첫 실행이 새 결함을 드러냈다 (세션 종료 시점 미해결, 아래가 다음 세션의 첫 일감):**
+>
+> **T002 블로커 — 렌더 워커 프로덕션 기동 결함 (2026-08-05 실측, fcp Issue #3 코멘트에 원본):**
+>
+> - 사용자 벤치 실행 결과: 인증·라우트 진입은 성공(`instanceId` 반환)하나 2.4~5.2초에 `{"error":"NetworkError: A network error occurred."}` 로 500. cold/warm 모두 동일.
+> - 런타임 로그 실측: 벤치 POST가 500으로 끝난 **몇 초 뒤에** `/internal/render/bench-…` GET(별도 함수 호출, 캡처 페이지 SSR)이 **200으로 완료** — 즉 Chromium이 기동해 항해까지 발행한 뒤 **Chromium 프로세스가 죽어**(크래시 의심) puppeteer↔Chromium WebSocket이 끊긴 그림. `NetworkError: A network error occurred.`는 그 절단의 전형적 메시지.
+> - 이 리눅스 전용 기동 경로(`@sparticuz/chromium` 149 추출 + `headless:'shell'` + sparticuz args, apps/web/src/lib/pitchRender/browser.ts:57-64)는 **프로덕션에서 2026-08-05 처음 실행됐다** — darwin 벤치는 로컬 Chrome을 쓰므로 이 경로를 검증한 적이 없다(하니스가 프로덕션보다 약한 또 하나의 사례).
+> - 현재 벤치는 에러 메시지만 반환하고 Chromium stderr·스택을 버린다 → 원격 진단 불가. **다음 세션 계획(T012 제안, 미승인)**: ① 진단 강화 1커밋(에러 스택 + `dumpio` stderr 캡처 + 단계 마커를 벤치 응답에 포함) 배포 → ② 사용자 벤치 1회 재실행 → ③ 원인 확정(용의: 추출 무결성, headless 모드-바이너리 페어링, 플래그 조합, 실할당 메모리) → ④ 수정·검증·병합 → ⑤ T002 재개.
+>
+> **오케스트레이션 상태 (다음 세션 재개용):** fcp Goal `render-launch-path` = GitHub Issue #1, 태스크 #2~#11+#14. 완료: T001(#2, PR #16)·T003(#4)·T006(#7, PR #12)·T007(#8, PR #13)·T011(#14, PR #15). 대기: T002(#3, 위 블로커)·T004(#5, 자막 결정)·T008~T010. 로컬 원장: `.claude/fable-control-plane/goals/render-launch-path/`(이 머신 전용, git 미추적 — state.json이 최신 체크포인트). 실행 승인 envelope은 태스크 단위로 사용자에게 재확인.
 
 |             |                                                                                                                                                       |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -400,3 +400,10 @@
 - **이유**: 기존 프로젝트 지침이 플러그인의 Fable High 제어, Opus 전문 구현·리뷰, Sonnet 탐색·검증, evidence-gated xhigh와 최대 2개 정상 동시 실행 정책을 덮어써 Fable·xhigh 사용량과 중복 검증을 늘렸습니다. 프로젝트 지식과 모델 라우팅의 소유권을 분리해야 어떤 작업에서도 같은 최적화 정책이 일관되게 적용됩니다.
 - **검토 대안**: 기존 프로젝트 오케스트레이션과 플러그인을 병행(지시 충돌로 기각), Friendword 전용 에이전트를 계속 유지(플러그인 역할과 중복되어 기각), 과거 결정과 작업 기록 삭제(감사 추적성을 훼손하므로 기각).
 - **영향**: `.claude/agents/opus-worker.md`를 제거하고 고유 migration·RLS·QA 규칙은 `CLAUDE.md`로 이동합니다. `FRIENDWORD_HANDOFF.md`와 `docs/TASKS.md`의 과거 Advisor/Worker 서술은 역사 기록으로만 유지하며 현재 정책이 아니라는 표지를 추가합니다. 과거 `docs/DECISIONS.md` 항목은 당시 사실로 보존되지만 이 결정 이후의 작업에는 적용하지 않습니다. 제품 불변 조건, 전체 웹 게이트, mutation red, hosted DB 우선 배포와 사용자 전용 launch gate는 그대로 유지합니다.
+
+## 2026-08-05: 공유 도메인 확정 — friendword.com이 canonical origin (T003, fcp Issue #4)
+
+- **결정**: 사용자가 2026-08-04에 취득한 `friendword.com`을 canonical share origin으로 확정합니다. 렌더 엔드카드·공유 URL은 `friendword.com/p/<slug>` 형태를 사용하며, Vercel 프로젝트에 `FRIENDWORD_SHARE_ORIGIN=https://friendword.com`을 설정(사용자 액션)하고 도메인을 프로젝트에 연결합니다. www는 apex로 리다이렉트합니다.
+- **이유**: `resolveShareOrigin`(apps/web/src/lib/pitchRender/endCard.ts:19-29)은 env 미설정 시 `VERCEL_PROJECT_PRODUCTION_URL`(vercel.app)로 폴백하고, 같은 revision은 재렌더되지 않으므로 도메인 미확정 상태의 첫 실렌더는 vercel.app URL을 다운로드 MP4에 영구히 굽습니다(2026-08-04 Deputy 확인). 첫 실렌더 전에 origin이 확정되어야 합니다.
+- **검토 대안**: vercel.app 엔드카드를 QA 전용 파일에 한해 수용(도메인이 이미 취득되어 불필요 — 기각), 다른 도메인 후보 탐색(사용자가 friendword.com 취득으로 종결), www를 canonical로(관례상 apex 채택).
+- **영향**: 기록 시점(2026-08-05) `friendword.com`은 아직 HTTPS 미응답 — Vercel 도메인 연결과 env 설정이 사용자 잔여 액션이며, 렌더 파이프라인 hosted 활성화(0054 push) 전 확인 항목에 포함됩니다. 반영 확인 전까지 실렌더를 시작하지 않습니다. 코드 변경 없음(엔드카드 URL은 이미 환경 설정값).

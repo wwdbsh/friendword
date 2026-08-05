@@ -41,6 +41,37 @@ VALUES
   ('c1120000-0000-0000-0000-000000000002', 'c1100000-0000-0000-0000-000000000002',
    '00000000-0000-0000-0000-000000000004', 'published', now(), 'audit3-c11-cy');
 
+-- Casey (0003) is the sender throughout. The interest rows below are INSERTed
+-- directly, so they carry no submitted_photo_digest, and since 0055 a NULL
+-- digest forces the accept-time photo provenance and 2-photo re-check that 0044
+-- grandfathered away. §3 accepts one of those rows with a raw UPDATE to prove
+-- the beta gate does NOT reach the owner's decision, so Casey is made genuinely
+-- eligible here: the accept must succeed because it is ungated, not because a
+-- digest happened to match. The ROLLBACK at the end of the file undoes this.
+INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+VALUES
+  (
+    'profile-media',
+    '00000000-0000-0000-0000-000000000003/c11-casey-1.jpg',
+    '00000000-0000-0000-0000-000000000003',
+    '{"mimetype":"image/jpeg"}'
+  ),
+  (
+    'profile-media',
+    '00000000-0000-0000-0000-000000000003/c11-casey-2.jpg',
+    '00000000-0000-0000-0000-000000000003',
+    '{"mimetype":"image/jpeg"}'
+  );
+
+UPDATE dating_profiles
+   SET bio = 'Museum fan and weekend cyclist.',
+       dating_intent = 'long-term',
+       photos = ARRAY[
+         '00000000-0000-0000-0000-000000000003/c11-casey-1.jpg',
+         '00000000-0000-0000-0000-000000000003/c11-casey-2.jpg'
+       ]
+ WHERE user_id = '00000000-0000-0000-0000-000000000003';
+
 -- Existing interest rows from Casey (0003), created while the beta is open.
 INSERT INTO interests (id, campaign_id, sender_user_id, status, note, submitted_at)
 VALUES

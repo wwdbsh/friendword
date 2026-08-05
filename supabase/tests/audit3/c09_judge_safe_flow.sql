@@ -56,6 +56,40 @@ UPDATE app_config SET value = 'off'
 INSERT INTO qa_preview_allowlist (pitch_draft_id, note)
 VALUES ('c0900000-0000-0000-0000-000000000001', 'audit3 c09 judge-safe preview');
 
+-- ── 0. Sender eligibility fixture, so §3's accept is about the beta gate ──
+-- The interests below are INSERTed directly, so they carry no
+-- submitted_photo_digest. Since 0055 a NULL digest forces the accept-time photo
+-- provenance and 2-photo re-check (0044 grandfathered it away). Casey (0003),
+-- the sender whose interest §3 accepts, gets a complete dating profile backed
+-- by resolvable caller-owned profile-media objects, so §3 is decided by what
+-- this suite is actually about — whether the beta gate reaches past submission
+-- — and not by a sender-eligibility refusal. (§5's accept attempt needs no such
+-- fixture: decide_interest's owner guard refuses a non-owner before it ever
+-- looks at the sender.) The ROLLBACK at the end of the file undoes all of it.
+INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+VALUES
+  (
+    'profile-media',
+    '00000000-0000-0000-0000-000000000003/c09-casey-1.jpg',
+    '00000000-0000-0000-0000-000000000003',
+    '{"mimetype":"image/jpeg"}'
+  ),
+  (
+    'profile-media',
+    '00000000-0000-0000-0000-000000000003/c09-casey-2.jpg',
+    '00000000-0000-0000-0000-000000000003',
+    '{"mimetype":"image/jpeg"}'
+  );
+
+UPDATE dating_profiles
+   SET bio = 'Museum fan and weekend cyclist.',
+       dating_intent = 'long-term',
+       photos = ARRAY[
+         '00000000-0000-0000-0000-000000000003/c09-casey-1.jpg',
+         '00000000-0000-0000-0000-000000000003/c09-casey-2.jpg'
+       ]
+ WHERE user_id = '00000000-0000-0000-0000-000000000003';
+
 -- ── 1. Allowlisted interest submission is accepted while the beta is closed ──
 -- Direct INSERT exercises the interests INSERT trigger (block_interests_until_
 -- public_beta) on the same path a bypass would, and proves the allowlist opens

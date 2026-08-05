@@ -3,16 +3,13 @@
   "buildCommand": "next build",
   "functions": {
     "app/api/media/ingest-run/route.ts": {
-      "maxDuration": 300,
-      "memory": 2048
+      "maxDuration": 300
     },
     "app/api/media/render-run/route.ts": {
-      "maxDuration": 300,
-      "memory": 2048
+      "maxDuration": 300
     },
     "app/api/media/render-bench/route.ts": {
-      "maxDuration": 300,
-      "memory": 2048
+      "maxDuration": 300
     }
   }
 }

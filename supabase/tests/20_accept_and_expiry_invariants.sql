@@ -768,6 +768,8 @@ $$;
 -- assert_profile_photo_validations runs after the provenance branch and would
 -- otherwise refuse for an unrelated reason.
 RESET ROLE;
+CREATE TEMP TABLE guard_a10_prior_enforcement AS
+SELECT value FROM app_config WHERE key = 'media_validation_enforcement';
 UPDATE app_config SET value = 'off' WHERE key = 'media_validation_enforcement';
 INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
 VALUES
@@ -813,7 +815,32 @@ BEGIN
 END;
 $$;
 
+-- Restore everything A10a-c mutated (file convention: A4b above), so guards
+-- appended after this point inherit the seed fixture, not A10's residue: the
+-- enforcement flag as it was, Casey's seed photo set, no synthetic storage
+-- objects, only the seed intro room, and the seed interest back in its
+-- accepted shape.
 RESET ROLE;
+UPDATE app_config
+   SET value = (SELECT value FROM guard_a10_prior_enforcement)
+ WHERE key = 'media_validation_enforcement';
+DROP TABLE guard_a10_prior_enforcement;
+DELETE FROM storage.objects
+ WHERE bucket_id = 'profile-media'
+   AND name IN (
+     '00000000-0000-0000-0000-000000000003/casey-1.jpg',
+     '00000000-0000-0000-0000-000000000003/casey-2.jpg'
+   );
+UPDATE dating_profiles
+   SET photos = ARRAY['local/casey.jpg']
+ WHERE user_id = '00000000-0000-0000-0000-000000000003';
+DELETE FROM intro_rooms
+ WHERE campaign_id = '20000000-0000-0000-0000-000000000001'
+   AND interested_user_id = '00000000-0000-0000-0000-000000000003'
+   AND id <> '40000000-0000-0000-0000-000000000001';
+UPDATE interests
+   SET status = 'accepted', decided_at = now() - INTERVAL '2 days'
+ WHERE id = '30000000-0000-0000-0000-000000000001';
 
 -- ═══ Guard A11: the accept invariant holds for a direct table write ═══
 -- authenticated holds GRANT UPDATE (status, decided_at) ON interests (0006)

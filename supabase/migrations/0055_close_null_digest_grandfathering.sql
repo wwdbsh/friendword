@@ -52,17 +52,19 @@
 --   only a sender who cannot prove provenance today is refused. Rows that DO
 --   carry a digest are unaffected — the change is confined to the NULL case.
 --
--- RECOVERY LIMITATION (operator-visible, stated plainly)
---   A sender refused by this re-check self-repairs by re-submitting: the
---   ON CONFLICT DO UPDATE branch of submit_interest refreshes
---   submitted_photo_digest along with the row. But re-submission goes through
---   the BEFORE INSERT beta gate (block_interests_until_public_beta,
---   0023/0034), which refuses while public_beta_enabled is 'off' unless the
---   campaign's pitch draft is on the QA preview allowlist. So while the beta is
---   closed, a refused legacy sender has no in-product recovery unless an
---   operator allowlists the draft. Given the measured hosted state — no
---   NULL-digest interest awaiting a decision — nobody is in that position
---   today, but the limitation is real and belongs in the record.
+-- RECOVERY (operator-visible, stated plainly)
+--   The re-check judges the sender's CURRENT profile, so the primary
+--   self-repair needs no gate at all: the sender fixes their own
+--   dating_profiles row (bio, intent, 2+ photos uploaded as owned
+--   profile-media objects) under dating_profiles_update_own (0002) and the
+--   accept passes — Guard A10c in supabase/tests/20 proves exactly this with
+--   the digest still NULL. Re-submitting through submit_interest is only what
+--   refreshes the stored digest, and THAT path is behind the BEFORE INSERT
+--   beta gate (block_interests_until_public_beta, 0023/0034) while
+--   public_beta_enabled is 'off' unless the draft is allowlisted. Operators
+--   should therefore point a refused sender at their profile photos first;
+--   allowlisting a draft to enable re-submission is not required for
+--   recovery and should not be done for that reason.
 --
 -- ROLLBACK
 --   A later migration that CREATE OR REPLACEs
@@ -75,6 +77,22 @@
 --   Local-only for now. This migration must not be pushed standalone ahead of
 --   0054; hosted application rides with the pending 0054 push and 0054's own
 --   gates.
+--
+--   PRE-PUSH CHECK (mandatory, immediately before `supabase db push --linked`):
+--   the 2026-08-05 measurement above goes stale the moment any interest is
+--   written, and the accept predicate fires on ANY transition into 'accepted',
+--   not only from 'submitted' — interests.status defaults to 'started' (0001)
+--   and 'verification_pending'/'withdrawn' rows can also still be decided.
+--   Re-run, read-only, and expect zero rows:
+--
+--     SELECT id, status, submitted_at
+--       FROM public.interests
+--      WHERE submitted_photo_digest IS NULL
+--        AND status <> 'accepted';
+--
+--   Any row returned is a sender who will be newly refused at accept unless
+--   their current profile proves provenance — resolve per RECOVERY above
+--   before or immediately after the push, and record the finding.
 
 -- 0044 body reproduced whole. The ONLY change is the digest predicate below:
 -- `IS NOT NULL AND ... IS DISTINCT FROM` becomes `IS NULL OR ... IS DISTINCT

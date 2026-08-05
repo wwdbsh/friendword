@@ -676,13 +676,21 @@ $$;
 RESET ROLE;
 SELECT pg_temp.reset_probe_interest();
 
--- ═══ Guard A10: legacy photo paths are grandfathered, not re-judged ═══
--- Casey's seed profile carries 'local/casey.jpg', which is not a caller-owned
--- profile-media object, and their seed interest predates the digest column.
--- Enforcing provenance on that row would make every already-submitted interest
--- from such a sender permanently un-acceptable — the deploy-day break this
--- grandfathering exists to avoid. The control right after it proves the rule is
--- "no recorded submission photo set", not "provenance is never checked".
+-- ═══ Guard A10: a NULL digest is missing evidence, not a free pass ════
+-- 0055 closes 0044's grandfathering. submitted_photo_digest IS NULL used to
+-- SKIP the photo-provenance branch; it now FORCES it, so "no recorded
+-- submission evidence" means "prove provenance now" instead of "trust the
+-- stored paths". Casey (0003) is exactly the legacy shape 0044 grandfathered:
+-- a seed interest written before the digest column existed, and a seed dating
+-- profile whose single photo path resolves to no owned profile-media object.
+--
+-- Three guards, because the fail-closed rule has three distinct outcomes and
+-- one combined assertion could not tell them apart: the strict completeness
+-- rule refuses first (A10a), provenance refuses next (A10b), and a legacy
+-- sender whose evidence still stands up today is accepted (A10c) — the
+-- positive control that keeps A10a/A10b from passing vacuously.
+
+-- ── A10a: one photo no longer passes a NULL-digest accept ──
 UPDATE interests SET status = 'submitted', decided_at = NULL
  WHERE id = '30000000-0000-0000-0000-000000000001';
 
@@ -690,61 +698,149 @@ SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
 DO $$
 DECLARE
-  room UUID;
+  accepted BOOLEAN := false;
+  refusal TEXT;
 BEGIN
   IF (SELECT submitted_photo_digest FROM interests
        WHERE id = '30000000-0000-0000-0000-000000000001') IS NOT NULL THEN
-    RAISE EXCEPTION 'GUARD-A10: the legacy fixture unexpectedly carries a digest';
+    RAISE EXCEPTION 'GUARD-A10a: the legacy fixture unexpectedly carries a digest';
   END IF;
   IF (SELECT photos FROM dating_profiles
        WHERE user_id = '00000000-0000-0000-0000-000000000003')
      <> ARRAY['local/casey.jpg'] THEN
-    RAISE EXCEPTION 'GUARD-A10: the legacy fixture no longer has an unresolvable photo path';
+    RAISE EXCEPTION 'GUARD-A10a: the legacy fixture no longer has a single unresolvable photo path';
   END IF;
   BEGIN
-    SELECT intro_room_id INTO room
-      FROM public.decide_interest('30000000-0000-0000-0000-000000000001', 'accepted');
+    PERFORM * FROM public.decide_interest('30000000-0000-0000-0000-000000000001', 'accepted');
+    accepted := true;
   EXCEPTION WHEN OTHERS THEN
-    RAISE EXCEPTION 'GUARD-A10: a pre-0044 interest with legacy photo paths was refused: %', SQLERRM;
+    refusal := SQLERRM;
   END;
-  IF room IS NULL THEN
-    RAISE EXCEPTION 'GUARD-A10: the grandfathered accept opened no intro room';
+  IF accepted THEN
+    RAISE EXCEPTION 'GUARD-A10a: a NULL-digest interest from an incomplete profile was accepted';
+  END IF;
+  IF refusal <> 'this interest can no longer be accepted: complete your dating profile (bio, intent, and at least 2 photos) first' THEN
+    RAISE EXCEPTION 'GUARD-A10a: refused with "%"', refusal;
   END IF;
 END;
 $$;
 
+-- ── A10b: two photos clear completeness, and provenance refuses ──
+-- Same NULL digest, still unresolvable paths. With completeness satisfied the
+-- refusal can only come from assert_profile_photo_objects, which is the check
+-- 0044 skipped entirely for this row.
 RESET ROLE;
--- Same row, still unresolvable paths, but now submission-time evidence IS
--- recorded and the current evidence differs from it: the gate opens and
--- provenance is judged. Two paths so the strict completeness rule — which the
--- same gated branch checks first — is satisfied and provenance is what refuses.
 UPDATE dating_profiles
    SET photos = ARRAY['local/casey.jpg', 'local/casey-2.jpg']
  WHERE user_id = '00000000-0000-0000-0000-000000000003';
-UPDATE interests
-   SET status = 'submitted',
-       decided_at = NULL,
-       submitted_photo_digest = 'a-different-submission-evidence-digest'
+UPDATE interests SET status = 'submitted', decided_at = NULL
  WHERE id = '30000000-0000-0000-0000-000000000001';
 SET LOCAL ROLE authenticated;
 
 DO $$
 DECLARE
+  accepted BOOLEAN := false;
   refusal TEXT;
 BEGIN
+  IF (SELECT submitted_photo_digest FROM interests
+       WHERE id = '30000000-0000-0000-0000-000000000001') IS NOT NULL THEN
+    RAISE EXCEPTION 'GUARD-A10b: the legacy fixture unexpectedly carries a digest';
+  END IF;
   BEGIN
     PERFORM * FROM public.decide_interest('30000000-0000-0000-0000-000000000001', 'accepted');
-    RAISE EXCEPTION 'GUARD-A10: a changed photo set with an unresolvable path was accepted';
+    accepted := true;
   EXCEPTION WHEN OTHERS THEN
     refusal := SQLERRM;
   END;
+  IF accepted THEN
+    RAISE EXCEPTION 'GUARD-A10b: a NULL-digest interest with unresolvable photo paths was accepted';
+  END IF;
   IF refusal <> 'this interest can no longer be accepted: profile photos require owned storage objects with an allowed image MIME type' THEN
-    RAISE EXCEPTION 'GUARD-A10: refused with "%"', refusal;
+    RAISE EXCEPTION 'GUARD-A10b: refused with "%"', refusal;
   END IF;
 END;
 $$;
 
+-- ── A10c: a legacy sender who can still prove provenance is accepted ──
+-- The digest stays NULL — only the evidence behind the paths changes. This is
+-- the recovery path 0055 documents: fail-closed refuses missing evidence, not
+-- legacy rows as such. media_validation_enforcement is pinned off because
+-- assert_profile_photo_validations runs after the provenance branch and would
+-- otherwise refuse for an unrelated reason.
 RESET ROLE;
+CREATE TEMP TABLE guard_a10_prior_enforcement AS
+SELECT value FROM app_config WHERE key = 'media_validation_enforcement';
+UPDATE app_config SET value = 'off' WHERE key = 'media_validation_enforcement';
+INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+VALUES
+  (
+    'profile-media',
+    '00000000-0000-0000-0000-000000000003/casey-1.jpg',
+    '00000000-0000-0000-0000-000000000003',
+    '{"mimetype":"image/jpeg"}'
+  ),
+  (
+    'profile-media',
+    '00000000-0000-0000-0000-000000000003/casey-2.jpg',
+    '00000000-0000-0000-0000-000000000003',
+    '{"mimetype":"image/jpeg"}'
+  );
+UPDATE dating_profiles
+   SET photos = ARRAY[
+     '00000000-0000-0000-0000-000000000003/casey-1.jpg',
+     '00000000-0000-0000-0000-000000000003/casey-2.jpg'
+   ]
+ WHERE user_id = '00000000-0000-0000-0000-000000000003';
+UPDATE interests SET status = 'submitted', decided_at = NULL
+ WHERE id = '30000000-0000-0000-0000-000000000001';
+SET LOCAL ROLE authenticated;
+
+DO $$
+DECLARE
+  room UUID;
+BEGIN
+  IF (SELECT submitted_photo_digest FROM interests
+       WHERE id = '30000000-0000-0000-0000-000000000001') IS NOT NULL THEN
+    RAISE EXCEPTION 'GUARD-A10c: the legacy fixture unexpectedly carries a digest';
+  END IF;
+  BEGIN
+    SELECT intro_room_id INTO room
+      FROM public.decide_interest('30000000-0000-0000-0000-000000000001', 'accepted');
+  EXCEPTION WHEN OTHERS THEN
+    RAISE EXCEPTION 'GUARD-A10c: a NULL-digest interest with resolvable owned photos was refused: %', SQLERRM;
+  END;
+  IF room IS NULL THEN
+    RAISE EXCEPTION 'GUARD-A10c: the accept opened no intro room';
+  END IF;
+END;
+$$;
+
+-- Restore everything A10a-c mutated (file convention: A4b above), so guards
+-- appended after this point inherit the seed fixture, not A10's residue: the
+-- enforcement flag as it was, Casey's seed photo set, no synthetic storage
+-- objects, only the seed intro room, and the seed interest back in its
+-- accepted shape.
+RESET ROLE;
+UPDATE app_config
+   SET value = (SELECT value FROM guard_a10_prior_enforcement)
+ WHERE key = 'media_validation_enforcement';
+DROP TABLE guard_a10_prior_enforcement;
+DELETE FROM storage.objects
+ WHERE bucket_id = 'profile-media'
+   AND name IN (
+     '00000000-0000-0000-0000-000000000003/casey-1.jpg',
+     '00000000-0000-0000-0000-000000000003/casey-2.jpg'
+   );
+UPDATE dating_profiles
+   SET photos = ARRAY['local/casey.jpg']
+ WHERE user_id = '00000000-0000-0000-0000-000000000003';
+DELETE FROM intro_rooms
+ WHERE campaign_id = '20000000-0000-0000-0000-000000000001'
+   AND interested_user_id = '00000000-0000-0000-0000-000000000003'
+   AND id <> '40000000-0000-0000-0000-000000000001';
+UPDATE interests
+   SET status = 'accepted', decided_at = now() - INTERVAL '2 days'
+ WHERE id = '30000000-0000-0000-0000-000000000001';
 
 -- ═══ Guard A11: the accept invariant holds for a direct table write ═══
 -- authenticated holds GRANT UPDATE (status, decided_at) ON interests (0006)

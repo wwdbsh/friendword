@@ -195,7 +195,35 @@ ROLLBACK;
 -- the column grant and interests_update_owners still permit it, and the 0044
 -- accept-invariant trigger passes because the campaign is published and the
 -- sender is eligible. Blair (0002) owns the seed campaign.
+--
+-- The probe row is INSERTed directly above, so it carries no
+-- submitted_photo_digest, and since 0055 a NULL digest forces the photo
+-- provenance and 2-photo re-check instead of skipping it. Alex (0001) is made
+-- genuinely eligible inside this transaction — the sender really does satisfy
+-- the accept invariant, which is what this assertion has always claimed — and
+-- the ROLLBACK keeps the seed profile untouched for the later test files that
+-- share this database.
 BEGIN;
+INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+VALUES
+  (
+    'profile-media',
+    '00000000-0000-0000-0000-000000000001/alex-1.jpg',
+    '00000000-0000-0000-0000-000000000001',
+    '{"mimetype":"image/jpeg"}'
+  ),
+  (
+    'profile-media',
+    '00000000-0000-0000-0000-000000000001/alex-2.jpg',
+    '00000000-0000-0000-0000-000000000001',
+    '{"mimetype":"image/jpeg"}'
+  );
+UPDATE dating_profiles
+   SET photos = ARRAY[
+     '00000000-0000-0000-0000-000000000001/alex-1.jpg',
+     '00000000-0000-0000-0000-000000000001/alex-2.jpg'
+   ]
+ WHERE user_id = '00000000-0000-0000-0000-000000000001';
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000002';
 DO $$

@@ -197,6 +197,33 @@ BEGIN
   END IF;
 
   -- Interest submission and acceptance record through the same triggers.
+  -- The interest is INSERTed directly, so it carries no submitted_photo_digest,
+  -- and since 0055 a NULL digest forces the accept-time photo provenance and
+  -- 2-photo re-check (0044's grandfathering is gone). Casey (0003) is made
+  -- genuinely eligible first so the accept UPDATE below passes that invariant
+  -- on its own merits; this suite is about analytics attribution, not about
+  -- sender eligibility.
+  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+  VALUES
+    (
+      'profile-media',
+      '00000000-0000-0000-0000-000000000003/b14-casey-1.jpg',
+      '00000000-0000-0000-0000-000000000003',
+      '{"mimetype":"image/jpeg"}'
+    ),
+    (
+      'profile-media',
+      '00000000-0000-0000-0000-000000000003/b14-casey-2.jpg',
+      '00000000-0000-0000-0000-000000000003',
+      '{"mimetype":"image/jpeg"}'
+    );
+  UPDATE public.dating_profiles
+     SET photos = ARRAY[
+       '00000000-0000-0000-0000-000000000003/b14-casey-1.jpg',
+       '00000000-0000-0000-0000-000000000003/b14-casey-2.jpg'
+     ]
+   WHERE user_id = '00000000-0000-0000-0000-000000000003';
+
   INSERT INTO public.interests (id, campaign_id, sender_user_id, status, submitted_at)
   VALUES (
     'b1400000-0000-0000-0000-000000000301',

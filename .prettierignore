@@ -8,3 +8,4 @@ supabase/migrations
 .briefs
 FRIENDWORD_HANDOFF.md
 test-results
+.claude

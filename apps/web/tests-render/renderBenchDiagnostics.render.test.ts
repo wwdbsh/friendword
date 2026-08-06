@@ -9,11 +9,20 @@
 
 import type { RenderSceneOptions, RenderSceneResult } from '@/lib/pitchRender/renderScene';
 import type { LaunchProbe } from '@/lib/pitchRender/diagnostics';
+import type { MemorySource } from '@/lib/pitchRender/peakMemory';
 
 const SECRET = 'unit-render-secret-0123456789';
 const BASE_URL = 'http://127.0.0.1:3120';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Every source the T013 chain may honestly report (peakMemory.ts). */
+const MEMORY_SOURCES: readonly MemorySource[] = [
+  'cgroup-v2-peak',
+  'cgroup-v2-current-sampled',
+  'cgroup-v1-max-usage',
+  'self-maxrss',
+];
 
 const PROBE: LaunchProbe = {
   mode: 'sparticuz-linux',
@@ -88,7 +97,11 @@ describe('render-bench failure diagnostics', () => {
     expect(body.browserExitCode).toBeNull();
     expect(body.browserExitSignal).toBeNull();
     expect(body.peakMemoryBytes as number).toBeGreaterThan(0);
-    expect(['cgroup-v2-peak', 'self-maxrss']).toContain(body.memorySource);
+    expect(MEMORY_SOURCES).toContain(body.memorySource);
+    // The source is only useful next to the honesty flag and the attempts.
+    expect(typeof body.memorySampled).toBe('boolean');
+    expect(body.memorySampled).toBe(body.memorySource === 'cgroup-v2-current-sampled');
+    expect((body.memoryProbes as unknown[]).length).toBe(3);
   });
 
   it('carries stage, probe, stderr tail and exit signal when the engine dies mid-capture', async () => {
@@ -128,7 +141,11 @@ describe('render-bench failure diagnostics', () => {
     expect(body.browserExitSignal).toBe('SIGKILL');
     expect(body.launchProbe).toEqual(PROBE);
     expect(body.peakMemoryBytes as number).toBeGreaterThan(0);
-    expect(['cgroup-v2-peak', 'self-maxrss']).toContain(body.memorySource);
+    expect(MEMORY_SOURCES).toContain(body.memorySource);
+    // The source is only useful next to the honesty flag and the attempts.
+    expect(typeof body.memorySampled).toBe('boolean');
+    expect(body.memorySampled).toBe(body.memorySource === 'cgroup-v2-current-sampled');
+    expect((body.memoryProbes as unknown[]).length).toBe(3);
   });
 
   it('leaks no authorization header or secret into the failure body', async () => {

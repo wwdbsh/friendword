@@ -23,11 +23,16 @@ import { resolveShareOrigin } from '@/lib/pitchRender/endCard';
 import { startMemorySampler } from '@/lib/pitchRender/peakMemory';
 import { renderScene, type RenderPhotoAsset } from '@/lib/pitchRender/renderScene';
 import { renderRunSecret, renderSecretMatches } from '@/lib/pitchRender/secret';
+import { BENCH_TIME_BUDGET_MS } from '@/lib/pitchRender/timeBudget';
 
 export const dynamic = 'force-dynamic';
 
-/** Same Hobby-plan ceiling as render-run; the worst case measures ~150s. */
-export const maxDuration = 300;
+/**
+ * Same Fluid ceiling as render-run. A literal because Next.js rejects an
+ * imported constant here; timeBudget.test.ts asserts it equals
+ * RENDER_MAX_DURATION_SECONDS, and vercel.json carries the same number.
+ */
+export const maxDuration = 800;
 
 // The Linux 실측 instrument (SESSION_HANDOFF §3-2): one POST renders the
 // measured worst case — a 60s schemaVersion 2 scene at 30fps plus the 1.5s end
@@ -240,7 +245,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         words,
         text,
         workDir,
-        timeBudgetMs: 270_000,
+        timeBudgetMs: BENCH_TIME_BUDGET_MS,
         diagnostics: {
           onStage: stages.mark,
           launch: {

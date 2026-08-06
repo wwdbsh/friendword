@@ -9,11 +9,16 @@ import { getSupabaseServiceClient } from '@/lib/supabaseServer';
 export const dynamic = 'force-dynamic';
 
 /**
- * Worst-case scene is 60s = 1,800 frames, measured ~150s on one vCPU; 300 is
- * the same Hobby-plan ceiling the ingest worker runs under, and the pass
- * budget inside runRenderPass leaves margin under it.
+ * Fluid's ceiling on Pro. The Hobby measurement (Issue #3) was ~4.2fps on one
+ * vCPU, so the 1,845-frame worst case aborted honestly at ~1,130 frames inside
+ * a 300s invocation; the instance now runs on a Performance machine and this
+ * spends the ceiling that comes with it. The pass budget inside runRenderPass
+ * keeps WORKER_SAFETY_MARGIN_MS under this — a literal here because Next.js
+ * statically analyses route segment config and rejects an imported constant,
+ * so timeBudget.test.ts asserts this equals RENDER_MAX_DURATION_SECONDS.
+ * vercel.json carries the same number for the deployed function.
  */
-export const maxDuration = 300;
+export const maxDuration = 800;
 
 /**
  * The render worker (motion pitch Phase 4). Claims leased jobs from

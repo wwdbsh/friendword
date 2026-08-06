@@ -20,6 +20,7 @@ import {
   type LaunchProbe,
 } from '@/lib/pitchRender/diagnostics';
 import { resolveShareOrigin } from '@/lib/pitchRender/endCard';
+import { startMemorySampler } from '@/lib/pitchRender/peakMemory';
 import { renderScene, type RenderPhotoAsset } from '@/lib/pitchRender/renderScene';
 import { renderRunSecret, renderSecretMatches } from '@/lib/pitchRender/secret';
 
@@ -172,26 +173,6 @@ async function benchAudio(workDir: string): Promise<{ bytes: Buffer; mimeType: s
   return { bytes: await readFile(file), mimeType: 'audio/mp4' };
 }
 
-/**
- * The pass's memory high-water mark, read ONCE after the render. Preferred
- * source is cgroup v2's memory.peak — the kernel-tracked maximum the OOM
- * killer actually enforces, and it counts the Chromium and ffmpeg CHILDREN.
- * The fallback, process.resourceUsage().maxRSS, sees this Node process alone
- * (libuv reports kilobytes), so memorySource says honestly which one answered.
- */
-async function peakMemory(): Promise<{ bytes: number; source: string }> {
-  try {
-    const raw = await readFile('/sys/fs/cgroup/memory.peak', 'utf8');
-    const parsed = Number.parseInt(raw.trim(), 10);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return { bytes: parsed, source: 'cgroup-v2-peak' };
-    }
-  } catch {
-    // Not on cgroup v2 (macOS dev box, older kernel); fall through.
-  }
-  return { bytes: process.resourceUsage().maxRSS * 1024, source: 'self-maxrss' };
-}
-
 export async function POST(request: Request): Promise<NextResponse> {
   const secret = renderRunSecret();
   if (secret === null) {
@@ -231,6 +212,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     probe: null,
     exit: null,
   };
+  // T013: started HERE, after the secret gate and before any work, so a polled
+  // memory.current maximum covers the whole pass. Bench-only — the render-run
+  // worker never polls, so a real render pays nothing for this.
+  const memoryProbe = startMemorySampler();
 
   try {
     await mkdir(workDir, { recursive: true });
@@ -273,7 +258,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       },
     );
 
-    const memory = await peakMemory();
+    const memory = await memoryProbe.read();
     return NextResponse.json({
       instanceId: INSTANCE_ID,
       coldStart,
@@ -285,6 +270,11 @@ export async function POST(request: Request): Promise<NextResponse> {
       outputBytes: stats.outputBytes,
       peakMemoryBytes: memory.bytes,
       memorySource: memory.source,
+      // An approximation must never be read as a kernel high-water mark: the
+      // T002 verdict depends on knowing which one this is.
+      memorySampled: memory.sampled,
+      memorySamples: memory.samples,
+      memoryProbes: memory.probes,
       audio: true,
       platform: `${process.platform}-${process.arch}`,
     });
@@ -295,7 +285,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     // variable-length field is capped in diagnostics.ts.
     const detail = describeError(error, 'bench render failed');
     const stderr = stderrTail.read();
-    const memory = await peakMemory();
+    const memory = await memoryProbe.read();
     return NextResponse.json(
       {
         instanceId: INSTANCE_ID,
@@ -314,11 +304,17 @@ export async function POST(request: Request): Promise<NextResponse> {
         launchProbe: browserFacts.probe,
         peakMemoryBytes: memory.bytes,
         memorySource: memory.source,
+        memorySampled: memory.sampled,
+        memorySamples: memory.samples,
+        // Which memory source answered, and why the others did not — a failed
+        // bench is otherwise the only place this platform fact is observable.
+        memoryProbes: memory.probes,
         platform: `${process.platform}-${process.arch}`,
       },
       { status: 500 },
     );
   } finally {
+    memoryProbe.stop();
     // Discard everything: the MP4 was counted, never kept.
     await rm(workDir, { recursive: true, force: true });
   }

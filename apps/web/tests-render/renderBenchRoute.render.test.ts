@@ -73,7 +73,14 @@ describe.runIf(E2E)('render-bench route — full worst-case measurement', () => 
     expect(payload.captureMs).toBeGreaterThan(0);
     expect(payload.outputBytes).toBeGreaterThan(1e6);
     expect(payload.peakMemoryBytes).toBeGreaterThan(0);
-    expect(['cgroup-v2-peak', 'self-maxrss']).toContain(payload.memorySource);
+    expect([
+      'cgroup-v2-peak',
+      'cgroup-v2-current-sampled',
+      'cgroup-v1-max-usage',
+      'self-maxrss',
+    ]).toContain(payload.memorySource);
+    expect(payload.memorySampled).toBe(payload.memorySource === 'cgroup-v2-current-sampled');
+    expect(payload.memoryProbes).toHaveLength(3);
     expect(payload.audio).toBe(true);
   });
 });

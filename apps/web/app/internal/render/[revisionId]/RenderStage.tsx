@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 
 import { MotionSceneV2 } from '@/components/MotionSceneV2';
+import { collectFontFaceSources, loadRenderFonts } from '@/lib/pitchRender/fontGate';
 import type { RenderPayload } from '@/lib/pitchRender/payload';
 import { sceneV2Frame, sceneV2PhotoIndexes, type SceneV2Frame } from '@/pitch/sceneV2';
 
@@ -174,9 +175,20 @@ export function RenderStage() {
       const warmups = Array.from(
         document.querySelectorAll<HTMLElement>('[data-render-font-warmup]'),
       );
-      await Promise.all(
-        warmups.map((warmup) => document.fonts.load(`16px ${getComputedStyle(warmup).fontFamily}`)),
-      );
+      // T013: load ONLY the url()-backed families, never next/font's
+      // local()-sourced metric fallback — the headless shell cannot instantiate
+      // local() and rejected the whole-stack load with NetworkError. The gate
+      // still fails loudly if a real family will not load; see fontGate.ts.
+      await loadRenderFonts({
+        stacks: warmups.map((warmup) => getComputedStyle(warmup).fontFamily),
+        faces: collectFontFaceSources(document.styleSheets),
+        load: (spec) => document.fonts.load(spec),
+        check: (spec) => document.fonts.check(spec),
+      });
+      // Settles the faces the stage's own layout kicked off. It never rejects —
+      // a face that ends in the error state (the local() fallback does, in the
+      // shell) leaves `loading` empty rather than pending — so this cannot
+      // reintroduce the failure the load above just stopped.
       await document.fonts.ready;
       await nextPaint();
     };

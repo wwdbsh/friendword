@@ -1,3 +1,4 @@
+import { formatErrorForDisplay } from '../../services/errorDiagnostics';
 import type { PitchDraftId, PitchRecording, PitchRelationship } from '../../services/types';
 
 export class PitchFlowStateError extends Error {
@@ -46,7 +47,10 @@ export function handleSubmitError(
   if (error instanceof Error) {
     // TODO(qa): temporary diagnostics while device QA hunts a submit failure.
     console.warn('[pitchFlow] submit failed', error.message, error.stack);
-    setErrorMessage(error.message);
+    // The screen carries the error class and top frames as well as the message:
+    // a released build has no console, so this is the only way a device-only
+    // failure gets identified (T015 defect 2).
+    setErrorMessage(formatErrorForDisplay(error));
     return;
   }
   throw error;

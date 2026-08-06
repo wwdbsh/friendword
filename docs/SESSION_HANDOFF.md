@@ -45,13 +45,13 @@
 >
 > **오케스트레이션 상태 (다음 세션 재개용):** fcp Goal `render-launch-path` = GitHub Issue #1, 태스크 #2~#11+#14. 완료: T001(#2, PR #16)·T003(#4)·T006(#7, PR #12)·T007(#8, PR #13)·T011(#14, PR #15). 진행: T012(#17, 벤치 진단 계측). 대기: T002(#3, 위 블로커)·T008~T010. T004(#5) 결정 완료(2026-08-05): 자막 채택, 단 기성 자막 스타일 금지 — Hype Mixtape 감성의 스타일드 자막 크롬(구현 T005, 시안 승인 게이트; DECISIONS 기록 예정). 로컬 원장: `.claude/fable-control-plane/goals/render-launch-path/`(이 머신 전용, git 미추적 — state.json이 최신 체크포인트). 실행 승인 envelope은 태스크 단위로 사용자에게 재확인.
 
-|             |                                                                                                                                                       |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 코드        | `26ebd6e` on `main` (렌더 워커 기동 슬라이스)                                                                                                         |
+|             |                                                                                                                                                                                                                      |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 코드        | `26ebd6e` on `main` (렌더 워커 기동 슬라이스)                                                                                                                                                                        |
 | hosted DB   | **0056까지 적용** (T008, 2026-08-06 — 0054 렌더 큐 + 0055 NULL-digest fail-closed + 0056 rate-limit 경합). 시드 `media_render_concurrency_cap`=**1** 확인, anon ACL 프로브 정상. **내보내기 파이프라인 hosted 활성** |
-| 런치 게이트 | `public_beta_enabled=off` · `real_payments_enabled=off` · `identity_enforcement=off` · `media_validation_enforcement=off` — **전부 사용자 결정 대기** |
-| 해커톤      | **Final Official Rules 공개·전면 대조 완료**([`HACKATHON_RULES.md`](HACKATHON_RULES.md) 2026-08-04). 한국 참가 확정, 웹 선공개 무해 확정              |
-| 전 게이트   | green (아래 수치, Advisor 재실행)                                                                                                                     |
+| 런치 게이트 | `public_beta_enabled=off` · `real_payments_enabled=off` · `identity_enforcement=off` · `media_validation_enforcement=off` — **전부 사용자 결정 대기**                                                                |
+| 해커톤      | **Final Official Rules 공개·전면 대조 완료**([`HACKATHON_RULES.md`](HACKATHON_RULES.md) 2026-08-04). 한국 참가 확정, 웹 선공개 무해 확정                                                                             |
+| 전 게이트   | green (아래 수치, Advisor 재실행)                                                                                                                                                                                    |
 
 ```
 DB 01~29 exit 0 (canonical runner: bash scripts/test-db.sh)

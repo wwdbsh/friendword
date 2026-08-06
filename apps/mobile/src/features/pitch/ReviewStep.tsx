@@ -1,5 +1,6 @@
 import { colors, fontSizes, radii, spacing, strokes } from '@friendword/ui-tokens';
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
+import { useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 
 import { HypeButton, StickerCard } from '../../components';
@@ -43,6 +44,7 @@ export function ReviewStep({
 }: ReviewStepProps) {
   const player = useAudioPlayer(recording.uri);
   const playerStatus = useAudioPlayerStatus(player);
+  const [playbackErrorMessage, setPlaybackErrorMessage] = useState<string | null>(null);
   const isLongEnough = recording.durationMillis >= 30_000;
 
   return (
@@ -74,9 +76,21 @@ export function ReviewStep({
               return;
             }
             // Playback must survive the iOS silent switch; the recorder's mode
-            // reset may have dropped playsInSilentMode before this screen.
+            // reset may have dropped playsInSilentMode before this screen. A
+            // failure here is reported rather than swallowed: playback still
+            // starts, but it can be inaudible with the silent switch on.
             void setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true })
-              .catch(() => undefined)
+              .then(() => {
+                setPlaybackErrorMessage(null);
+              })
+              .catch((error: unknown) => {
+                if (!(error instanceof Error)) {
+                  throw error;
+                }
+                setPlaybackErrorMessage(
+                  'Audio playback mode could not be set. If you hear nothing, turn off silent mode and try again.',
+                );
+              })
               .then(() => {
                 player.play();
               });
@@ -84,6 +98,11 @@ export function ReviewStep({
           secondary
         />
         <HypeButton label="Record it again" onPress={onRerecord} secondary />
+        {playbackErrorMessage ? (
+          <Text accessibilityLiveRegion="polite" style={styles.error}>
+            {playbackErrorMessage}
+          </Text>
+        ) : null}
         <View style={styles.caption}>
           <Text style={styles.captionLabel}>Caption</Text>
           <Text style={styles.detail}>

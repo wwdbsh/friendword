@@ -23,6 +23,12 @@
  * The Fluid-compute invocation ceiling on Pro. Both render routes declare this
  * as their `maxDuration`; ingest-run is deliberately NOT changed — its pass
  * budget is 150s and it has no reason to hold an instance longer.
+ *
+ * Operational fact (2026-08-06): Vercel validates this number against the
+ * TEAM'S PLAN at deployment-creation time — a push while the team is still
+ * Hobby is rejected as "invalid maxDuration for plan" before any build starts
+ * and leaves NO deployment record. If deploys of this file ever fail that way
+ * again, check the team plan first, not the code.
  */
 export const RENDER_MAX_DURATION_SECONDS = 800;
 

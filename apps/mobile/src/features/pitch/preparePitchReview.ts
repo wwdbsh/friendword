@@ -9,6 +9,7 @@ import {
   hasAiProcessingConsent,
   recordAiProcessingConsent,
 } from '../../services/aiConsent';
+import { formatErrorForDisplay } from '../../services/errorDiagnostics';
 import type { PitchDraftService } from '../../services/pitchDrafts';
 import type { PitchDraft, PitchDraftId } from '../../services/types';
 
@@ -67,9 +68,11 @@ export function getAiDraftFailureMessage(error: unknown): string {
   if (error instanceof DraftGenerationError && error.status === 503) {
     return 'AI features are temporarily disabled';
   }
-  return error instanceof Error
-    ? error.message
-    : 'The AI draft could not be created. Please try again.';
+  // Anything else is unrecognised, so it is reported with the error class and
+  // the frame it came from: on a released build this screen is the only place a
+  // device-only failure is ever visible. See errorDiagnostics for what it may
+  // and may not carry.
+  return formatErrorForDisplay(error);
 }
 
 export async function preparePitchReview(

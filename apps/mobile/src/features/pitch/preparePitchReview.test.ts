@@ -357,4 +357,19 @@ describe('preparePitchReview', () => {
       'AI features are temporarily disabled',
     );
   });
+
+  it('carries the error class and frame for an unrecognised failure', () => {
+    // T015 defect 2: the device-only "rest" crash reaches this branch and a
+    // released build shows nothing but the message, which does not say whether
+    // the throw came from app code or from a library call.
+    const error = new TypeError("undefined is not an object (evaluating 'e.rest')");
+    error.stack =
+      "TypeError: undefined is not an object (evaluating 'e.rest')\n    at from (http://10.0.0.2:8081/index.bundle?platform=ios&dev=true:98765:12)";
+
+    const message = getAiDraftFailureMessage(error);
+
+    expect(message).toContain("evaluating 'e.rest'");
+    expect(message).toContain('TypeError');
+    expect(message).toContain('from@index.bundle:98765:12');
+  });
 });

@@ -6,10 +6,10 @@
       "maxDuration": 300
     },
     "app/api/media/render-run/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 800
     },
     "app/api/media/render-bench/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 800
     }
   }
 }

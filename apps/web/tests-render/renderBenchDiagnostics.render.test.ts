@@ -21,8 +21,15 @@ const MEMORY_SOURCES: readonly MemorySource[] = [
   'cgroup-v2-peak',
   'cgroup-v2-current-sampled',
   'cgroup-v1-max-usage',
+  'proc-rss-sampled',
   'self-maxrss',
 ];
+
+/** The two sources that poll rather than read a kernel high-water mark. */
+const SAMPLED_SOURCES: readonly MemorySource[] = ['cgroup-v2-current-sampled', 'proc-rss-sampled'];
+
+/** cgroup v2 peak, v2 current, v1 max_usage, /proc tree — every attempt named. */
+const MEMORY_PROBE_COUNT = 4;
 
 const PROBE: LaunchProbe = {
   mode: 'sparticuz-linux',
@@ -100,8 +107,8 @@ describe('render-bench failure diagnostics', () => {
     expect(MEMORY_SOURCES).toContain(body.memorySource);
     // The source is only useful next to the honesty flag and the attempts.
     expect(typeof body.memorySampled).toBe('boolean');
-    expect(body.memorySampled).toBe(body.memorySource === 'cgroup-v2-current-sampled');
-    expect((body.memoryProbes as unknown[]).length).toBe(3);
+    expect(body.memorySampled).toBe(SAMPLED_SOURCES.includes(body.memorySource as MemorySource));
+    expect((body.memoryProbes as unknown[]).length).toBe(MEMORY_PROBE_COUNT);
   });
 
   it('carries stage, probe, stderr tail and exit signal when the engine dies mid-capture', async () => {
@@ -144,8 +151,8 @@ describe('render-bench failure diagnostics', () => {
     expect(MEMORY_SOURCES).toContain(body.memorySource);
     // The source is only useful next to the honesty flag and the attempts.
     expect(typeof body.memorySampled).toBe('boolean');
-    expect(body.memorySampled).toBe(body.memorySource === 'cgroup-v2-current-sampled');
-    expect((body.memoryProbes as unknown[]).length).toBe(3);
+    expect(body.memorySampled).toBe(SAMPLED_SOURCES.includes(body.memorySource as MemorySource));
+    expect((body.memoryProbes as unknown[]).length).toBe(MEMORY_PROBE_COUNT);
   });
 
   it('leaks no authorization header or secret into the failure body', async () => {

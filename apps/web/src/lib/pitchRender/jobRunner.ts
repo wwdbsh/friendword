@@ -24,6 +24,13 @@ import {
   renderOutputStoragePath,
   uploadRenderOutput,
 } from './storage';
+import {
+  COMPLETION_MARGIN_MS,
+  DEFAULT_CLAIM_WINDOW_MS,
+  DEFAULT_LEASE_SECONDS,
+  MIN_START_BUDGET_MS,
+  WORKER_HARD_BUDGET_MS,
+} from './timeBudget';
 import { assertRenderableScene } from './validate';
 
 // The render worker's job loop (Phase 4): claim a leased job from
@@ -47,22 +54,15 @@ import { assertRenderableScene } from './validate';
 //     which reorders keys and reformats numbers (0048's pinned comment; this
 //     repo has already shipped four cross-language serialization incidents).
 
-const DEFAULT_LEASE_SECONDS = 900;
 const DEFAULT_MAX_JOBS = 2;
-/**
- * Stop CLAIMING once this much of the pass has elapsed: the worst measured
- * render (60s scene) is ~150s, so a job may only start while that still fits
- * under the hard budget below (the ingest worker's start-window pattern,
- * pipeline.ts runClipIngestPass).
- */
-const DEFAULT_CLAIM_WINDOW_MS = 90_000;
-/** Everything — render, upload, completion — inside the route's 300s ceiling. */
-const DEFAULT_HARD_BUDGET_MS = 260_000;
-/** Upload + completion must land while the lease is still held. */
-const COMPLETION_MARGIN_MS = 30_000;
-/** Below this there is no point launching Chromium at all: fail before starting. */
-const MIN_START_BUDGET_MS = 15_000;
 const MAX_FAILURE_REASON_CHARS = 300;
+
+// The pass clock — lease length, claim window, hard budget, completion margin
+// and the refuse-to-start floor — now lives in ./timeBudget, where each value
+// is defined relative to the route's maxDuration and the relations between
+// them are asserted (timeBudget.test.ts). They were literals here while the
+// ceiling was 300s; at 800s the lease is close enough to the budget that
+// "which deadline binds" stopped being obvious, and a comment is not a proof.
 
 /** sha256 hex over the canonical text, byte-compatible with pg's digest(). */
 export function sceneHashOfCanonicalText(canonicalSceneText: string): string {
@@ -113,7 +113,7 @@ export async function runRenderPass(
 ): Promise<RenderPassSummary> {
   const startedAt = Date.now();
   const claimDeadline = startedAt + (options.claimWindowMs ?? DEFAULT_CLAIM_WINDOW_MS);
-  const hardDeadline = startedAt + (options.hardBudgetMs ?? DEFAULT_HARD_BUDGET_MS);
+  const hardDeadline = startedAt + (options.hardBudgetMs ?? WORKER_HARD_BUDGET_MS);
   const maxJobs = options.maxJobs ?? DEFAULT_MAX_JOBS;
 
   const jobs: RenderJobReport[] = [];

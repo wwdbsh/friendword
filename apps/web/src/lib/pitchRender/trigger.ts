@@ -5,7 +5,9 @@ import { renderRunSecret } from './secret';
 /**
  * How long the kick waits for /api/media/render-run to ANSWER, not to finish.
  * Delivering the request takes well under a second; the worker's response only
- * arrives once the whole pass is over (up to ~260s), so awaiting it the way
+ * arrives once the whole pass is over (up to WORKER_HARD_BUDGET_MS — 760s
+ * since the Pro ceiling raise, and the reason this wait is capped at all), so
+ * awaiting it the way
  * the ingest trigger does would pin every kick invocation for the render's
  * duration — and the kick route's own default maxDuration would kill it
  * mid-await. The abort cancels our wait for the response, nothing else.

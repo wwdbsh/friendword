@@ -77,10 +77,17 @@ describe.runIf(E2E)('render-bench route — full worst-case measurement', () => 
       'cgroup-v2-peak',
       'cgroup-v2-current-sampled',
       'cgroup-v1-max-usage',
+      'proc-rss-sampled',
       'self-maxrss',
     ]).toContain(payload.memorySource);
-    expect(payload.memorySampled).toBe(payload.memorySource === 'cgroup-v2-current-sampled');
-    expect(payload.memoryProbes).toHaveLength(3);
+    // Both polled sources must own up to being polled; on darwin (no cgroup,
+    // no /proc) this run lands on self-maxrss and the flag is false.
+    expect(payload.memorySampled).toBe(
+      payload.memorySource === 'cgroup-v2-current-sampled' ||
+        payload.memorySource === 'proc-rss-sampled',
+    );
+    // cgroup v2 peak, v2 current, v1 max_usage, /proc tree.
+    expect(payload.memoryProbes).toHaveLength(4);
     expect(payload.audio).toBe(true);
   });
 });

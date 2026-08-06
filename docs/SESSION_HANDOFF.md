@@ -48,7 +48,7 @@
 |             |                                                                                                                                                       |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 코드        | `26ebd6e` on `main` (렌더 워커 기동 슬라이스)                                                                                                         |
-| hosted DB   | **0053까지 적용**. `0054`는 **로컬 전용 — 의도적 보류**(§3 참조). 시드 교정: `media_render_concurrency_cap` 2→**1**                                   |
+| hosted DB   | **0056까지 적용** (T008, 2026-08-06 — 0054 렌더 큐 + 0055 NULL-digest fail-closed + 0056 rate-limit 경합). 시드 `media_render_concurrency_cap`=**1** 확인, anon ACL 프로브 정상. **내보내기 파이프라인 hosted 활성** |
 | 런치 게이트 | `public_beta_enabled=off` · `real_payments_enabled=off` · `identity_enforcement=off` · `media_validation_enforcement=off` — **전부 사용자 결정 대기** |
 | 해커톤      | **Final Official Rules 공개·전면 대조 완료**([`HACKATHON_RULES.md`](HACKATHON_RULES.md) 2026-08-04). 한국 참가 확정, 웹 선공개 무해 확정              |
 | 전 게이트   | green (아래 수치, Advisor 재실행)                                                                                                                     |

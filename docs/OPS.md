@@ -150,22 +150,26 @@ request의 `note`에 기록합니다. 실패한 요청은 `failed`와 제한된 
 - mock 처리 금지 원칙(CLAUDE.md 9)에 따라 이 런북이 최소 실물 운영 도구다 —
   전용 운영자 UI는 출시 후 P1
 
-## Launch gates (0023 — 2차 감사 Slice 0)
+## Launch gates (0023 — 2차 감사 Slice 0, 0060에서 sandbox 분기)
 
-`app_config`의 두 스위치가 실결제와 외부 공개 베타를 서버에서 차단합니다. 기본값은 둘 다 `off`이며 **Slice 10 release gate(2차 감사 §7) 통과 전에는 hosted에서 켜지 않습니다.**
+`app_config`의 스위치가 실결제와 외부 공개 베타를 서버에서 차단합니다. 기본값은 모두 `off`이며 **Slice 10 release gate(2차 감사 §7) 통과 전에는 hosted에서 `real_payments_enabled`를 켜지 않습니다.**
 
-| key                     | off일 때 차단되는 것                                                                      |
-| ----------------------- | ----------------------------------------------------------------------------------------- |
-| `real_payments_enabled` | `purchase_intents` INSERT(구매 시작), PRODUCTION environment `purchase_events`(효익 지급) |
-| `public_beta_enabled`   | `interests` INSERT(외부 사용자의 관심 표현 제출)                                          |
+| key                        | off일 때 차단되는 것                                                                                           |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `real_payments_enabled`    | PRODUCTION `purchase_intents` INSERT(구매 시작), PRODUCTION environment `purchase_events`(효익 지급)           |
+| `public_beta_enabled`      | `interests` INSERT(외부 사용자의 관심 표현 제출)                                                               |
+| `sandbox_payments_enabled` | SANDBOX `purchase_intents` INSERT, 그리고 **SANDBOX 구매 이벤트의 효익 지급**(닫혀 있으면 review로만 남습니다) |
 
-- SANDBOX environment 결제 이벤트는 `real_payments_enabled=off`여도 처리됩니다(내부 sandbox 검증용).
-- 로컬 테스트 DB는 `supabase/seed.sql`이 두 게이트를 켭니다. hosted에는 seed가 적용되지 않으므로 기본 off가 유지됩니다.
-- `scripts/e2e-production.mjs`는 실행 시작 시 게이트를 열고 종료 시(finally) 이전 값으로 원복합니다. 중단으로 원복이 누락됐는지 확인하려면:
+- 0060 이후 게이트는 environment로 갈립니다. **프로덕션 기본 off는 그대로입니다** — PRODUCTION intent는 여전히 `real_payments_enabled`를 요구하고, PRODUCTION 이벤트는 여전히 `purchase_events_production_gate`가 막습니다.
+- SANDBOX intent는 `sandbox_payments_enabled=on` **그리고** `sandbox_test_accounts`에 등록된 계정에만 발급됩니다. 스위치만 열려도 다른 사람의 구매는 열리지 않습니다. 절차는 아래 "RevenueCat sandbox 결제 드릴".
+- 웹훅도 **지급 직전에 두 조건을 다시 봅니다**(창이 열려 있는가, 지급 대상이 등록되어 있는가). intent는 발급 시점의 사실만 증명하므로, 드릴 도중 등록을 해제했거나 이전 창의 intent가 뒤늦게 도착한 웹훅은 지급 없이 `sandbox_purchase_not_enrolled` / `sandbox_payments_closed` review로 남습니다.
+- **환불·취소·만료(효익 회수) 이벤트에는 두 제한이 모두 적용되지 않습니다.** 창을 닫고 등록을 지우는 것이 드릴의 정상 종료 상태인데, 그 뒤 도착한 환불을 거부하면 이미 지급된 효익이 그대로 남기 때문입니다.
+- 로컬 테스트 DB는 `supabase/seed.sql`이 세 게이트를 모두 켭니다(스위트가 SANDBOX 이벤트를 재생하므로). hosted에는 seed가 적용되지 않으므로 기본 off가 유지됩니다.
+- `scripts/e2e-production.mjs`는 실행 시작 시 `real_payments_enabled`·`sandbox_payments_enabled`를 열고 종료 시(finally) 이전 값으로 원복합니다. 중단으로 원복이 누락됐는지 확인하려면:
 
 ```sql
 SELECT key, value, updated_at FROM app_config
- WHERE key IN ('real_payments_enabled', 'public_beta_enabled');
+ WHERE key IN ('real_payments_enabled', 'public_beta_enabled', 'sandbox_payments_enabled');
 ```
 
 - 게이트 상태 변경은 service role SQL로만 하며, 변경 시 이 문서와 `docs/DECISIONS.md`에 날짜·이유를 남깁니다:
@@ -176,6 +180,223 @@ SELECT key, value, updated_at FROM app_config
 UPDATE app_config SET value = 'on'  -- 또는 'off'
  WHERE key = 'real_payments_enabled';
 ```
+
+## RevenueCat sandbox 결제 드릴 (0060 이후 — 사용자 실행)
+
+목적: **실결제 게이트를 켜지 않고** 실 스토어 sandbox 왕복(구매 → 웹훅 멱등 → restore → 환불)을 한 번 통과시킵니다. 아래 전 과정은 `real_payments_enabled=off` 상태로 수행합니다. 드릴 중 이 스위치를 켜지 않습니다.
+
+SQL은 전부 **service role**(Supabase Studio SQL editor)에서 실행합니다.
+
+### 0. 전제 점검 — 하나라도 아니면 시작하지 않습니다
+
+| 확인                     | 방법                                                                                                                                                          | 기대                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| 0060이 hosted에 있다     | `SELECT to_regclass('public.sandbox_test_accounts');`                                                                                                         | NULL이 아님                                                                                       |
+| 스위치가 기본값이다      | `SELECT key, value FROM app_config WHERE key IN ('real_payments_enabled', 'sandbox_payments_enabled');`                                                       | 둘 다 `off`. sandbox가 이미 `on`이면 앞선 드릴이 창을 닫지 않은 것 — 먼저 7단계로 닫고 시작합니다 |
+| 등록부가 비어 있다       | `SELECT user_id, note, enrolled_at FROM sandbox_test_accounts;`                                                                                               | 0행. 남아 있으면 그 계정은 드릴 밖에서도 sandbox 대상이므로 이유를 확인하고 지웁니다              |
+| 웹훅이 도달한다          | Vercel 환경변수에 `REVENUECAT_WEBHOOK_AUTH_TOKEN`이 있고 RevenueCat 웹훅 URL이 production origin `/api/revenuecat`                                            | 없으면 라우트가 **501**을 답하고 이벤트가 영영 안 옵니다                                          |
+| 빌드에 iOS 키가 구워졌다 | `cd apps/mobile && pnpm dlx eas-cli env:list production` 에 `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY`가 보이고, 그 뒤 빌드한 TestFlight 앱의 paywall이 가격을 표시 | paywall이 "Billing isn't live yet"이면 키가 안 구워진 것 — env 등록 **후 재빌드**해야 반영됩니다  |
+| sandbox 테스터 계정      | ASC → Users and Access → Sandbox → Test Accounts                                                                                                              | 계정 존재                                                                                         |
+| 기기가 sandbox 로그인    | iPhone 설정 → App Store → 하단 SANDBOX ACCOUNT                                                                                                                | 위 테스터 계정                                                                                    |
+
+### 1. 드릴 창 열기 (등록 + 스위치)
+
+**등록하는 순간부터 이 계정은 프로덕션 구매를 할 수 없습니다**(그 사람의 구매는 정의상 테스트로 취급됩니다 — 0060의 fail-safe 방향). 그러니 등록 전에 그 계정에 진행 중인 구매가 없는지 한 번 봅니다: `SELECT id, product_id, status, environment, expires_at FROM purchase_intents WHERE user_id = '<user_id>' AND status = 'issued' AND expires_at > now();` — 0행이어야 하고, 남아 있으면 그 결제를 끝내거나 만료를 기다린 뒤 시작합니다.
+
+```sql
+-- 앱에서 로그인할 계정의 user id (TestFlight에서 쓰는 이메일로 찾습니다)
+SELECT u.id FROM users u
+  JOIN auth.users a ON a.id = u.id
+ WHERE a.email = '<TestFlight 로그인 이메일>';
+
+INSERT INTO sandbox_test_accounts (user_id, note)
+VALUES ('<user_id>', 'sandbox drill <YYYY-MM-DD>');
+
+UPDATE app_config SET value = 'on' WHERE key = 'sandbox_payments_enabled';
+
+SELECT key, value FROM app_config
+ WHERE key IN ('real_payments_enabled', 'sandbox_payments_enabled');
+```
+
+기대: `real_payments_enabled=off`, `sandbox_payments_enabled=on`. **real payments가 on이면 여기서 멈춥니다** — 이 드릴은 off 상태를 증명하는 절차입니다.
+
+Campaign Pass($19.99)까지 드릴한다면, Pass는 **캠페인 상태를 바꿉니다**(`ends_at` +30일, `expired`였다면 `published`로 부활). 되돌리려면 바꾸기 전 값이 필요하니 지금 적어 둡니다:
+
+```sql
+SELECT id, status, ends_at FROM campaigns WHERE id = '<대상 campaign_id>';
+```
+
+Creator Launch만 드릴한다면 캠페인은 손대지 않으므로 이 줄은 건너뜁니다.
+
+### 2. 구매 (앱, Creator Launch $4.99)
+
+앱에서 pitch draft를 하나 만들고 Creator kit 잠금 해제로 들어가 결제합니다. Apple 결제 시트에 **[Environment: Sandbox]** 문구가 있어야 합니다(없으면 실계정으로 실결제를 하려는 것이니 취소).
+
+기대: 결제 후 앱이 확인 대기로 넘어가고 60초 안에 kit이 열립니다.
+막히면: "purchases are not available yet"는 1단계 등록/스위치가 안 된 것, "Billing isn't live yet"는 키가 안 구워진 것입니다.
+
+### 3. 서버 확인
+
+```sql
+SELECT provider_event_id, event_type, environment, product_id,
+       original_transaction_id, purchased_at
+  FROM purchase_events ORDER BY created_at DESC LIMIT 5;
+
+SELECT credit_state, environment, pitch_draft_id, idempotency_key
+  FROM purchase_credit_ledger ORDER BY created_at DESC LIMIT 5;
+
+SELECT id, status, environment FROM purchase_intents
+ WHERE user_id = '<user_id>' ORDER BY created_at DESC LIMIT 5;
+```
+
+기대: 이벤트 `environment='SANDBOX'`, 원장 `credit_state='available'`·`environment='SANDBOX'`, intent `status='consumed'`·`environment='SANDBOX'`.
+행이 하나도 없으면 웹훅이 안 온 것입니다 — RevenueCat 대시보드의 이벤트 delivery 로그와 아래 review 큐를 함께 봅니다.
+**3단계의 `original_transaction_id`를 적어 둡니다.** 6단계에서 씁니다.
+
+### 4. 웹훅 멱등
+
+RevenueCat 대시보드에서 그 이벤트를 **재전송(resend)** 합니다.
+
+```sql
+SELECT provider_event_id, count(*) FROM purchase_events
+ WHERE original_transaction_id = '<3단계 값>' GROUP BY 1;
+SELECT count(*) FROM purchase_credit_ledger WHERE idempotency_key = '<3단계 값>';
+```
+
+기대: 이벤트 id별 1행, 원장 1행. 숫자가 늘면 즉시 중단하고 보고합니다.
+
+### 5. Restore
+
+앱 삭제 → TestFlight에서 재설치 → 같은 계정으로 로그인 → paywall에서 **Restore purchases**.
+
+```sql
+SELECT count(*) FROM purchase_intents WHERE user_id = '<user_id>';
+SELECT count(*) FROM purchase_credit_ledger WHERE user_id = '<user_id>';
+```
+
+기대: 두 숫자 모두 **변하지 않습니다**. restore는 새 purchase intent를 발급하지 않는 것이 계약입니다(3차 감사 Slice 4 (d)). 앱에서는 kit이 다시 보여야 합니다.
+
+### 6. 환불
+
+- **경로 A (선호)**: RevenueCat 대시보드 → 해당 Customer → 그 transaction → Refund.
+- **경로 B (A가 불가능할 때 — 서버 계약만 검증)**: 3단계의 transaction id로 REFUND 웹훅을 직접 재생합니다.
+
+```sh
+curl -sS -X POST "https://friendword-web-nmsi.vercel.app/api/revenuecat" \
+  -H "Authorization: $REVENUECAT_WEBHOOK_AUTH_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"event":{"id":"drill-refund-<YYYYMMDD>","type":"REFUND",
+       "app_user_id":"<user_id>","product_id":"creator_launch_credit_499",
+       "environment":"SANDBOX","transaction_id":"<3단계 값>",
+       "original_transaction_id":"<3단계 값>"}}'
+```
+
+기대 응답: `benefit.kind='creator_credit_revocation'`. 아직 kit을 만들지 않았으면 `revoked=true`·`state='revoked'`, 이미 kit이 만들어졌으면 `revoked=false`·`state='consumed'`입니다(배달된 kit은 회수하지 않는 것이 계약 — 3차 감사 (f)). 원장으로 재확인:
+
+```sql
+SELECT credit_state, environment FROM purchase_credit_ledger
+ WHERE idempotency_key = '<3단계 값>';
+```
+
+경로 B는 **스토어가 아니라 서버 계약만** 증명합니다. B로 끝냈다면 "실 스토어 환불 왕복 미검증"을 남은 위험으로 기록합니다.
+
+### 7. 창 닫기와 정리
+
+```sql
+UPDATE app_config SET value = 'off' WHERE key = 'sandbox_payments_enabled';
+DELETE FROM sandbox_test_accounts WHERE user_id = '<user_id>';
+
+-- 닫혔는지 확인 (등록부는 0행이어야 합니다)
+SELECT key, value FROM app_config
+ WHERE key IN ('real_payments_enabled', 'sandbox_payments_enabled');
+SELECT count(*) AS still_enrolled FROM sandbox_test_accounts;
+```
+
+창이 닫히면 뒤늦게 재전송된 sandbox 웹훅은 효익을 만들지 못하고 `sandbox_payments_closed` review로만 남습니다(설계된 동작). **회수 이벤트(환불·취소·만료)는 창과 무관하게 계속 처리됩니다** — 6단계 환불이 드릴 종료 후에 도착해도 정상 회수됩니다.
+
+**드릴이 남긴 산출물**은 이번 드릴의 것만 봅니다. `environment = 'SANDBOX'` 전체를 훑으면 예전 드릴 잔재까지 섞여 "이번에 뭘 만들었는지"를 못 읽습니다:
+
+```sql
+-- 이번 드릴의 산출물만 (3단계에서 적어 둔 transaction id로 한정)
+SELECT 'credit' AS kind, id::TEXT, credit_state::TEXT AS state, environment, created_at
+  FROM purchase_credit_ledger
+ WHERE idempotency_key = '<3단계 값>'
+UNION ALL
+SELECT 'entitlement', id::TEXT, active::TEXT, environment, created_at
+  FROM campaign_entitlements
+ WHERE original_transaction_id = '<3단계 값>'
+UNION ALL
+SELECT 'event', provider_event_id, event_type, environment, created_at
+  FROM purchase_events
+ WHERE original_transaction_id = '<3단계 값>';
+
+-- 이번 드릴이 만든 review가 남았는지 (있으면 아래 진단표대로 종결합니다)
+SELECT id, provider_event_id, reason, status, created_at
+  FROM purchase_event_reviews
+ WHERE status = 'open'
+   AND payload ->> 'original_transaction_id' = '<3단계 값>';
+```
+
+이 행들은 지우지 않고 남깁니다 — 라벨이 있어서 집계에서 빠지고(`docs/COST_MODEL.md`), 지우면 드릴이 실제로 무엇을 통과했는지 증거가 사라집니다. 다만 **오래된 드릴 잔재 전체를 세는 감사용 쿼리**가 필요하면 라벨로 훑되 `purchase_events`는 계약이 달라 `upper(coalesce(environment, ''))`로 봅니다:
+
+```sql
+SELECT count(*) FROM purchase_credit_ledger WHERE environment = 'SANDBOX';
+SELECT count(*) FROM campaign_entitlements  WHERE environment = 'SANDBOX';
+SELECT count(*) FROM purchase_events WHERE upper(coalesce(environment, '')) = 'SANDBOX';
+```
+
+#### 7b. Campaign Pass를 드릴했다면 — 캠페인 상태 원복
+
+Creator Launch는 draft에만 크레딧을 만들고 끝나지만, **Pass는 캠페인 자체를 바꿉니다**: `ends_at`이 30일 늘고, `expired`였던 캠페인은 `published`로 되살아납니다. 그대로 두면 무료 sandbox 구매가 실제 노출 기간을 연장한 셈이 됩니다. 순서대로 되돌립니다.
+
+1. entitlement를 계약대로 비활성화합니다(직접 UPDATE 대신 만료 이벤트를 재생합니다 — 상태 기계를 우회하지 않기 위해서. 창이 닫혀 있어도 회수는 처리됩니다):
+
+```sh
+curl -sS -X POST "https://friendword-web-nmsi.vercel.app/api/revenuecat" \
+  -H "Authorization: $REVENUECAT_WEBHOOK_AUTH_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"event":{"id":"drill-pass-expire-<YYYYMMDD>","type":"EXPIRATION",
+       "app_user_id":"<user_id>","product_id":"campaign_pass_30d_1999",
+       "environment":"SANDBOX","original_transaction_id":"<Pass의 transaction id>"}}'
+```
+
+기대 응답: `benefit.kind='campaign_pass_expiration'`, `active=false`.
+
+2. 1단계에서 적어 둔 값으로 캠페인 창을 돌립니다(**그 캠페인 하나만**):
+
+```sql
+UPDATE campaigns
+   SET ends_at = '<1단계에 적어 둔 ends_at>',   -- 원래 NULL이었으면 NULL
+       status  = '<1단계에 적어 둔 status>'
+ WHERE id = '<대상 campaign_id>';
+
+SELECT id, status, ends_at FROM campaigns WHERE id = '<대상 campaign_id>';
+SELECT active, expires_at, environment FROM campaign_entitlements
+ WHERE campaign_id = '<대상 campaign_id>' AND product_id = 'campaign_pass_30d_1999';
+```
+
+기대: `status`·`ends_at`이 드릴 전 값과 같고 entitlement는 `active=false`.
+
+3. entitlement 행 자체는 남습니다(라벨 `SANDBOX`, 비활성). 다만 그 캠페인에 **실제 결제 이력이 있었다면 라벨은 `PRODUCTION`으로 유지됩니다** — (campaign, product)당 행이 하나뿐이라 실매출 행을 테스트로 강등하지 않는 쪽을 택했기 때문입니다(0060, `docs/COST_MODEL.md`). 그 경우 이번 드릴 산출물은 위 `purchase_events` 조회로 식별합니다.
+
+### 실패 진단 — `purchase_event_reviews.reason`
+
+review로 빠진 이벤트는 **아무 효익도 만들지 않은 채 보류**된 것입니다(원장·entitlement에 행이 없습니다). 되살리는 길은 두 가지뿐이고, 어느 쪽이든 review 행은 종결시켜야 큐가 깨끗해집니다.
+
+- **재생(권장)** — 원인을 고친 뒤 RevenueCat 대시보드에서 같은 이벤트를 재전송합니다. 웹훅은 멱등이므로 안전하고, 이때 효익이 정상 생성됩니다. 재생이 성공했으면 남은 review 행은 `SELECT resolve_purchase_event_review('<review_id>', 'dismiss');`로 닫고 무엇을 고쳐서 재생했는지 `resolution_note`에 남깁니다.
+- **수동 귀속** — 재생이 불가능한 경우에만. creator credit은 `SELECT resolve_purchase_event_review('<review_id>', 'reassign', '<target_user_id>');`로 대상 사용자에게 귀속합니다. Campaign Pass는 reassign 대상이 아니라 refresh만 수행됩니다(위 "RevenueCat review resolve").
+
+review id는 위 7단계의 조회나 `SELECT id, provider_event_id, reason FROM purchase_event_reviews WHERE status = 'open';`으로 찾습니다.
+
+| reason                          | 뜻                                                       | 조치                                                                                                            |
+| ------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `sandbox_payments_closed`       | 창이 닫힌 상태에서 sandbox **구매** 이벤트 도착          | 드릴을 계속할 거면 1단계로 창을 열고 재전송 → 성공 후 `dismiss`. 이미 끝난 드릴이면 그대로 `dismiss`(정상 동작) |
+| `sandbox_purchase_not_enrolled` | 창은 열려 있으나 구매자가 `sandbox_test_accounts`에 없음 | 1단계 등록을 다시 확인(드릴 중 등록을 지웠거나 다른 계정으로 로그인) → 등록 후 재전송 → `dismiss`               |
+| `environment_mismatch`          | PRODUCTION 이벤트가 SANDBOX intent를 소비 시도           | 실결제가 섞인 것 — **재생하지 않습니다.** 창을 닫고 원인 확인 후 보고                                           |
+| `unattributed_purchase`         | intent 없이 도착한 구매                                  | 등록 전에 구매했거나 subscriber attribute 누락 — 재구매로 재현, 재현 불가면 `reassign`                          |
+| `pass_scope_ownership_changed`  | Pass 대상 캠페인 소유가 바뀜                             | 대상 캠페인 확인 후 수동 판단(자동 reassign 대상 아님)                                                          |
+
+나머지 reason과 종결 절차는 아래 "RevenueCat review resolve", "RevenueCat review 큐" 절을 따릅니다.
 
 ## 신고 auto-pause 정책 (0024 이후)
 

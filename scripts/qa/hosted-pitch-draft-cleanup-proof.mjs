@@ -332,10 +332,7 @@ async function main() {
     // via a published-status draft, and the campaign-exists branch is pinned by
     // supabase/tests/34_pitch_draft_cleanup.sql in a single SQL transaction.
     await expectResult(
-      admin
-        .from('pitch_drafts')
-        .update({ status: 'published' })
-        .eq('id', DRAFT_WITH_CAMPAIGN),
+      admin.from('pitch_drafts').update({ status: 'published' }).eq('id', DRAFT_WITH_CAMPAIGN),
       'mark draft published',
     );
 

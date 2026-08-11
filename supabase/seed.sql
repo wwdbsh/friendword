@@ -4,9 +4,16 @@ BEGIN;
 -- Local test databases opt into the launch gates (0023) so the suites can
 -- exercise interest and purchase flows. Hosted never runs seed.sql: there
 -- the gates stay 'off' until the second-audit Slice 10 release gate.
+-- 0060 adds `sandbox_payments_enabled`: the suites replay SANDBOX RevenueCat
+-- events, and a sandbox event only creates a benefit while that window is
+-- open. Hosted keeps it 'off' outside a deliberate drill (docs/OPS.md).
 UPDATE app_config
    SET value = 'on'
- WHERE key IN ('real_payments_enabled', 'public_beta_enabled');
+ WHERE key IN (
+   'real_payments_enabled',
+   'public_beta_enabled',
+   'sandbox_payments_enabled'
+ );
 
 INSERT INTO auth.users (id, email)
 VALUES
@@ -39,6 +46,19 @@ INSERT INTO introducer_profiles (user_id, pseudonym, completed_introduction_coun
 VALUES
   ('00000000-0000-0000-0000-000000000001', 'Friend A', 1),
   ('00000000-0000-0000-0000-000000000004', 'Friend D', 0);
+
+-- 0060: the window above says *when* sandbox benefits may exist; enrolment says
+-- *whose*. The suites replay SANDBOX purchase events for these fixed
+-- identities, so on a local DB every seed account is an enrolled sandbox
+-- tester. Hosted never runs this file — there the register is empty until an
+-- operator enrols one account for one drill (docs/OPS.md). Suite 35 clears this
+-- table inside its own transaction to prove the un-enrolled refusals.
+INSERT INTO sandbox_test_accounts (user_id, note)
+VALUES
+  ('00000000-0000-0000-0000-000000000001', 'local seed'),
+  ('00000000-0000-0000-0000-000000000002', 'local seed'),
+  ('00000000-0000-0000-0000-000000000003', 'local seed'),
+  ('00000000-0000-0000-0000-000000000004', 'local seed');
 
 INSERT INTO pitch_drafts (
   id,

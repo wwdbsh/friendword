@@ -1,6 +1,6 @@
 # PROJECT HANDOFF
 
-> 갱신: **2026-08-04 KST**. 작업 규칙은 [`CLAUDE.md`](../CLAUDE.md)(매 세션 자동 로드), 결정 이력과 근거는 [`docs/DECISIONS.md`](DECISIONS.md)(50건, 각 항목에 날짜·이유·검토한 대안·영향). **이 문서는 "지금 어디에 서 있는가"만 다룹니다** — 왜 그렇게 결정했는지는 DECISIONS를 읽으십시오.
+> 갱신: **2026-08-11 KST** (fcp Goal `render-launch-path` 종료 시점). 작업 규칙은 [`CLAUDE.md`](../CLAUDE.md)(매 세션 자동 로드), 결정 이력과 근거는 [`docs/DECISIONS.md`](DECISIONS.md)(50건, 각 항목에 날짜·이유·검토한 대안·영향). **이 문서는 "지금 어디에 서 있는가"만 다룹니다** — 왜 그렇게 결정했는지는 DECISIONS를 읽으십시오.
 >
 > 이 문서는 **세션이 바뀌어도, 기계가 바뀌어도 살아남는 유일한 인계 수단**입니다. Claude의 `~/.claude` 메모리는 머신 로컬이라 따라오지 않습니다. 새 세션은 `CLAUDE.md` → 이 문서 → `DECISIONS.md` 최신 3건 순으로 읽으면 됩니다.
 
@@ -21,105 +21,46 @@
 
 ---
 
-## 1. 지금 상태 (2026-08-04)
+## 1. 지금 상태 (2026-08-11 — fcp Goal `render-launch-path` 완료)
 
-> **2026-08-05 갱신 (fcp Goal `render-launch-path` — Issue #1, 상세는 각 PR·DECISIONS 당일 항목):**
+> **Goal `render-launch-path`(Issue #1) 종료 (2026-08-11).** 목표였던 두 문장이 전부 실증됐습니다: **승인된 피치가 프로덕션에서 MP4가 되고**(T009 — 실캠페인 내보내기 요청→kick 체인 claim 1.2초→3분19초 완주→오디오 스트림 MD5 원본 동일·엔드카드 canonical), **베타 개방 직전 상태에 도달했습니다**(전 게이트 green, hosted 0056 정합, 런치 게이트 4종 off로 사용자 결정만 대기). 태스크별 증거는 Issue #2~#31과 병합 PR #12~#33, 판정 이력은 DECISIONS 2026-08-05~11 항목.
 >
-> - 코드는 `88cc9e3` on `main`. 알려진 미해결 2건 종결: `0055`(NULL-digest fail-closed, PR #12) · `0056`(메시지 rate limit 경합 + 인덱스, PR #13) — **둘 다 로컬 전용, hosted 반영은 0054와 함께 T008에서**.
-> - **Vercel 배포 3일 중단(bc1c492~) 복구** (PR #15): 원인은 `serverExternalPackages`가 pnpm 심링크를 함수 엔트리로 만들어 심링크 관통 tracing include와 충돌(ENOTDIR→silent ENOENT 가면화). 불변식: 실의존성 include는 `storeGlob`(실경로) 경유 — `./node_modules/` 형태 금지. **아래 §2-1의 "라우트 501" 서술은 당시에도 부정확했다** — 라우트는 배포된 적 자체가 없었다. 지금은 배포·실존한다.
-> - **§2-1 해소**: `FRIENDWORD_MEDIA_RENDER_SECRET`·`FRIENDWORD_MEDIA_INGEST_SECRET`·`FRIENDWORD_SHARE_ORIGIN` Vercel Production 설정 완료(사용자). 실증: `friendword.com`의 render-bench/ingest-run/render-run 무토큰·오토큰 **401**(501 소멸).
-> - **§2-3 해소**: `friendword.com` 취득(08-04)·Vercel 연결·NS 위임 전파·SSL 정상, apex canonical + www→apex redirect. 홈 200.
-> - `vercel.json`의 `memory` 키는 제거됨(Active CPU 과금에서 플랫폼이 무시 — 메모리 상한은 이제 Performance 머신의 4GB). `maxDuration`은 렌더 2종 **800**(T014), ingest-run은 300.
-> - ~~다음 사용자 액션은 §3-2 리눅스 실측 벤치(T002)뿐~~ → **벤치 첫 실행이 새 결함을 드러냈다 (세션 종료 시점 미해결, 아래가 다음 세션의 첫 일감):**
+> 핵심 도착점 요약:
 >
-> **T002 블로커 — 렌더 워커 프로덕션 기동 결함 (2026-08-05 실측, fcp Issue #3 코멘트에 원본):**
->
-> - 사용자 벤치 실행 결과: 인증·라우트 진입은 성공(`instanceId` 반환)하나 2.4~5.2초에 `{"error":"NetworkError: A network error occurred."}` 로 500. cold/warm 모두 동일.
-> - 런타임 로그 실측: 벤치 POST가 500으로 끝난 **몇 초 뒤에** `/internal/render/bench-…` GET(별도 함수 호출, 캡처 페이지 SSR)이 **200으로 완료** — 즉 Chromium이 기동해 항해까지 발행한 뒤 **Chromium 프로세스가 죽어**(크래시 의심) puppeteer↔Chromium WebSocket이 끊긴 그림. `NetworkError: A network error occurred.`는 그 절단의 전형적 메시지.
-> - 이 리눅스 전용 기동 경로(`@sparticuz/chromium` 149 추출 + `headless:'shell'` + sparticuz args, apps/web/src/lib/pitchRender/browser.ts:57-64)는 **프로덕션에서 2026-08-05 처음 실행됐다** — darwin 벤치는 로컬 Chrome을 쓰므로 이 경로를 검증한 적이 없다(하니스가 프로덕션보다 약한 또 하나의 사례).
-> - ~~현재 벤치는 에러 메시지만 반환하고 Chromium stderr·스택을 버린다 → 원격 진단 불가~~ → **T012(#17, PR #18)로 진단 계측 배포, 재실행 1회로 원인 확정 (2026-08-06, 증거 원본 Issue #3 코멘트)**: 크래시가 아니었다 — Chromium exit 0. `stage: payload-load`에서 `DOMException: NetworkError`. **원인**: next/font가 생성하는 `src: local("Arial")` 사이즈 조정 fallback face('Unbounded Fallback' 등)를 first-frame 게이트가 계산된 전체 스택으로 `document.fonts.load()`에 넘김 → sparticuz headless-shell(`--single-process`)은 local() 조회 기계가 없어 face가 error 상태로 끝나고 load()가 NetworkError로 reject. darwin 로컬 Chrome은 local() 정상이라 재현 불가(하니스가 프로덕션보다 약한 사례 4호).
-> - **수정 = T013(#19)**: ① 게이트가 `@font-face` 규칙을 읽어 **url() 소스가 실재하는 패밀리만** 로드하고 `check()`로 검증(fontGate.ts — 패밀리 이름 하드코딩·스택 순서 의존 없음, 실폰트 미로드 시 여전히 명시 실패 = 결정론 원칙 유지, 전역 next/font 설정 불변). ② 부수 발견: Vercel에 `/sys/fs/cgroup/memory.peak`이 없어 `memorySource: self-maxrss`(Node 단독, 자식 미포함)로 떨어져 있었다 → peakMemory.ts 폴백 체인(v2 peak → v2 current 750ms 샘플링 → v1 max_usage → self-maxrss) + `memorySampled`/`memoryProbes` 정직 보고. **T002 판정 시 sampled 수치는 하한으로 취급**하고 `memoryProbes`로 어느 소스가 실제 가용한지 확인할 것.
-> - **현 상태(2026-08-06, T014로 갱신)**: 폰트 결함 해소 → 벤치가 실제로 렌더에 들어갔고, **다음 벽은 처리량**이었다. Hobby 1vCPU에서 캡처가 **~4.2fps**로, 워스트케이스 1,845프레임이 270s 예산 안 1,130프레임에서 정직하게 abort(완주 불가, Issue #3 코멘트에 원본). 하드웨어 격차 3배는 캡처 최적화로 못 메꾼다는 판단으로 **사용자가 Vercel Pro + Performance 머신(4GB/2vCPU)을 결정**(대시보드 설정은 사용자 액션, 새 배포부터 적용 — DECISIONS 2026-08-06 항목). T014가 코드 쪽을 맞췄다: 렌더 두 라우트 `maxDuration: 300 → 800`(vercel.json 포함, ingest-run은 300 불변), 벤치 예산 770s·워커 하드 예산 760s, 예산-천장-리스 관계는 `timeBudget.ts` + `tests-render/timeBudget.render.test.ts`가 상수 관계로 보증.
-> - **메모리 계측 보강(T014)**: Vercel에는 cgroup 3경로가 **전부 ENOENT**(v2 peak·v2 current·v1 max_usage — memoryProbes 실측)라 `self-maxrss`(Node 단독, Chromium·ffmpeg 미포함)만 남아 T002 판정이 불가능했다. 체인에 `/proc` 폴백을 추가(`proc-rss-sampled`: self + 전 자손의 VmRSS 합, 750ms 폴링 최대값)해 자식 프로세스를 실제로 센다. **합산은 공유 페이지를 프로세스마다 세므로 상한(upper bound)**이며 sampled — 판정 시 그 성격을 지킬 것.
-> - **T002 판정 완료 (2026-08-06, 상세는 DECISIONS 당일 항목·Issue #3)**: Pro/Performance(2vCPU/4GB) 전환·배포(T014, PR #22) 후 재벤치 4회(cold 1·warm 1·동시 2) **전부 1,845프레임 완주**. renderMs 최악 386s(예산 770s의 절반), 자식 포함 peak 1.52GB vs 기준 3.44GB(44%, `proc-rss-sampled` 첫 실측), outputBytes 4회 동일(결정론 프로덕션 성립). **renderMs 기준 p95 ≤ 480s로 재협상(사용자 승인)** · **cap=1 유지**(동시 2회 인스턴스 상이였으나 공유 미배제 + 재사용 런 peak 상승 관찰). 렌더 파이프라인은 이제 프로덕션에서 실증된 상태 — 남은 것은 0054 hosted 적용(T008)과 실렌더 E2E(T009).
->
-> **T009 완료 — 실렌더 end-to-end 프로덕션 실증 (2026-08-11, 증거 원본 Issue #10 코멘트):**
->
-> - QA 캠페인 `sumin-n2g2ma`(TestFlight #9 창작 → AI 초안 실경유 → Dater consent 승인 → allowlist 게이트 publish)에서 내보내기 요청 → **워커 claim 1.2초**(kick 체인 최초 실증, cron 없음) → **3분 19초 완주** → MP4 다운로드. **Vercel invocation-지속 가정 성립 확정**(5초 abort 후 완주 — 트리거 재설계 불필요).
-> - MP4 QA: 1080×1920 30fps · 36.4s · 8.3MB · **오디오 스트림 MD5가 원본 녹음과 동일**(무필터 비트 증명) · 엔드카드 `friendword.com/p/sumin-n2g2ma` 각인. 파일은 QA 전용(배포·공유 금지).
-> - 과금 불변식 실증: `pitch_render_unlocks` 생성 = 잡 done과 마이크로초 동일 — 소비는 성공 시점.
-> - 같은 QA 세션에서 퍼널 전체 최초 완주(무가입 열람→관심 S2 제출→/inbox 수락 경로). 파생 작업: T016(UI polish), T017(자막 크롬 — dvh 원인 확정), 백로그 B1(초대 이메일 복구 부재)·B2(크롭·전환, 새 schemaVersion 필요).
->
-> **오케스트레이션 상태 (다음 세션 재개용):** fcp Goal `render-launch-path` = GitHub Issue #1, 태스크 #2~#11+#14. 완료: T001(#2, PR #16)·T003(#4)·T006(#7, PR #12)·T007(#8, PR #13)·T011(#14, PR #15). 진행: T012(#17, 벤치 진단 계측). 대기: T002(#3, 위 블로커)·T008~T010. T004(#5) 결정 완료(2026-08-05): 자막 채택, 단 기성 자막 스타일 금지 — Hype Mixtape 감성의 스타일드 자막 크롬(구현 T005, 시안 승인 게이트; DECISIONS 기록 예정). 로컬 원장: `.claude/fable-control-plane/goals/render-launch-path/`(이 머신 전용, git 미추적 — state.json이 최신 체크포인트). 실행 승인 envelope은 태스크 단위로 사용자에게 재확인.
+> - **렌더 파이프라인 프로덕션 실증**: Performance 머신(2vCPU/4GB, Vercel Pro) 위에서 60s 워스트케이스 벤치 완주 — **자막 포함 renderMs 364s**(기준 480s, 여유 24%), peak 메모리 815MB~1.52GB(`proc-rss-sampled`, 기준 3.44GB), 4회 outputBytes 동일(결정론). cap=1 유지. 기회주의 kick 체인·invocation-지속 가정·과금 원자성(소비=성공 시점) 전부 실측 확정.
+> - **자막 크롬(T017, A안)**: 웹 플레이어·MP4 공용 — `captionChrome.ts` 순수 함수 하나를 웹은 CSS 키프레임으로, 캡처는 프레임별 평가로 소비(결정론이 seek 시그니처에 편입). 전 치수 컨테이너 단위(dvh 제거 — 어떤 임베드 크기에서도 비율 동일). scene·scene_hash 불변.
+> - **모바일 창작 플로우 실기기 검증(T015, TestFlight #9)**: 녹음 무결성 게이트(무음 테이크 거부), AI 초안 실생성(OpenAI), 에러 계측(클래스+프레임 화면 표시). EAS env는 빌드 프로필-환경 연결(eas.json `environment`)로만 주입됨 — **베이크 검증은 IPA 추출로**(대시보드 신뢰 금지, 2회 사고).
+> - **운영 수리 이력**: hosted SMTP(Resend 도메인 인증 — 이전엔 소유자 외 전 사용자 가입 불가), Auth Site URL·Redirect(nmsi→friendword.com — 오리진 세션 분열 방지), 이메일 템플릿 통일, OPENAI_API_KEY·REVENUECAT_WEBHOOK_AUTH_TOKEN Vercel 설정(사용자).
+> - **QA 데이터(hosted, 무해·보존)**: 캠페인 `sumin-n2g2ma`(allowlist 격리, 2026-08-18 자연 만료), QA 계정 wwdbsh+dater/+sim, 죽은 드래프트 3건(자기초대 등 — B1 백로그의 실증 사례). 삭제하지 않음 — 목록이 곧 기록.
+> - **백로그**: `docs/TASKS.md` 2026-08-11 절 — B1(초대 이메일 복구 경로), B2(scene v-next — 새 schemaVersion 필수), B3(계측 잔손질), B4('rest' 크래시 감시).
 
-|             |                                                                                                                                                                                                                      |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 코드        | `26ebd6e` on `main` (렌더 워커 기동 슬라이스)                                                                                                                                                                        |
-| hosted DB   | **0056까지 적용** (T008, 2026-08-06 — 0054 렌더 큐 + 0055 NULL-digest fail-closed + 0056 rate-limit 경합). 시드 `media_render_concurrency_cap`=**1** 확인, anon ACL 프로브 정상. **내보내기 파이프라인 hosted 활성** |
-| 런치 게이트 | `public_beta_enabled=off` · `real_payments_enabled=off` · `identity_enforcement=off` · `media_validation_enforcement=off` — **전부 사용자 결정 대기**                                                                |
-| 해커톤      | **Final Official Rules 공개·전면 대조 완료**([`HACKATHON_RULES.md`](HACKATHON_RULES.md) 2026-08-04). 한국 참가 확정, 웹 선공개 무해 확정                                                                             |
-| 전 게이트   | green (아래 수치, Advisor 재실행)                                                                                                                                                                                    |
+|             |                                                                                                                                                                                                                                                          |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 코드        | `858ccbe` on `main` (자막 크롬 — Goal 마지막 코드 병합)                                                                                                                                                                                                  |
+| hosted DB   | **0056까지 적용·정합** (`supabase migration list` 로컬=원격). `0040`은 의도적 갭                                                                                                                                                                         |
+| 런치 게이트 | `public_beta_enabled=off` · `real_payments_enabled=off` · `identity_enforcement=off` · `media_validation_enforcement=off` — **전부 사용자 결정 대기** · `media_render_concurrency_cap=1`                                                                 |
+| 전 게이트   | green (2026-08-11 통합 재실행): DB 하니스 29 exit 0 · 패키지 730(contracts 293·mobile 256·data 135·domain 13·adapters 11·ui-tokens 22) · audit3 182 · ui 35 · render 98(+e2e 106, 실 Chromium 자막 포함) · Playwright 75 · build·typecheck·lint·format ✓ |
 
-```
-DB 01~29 exit 0 (canonical runner: bash scripts/test-db.sh)
-contracts 293 · data 135 · mobile 231
-web  audit3 182 · ui 17 · render 38(+gated 43, 벤치 e2e 포함) · e2e 75
-build ✓ · typecheck 0 errors · lint/format clean
-```
-
-**green test ≠ 완료 증거입니다.** 이 리포에서 전 게이트 green인 채로 프로덕션이 깨져 있던 사고가 세 번 났습니다(`CLAUDE.md` §14).
-
-### 최근 슬라이스
-
-**`26ebd6e` — 큐를 집어갈 손 (렌더 워커 기동, hosted 무관 — 코드만)**
-0054의 큐는 완성돼 있었지만 아무것도 워커를 부르지 않았습니다. kit 카드가 내보내기 요청·폴 틱마다 세션 게이트 릴레이(`/api/media/render-kick`)를 기회주의적으로 kick하고(ingest 패턴, cron 없음 유지), 워커는 잡이 남아 있으면 pass 종료 시 **self-kick**합니다(claim 창 90초 < 렌더 1건 ~150초 — 이것 없으면 두 번째 잡이 영원히 방치). `vercel.json`에 render-run·render-bench 등록(300s/2048MB). **DB·스토리지 0의 시크릿 게이트 벤치**(`/api/media/render-bench`)가 워스트케이스(60초/1,845프레임)를 실엔진으로 돌려 리눅스 실측을 0054 이전에 가능하게 합니다. 동시 상한 시드 2→**1**(Fluid 인스턴스 공유 시 1.2GB×2가 2048MB에서 공존 불가 — 실측 후 app_config UPDATE로 상향). 트리거의 5초 abort는 "Vercel이 클라이언트 절단 후에도 invocation을 지속한다"는 가정에 의존합니다(§5).
-
-**`5cef761` — 퍼널 종착지와 채널 귀속 (0053, hosted 적용됨)**
-릴스가 트래픽을 데려와도 받을 곳이 없었습니다(베타 게이트가 관심 표현을 거부). 관심을 **단계화**했습니다: S1(의사를 비공개 저장, Dater 도달 0건) → S2(프로필 검증 통과 시 `submit_interest`로 승격) → S3(기존 Dater 승인). S1은 `interests`의 상태 컬럼이 아니라 **별도 테이블 `interest_intents`** 입니다 — 기존 소비자 전부가 "행 = 전달된 관심"을 가정하므로 읽기 하나만 놓쳐도 미검증 관심이 Dater 표면에 뜹니다. 귀속은 `sessionStorage` → `localStorage` `{slug, ch, ts}` + 30일 만료로 옮기고 **모든 로그인 복귀 표면**(root layout)에서 클레임합니다.
-
-**`bc1c492` — 승인된 피치가 MP4가 된다 (0054, hosted 미적용)**
-`media-worker/render/index.ts`가 9줄 주석이라 **올릴 파일 자체가 없었습니다**. 브라우저를 합성기로 씁니다 — 웹과 동일한 scene JSON을 동일 컴포넌트로 헤드리스 페이지에 그려 프레임을 캡처하고 ffmpeg로 인코딩합니다(ffmpeg는 인코더이지 합성기가 아닙니다). 해석기는 이미 `(scene, t)` 순수 함수였고 애니메이션 루프가 재생 여부로 게이트돼 있어 **리팩터링이 불필요했습니다**.
-
----
+**green test ≠ 완료 증거입니다.** 이 리포에서 전 게이트 green인 채로 프로덕션이 깨져 있던 사고가 이 Goal에서만 3건 더 나왔습니다(폰트 local() 게이트, EAS env 미베이크 2회) — 전부 "하니스가 프로덕션보다 약함" 계열. 산출물(IPA·MP4·실응답)을 직접 검증하는 것이 규칙입니다.
 
 ## 2. 사용자 결정 대기 (Advisor가 임의로 정하지 않음)
 
-1. **`FRIENDWORD_MEDIA_RENDER_SECRET` / `FRIENDWORD_MEDIA_INGEST_SECRET`** — 둘 다 Vercel 미설정이라 해당 라우트가 501을 반환합니다. **키 값은 사용자가 직접 입력하며 Claude는 수신하지 않습니다.** 렌더 시크릿이 설정돼야 §3의 벤치·기동이 시작됩니다.
-2. **리눅스 실측 판정** — 벤치 도구는 배포돼 있습니다(§3-2에 실행 절차). 1.2GB는 **macOS RSS 합산 프록시**이고 여유가 7%뿐입니다. 기준 초과 시 실행처(Vercel Fluid, U6) 재협상이 필요하고 그건 사용자 결정입니다. 동시 벤치 2회의 `instanceId`가 같으면 Fluid 인스턴스 공유가 실증된 것이므로 **cap=1을 유지해야 합니다**(상향은 app_config UPDATE).
-3. **도메인 / `FRIENDWORD_SHARE_ORIGIN` — 0054 push 전에 결정해야 합니다.** `resolveShareOrigin`은 vercel.app을 거부하지 않으므로(2026-08-04 Deputy 확인 — 'not configured' 501은 실질 데드 코드), 도메인 미확정 상태의 **첫 실렌더는 vercel.app URL을 다운로드 MP4에 영구히 굽습니다**(같은 revision은 재렌더되지 않음). 선택지: `friendword.com` 취득 + `FRIENDWORD_SHARE_ORIGIN` 설정, 또는 QA 전용 파일(배포 안 함)에 한해 vercel.app 엔드카드를 명시적으로 수용.
-4. **`public_beta_enabled`** — S2 파이프라인이 완성돼 있어 켜는 즉시 전달이 활성화됩니다. **릴스 배포는 이 스위치 이후**(`CLAUDE.md` §16). 해커톤 규칙상 Grand Prize shortlist가 **RevenueCat 계측 제출-기간-내(~9/30) 매출**로 결정되므로 `real_payments_enabled` 시점도 같은 축에서 판단이 필요합니다(`HACKATHON_RULES.md`).
-5. **릴스 음소거 문제(미해결, 열린 제품 질문)** — MP4에 플레이어의 **자막 트랙이 빠져** 있습니다. 장면 자체의 텍스트(wordPop, 헤드라인)는 들어갑니다. 승인 대상이 scene JSON이라는 원칙상 맞는 결정이지만, **릴스는 음소거로 소비되고 Introducer의 목소리가 콘텐츠의 핵심**이라 전달이 반쪽입니다. 사용자가 정한 메커니즘의 효과에 직결되므로 Advisor가 단독으로 바꾸지 않았습니다.
-6. **Ship Kit participant form** — Devpost 등록 이메일로 온 폼을 작성해야 스폰서 퍽이 풀립니다(해커톤 자격과 무관, 혜택만).
-
----
+1. **`public_beta_enabled`** — 켜는 즉시 S2 관심 전달이 활성화됩니다. **릴스 배포는 이 스위치 이후**(`CLAUDE.md` §16). 렌더·자막·퍼널이 전부 실증된 지금, 이것이 유일한 기술 외 관문입니다.
+2. **`real_payments_enabled` 시점** — 해커톤 Grand Prize shortlist가 RevenueCat 계측 제출-기간-내(~9/30) 매출로 결정되므로 베타 시점과 같은 축에서 판단(`HACKATHON_RULES.md`). 켜기 전 sandbox 결제 왕복 검증(OPS.md 게이트 드릴) 필요.
+3. **릴스 배포 시작** — 베타 스위치 이후. 첫 실사용자 캠페인 MP4부터 자막이 구워집니다(T017 완료로 조건 충족).
+4. **Ship Kit participant form** — 스폰서 퍽 해제용(자격 무관).
+5. `identity_enforcement`·`media_validation_enforcement` — 베타 운영 데이터를 보고 판단.
 
 ## 3. 다음에 할 일 (권장 순서)
 
-이 순서에는 이유가 있습니다. **뒤집지 마십시오.** (§3-1·§3-3의 코드는 `26ebd6e`로 완료 — 남은 것은 사용자 액션과 검증입니다.)
-
-1. **[사용자] Vercel에 `FRIENDWORD_MEDIA_RENDER_SECRET` 설정**(≥16자; `FRIENDWORD_MEDIA_INGEST_SECRET`도 같이 — ingest 워커도 이것 때문에 한 번도 돈 적이 없습니다). 값은 Claude에게 주지 않습니다.
-2. **[사용자] 리눅스 실측** — 배포된 프로덕션에 대해(프리뷰 불가 — deployment protection이 캡처 페이지를 막음):
-   ```
-   # cold(첫 호출) 1회 + warm 1회 + 동시 2회:
-   curl -X POST "$ORIGIN/api/media/render-bench" \
-     -H "authorization: Bearer $FRIENDWORD_MEDIA_RENDER_SECRET"
-   ```
-   판독: `renderMs` p95 ≤ 180,000 · `peakMemoryBytes` ≤ 1,717,986,918(2048MB의 80%) · `coldStart:true` 응답의 추가 소요가 콜드스타트 비용 · **동시 2회의 `instanceId`가 같으면 Fluid 인스턴스 공유 실증 → cap=1 유지 필수**. `memorySource`가 `cgroup-v2-peak`인지 확인(자식 프로세스 포함 수치).
-3. **[사용자 결정] 도메인 / `FRIENDWORD_SHARE_ORIGIN`** — §2-3. 첫 실렌더 전에 정해야 엔드카드 URL이 MP4에 올바르게 박힙니다.
-4. **그 다음에 `0054`를 hosted에 적용**(클린 트리에서 `supabase db push --linked`). 순서를 뒤집으면 내보내기 버튼이 살아나 잡이 쌓이는데 처리할 워커가 없어 **"Rendering your MP4…"가 영원히 떠 있습니다** — 아무 일도 안 일어나는데 진행 중이라고 말하는 화면이며, 이 트랙 내내 없애온 바로 그 패턴(§12)입니다. 지금 kit 화면의 "상태를 불러오지 못했습니다"는 보기엔 나빠도 **정직합니다**.
-5. **push 직후 실렌더 1건 end-to-end QA** — 내보내기 요청 → kick 체인(요청 kick → 워커 claim → self-kick) → MP4 다운로드까지. **기회주의 트리거 패턴은 프로덕션에서 실행된 적이 없습니다**(ingest는 시크릿 미설정으로 한 번도 안 돌았음) — 이 QA가 최초 실증입니다.
-6. 베타 스위치 → 7. 릴스 배포 (해커톤 시퀀싱은 `HACKATHON_RULES.md` — 9/30 스토어 출시 마감 역산 유지).
+1. **[사용자] 베타 스위치** — `public_beta_enabled=on` (app_config UPDATE, OPS.md 절차). 이전에 유입된 S1 의사는 전달되지 않았음을 인지.
+2. **첫 실사용자 캠페인 1건을 밀착 관찰** — 창작→승인→publish→렌더(자막 포함 첫 실파일)→릴스 업로드까지. B1(초대 이메일 오입력)이 실사용자에게 터지면 백로그 우선순위 상향.
+3. **릴스 배포 개시** + `real_payments_enabled` 판단(sandbox 드릴 선행).
+4. 9/30 스토어 출시 마감 역산 유지(`HACKATHON_RULES.md`), App Store 제출물 준비 트랙 별도 기립.
 
 ### 미착수·보류 (범위 밖으로 명시적으로 남긴 것)
 
-- **Phase 3b**: 클립을 scene에 넣기, 얼굴 블러 토글. v3 스키마는 있으나 **렌더는 v2 전용**이고 v1/v3는 핀된 에러로 거부합니다.
-- **Phase 5**: 비용 가드레일 확장, 사람 검토 큐.
-- **Instagram Private Replies 연동** — 낯선 시청자를 옮기는 유일한 공식 수단(댓글 → 자동 DM, 팔로우 무관, 7일·1건). **Meta App Review 필요**(`instagram_manage_comments`, `pages_messaging`).
-- **Play Install Referrer**: `apps/mobile/android` 디렉터리 자체가 없어 불가.
-- MP4 렌더러의 엔드카드는 완성됐으나, **모바일 앱 쪽 내보내기 표면은 없습니다**(웹 kit 화면만).
-- 알려진 미해결: `0044` NULL-digest grandfathering, `enforce_message_rate_limit`(0025)의 비직렬화 카운트 경합.
-
----
+- 백로그 B1~B4(`docs/TASKS.md` 2026-08-11 절), Phase 3b(클립 in scene·얼굴 블러 — 렌더는 v2 전용), Phase 5(비용 가드레일 확장·사람 검토 큐), Instagram Private Replies(Meta App Review), Play Install Referrer(android 디렉터리 부재), 모바일 내보내기 표면(웹 kit만).
 
 ## 4. 새 기계 부트스트랩
 
@@ -211,4 +152,4 @@ DB push는 클린 트리에서만 · `:3000` dev 서버가 떠 있는 채로 `we
 
 ## 8. 판정
 
-**기능성 내부 베타.** 외부 노출은 런치 게이트가 막고 있으며 그 스위치는 사용자 결정입니다. 릴스 배포는 베타 스위치 이후, 그리고 렌더 워커가 실제로 도는 것을 확인한 이후여야 합니다.
+**베타 개방 직전.** 렌더 워커는 실캠페인으로 프로덕션 실증됐고(T009), 자막·퍼널·모바일 창작 플로우까지 검증 완료. 외부 노출을 막는 것은 런치 게이트뿐이며 그 스위치는 사용자 결정입니다. 릴스 배포는 베타 스위치 이후입니다.

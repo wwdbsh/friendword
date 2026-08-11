@@ -43,6 +43,13 @@
 > - **메모리 계측 보강(T014)**: Vercel에는 cgroup 3경로가 **전부 ENOENT**(v2 peak·v2 current·v1 max_usage — memoryProbes 실측)라 `self-maxrss`(Node 단독, Chromium·ffmpeg 미포함)만 남아 T002 판정이 불가능했다. 체인에 `/proc` 폴백을 추가(`proc-rss-sampled`: self + 전 자손의 VmRSS 합, 750ms 폴링 최대값)해 자식 프로세스를 실제로 센다. **합산은 공유 페이지를 프로세스마다 세므로 상한(upper bound)**이며 sampled — 판정 시 그 성격을 지킬 것.
 > - **T002 판정 완료 (2026-08-06, 상세는 DECISIONS 당일 항목·Issue #3)**: Pro/Performance(2vCPU/4GB) 전환·배포(T014, PR #22) 후 재벤치 4회(cold 1·warm 1·동시 2) **전부 1,845프레임 완주**. renderMs 최악 386s(예산 770s의 절반), 자식 포함 peak 1.52GB vs 기준 3.44GB(44%, `proc-rss-sampled` 첫 실측), outputBytes 4회 동일(결정론 프로덕션 성립). **renderMs 기준 p95 ≤ 480s로 재협상(사용자 승인)** · **cap=1 유지**(동시 2회 인스턴스 상이였으나 공유 미배제 + 재사용 런 peak 상승 관찰). 렌더 파이프라인은 이제 프로덕션에서 실증된 상태 — 남은 것은 0054 hosted 적용(T008)과 실렌더 E2E(T009).
 >
+> **T009 완료 — 실렌더 end-to-end 프로덕션 실증 (2026-08-11, 증거 원본 Issue #10 코멘트):**
+>
+> - QA 캠페인 `sumin-n2g2ma`(TestFlight #9 창작 → AI 초안 실경유 → Dater consent 승인 → allowlist 게이트 publish)에서 내보내기 요청 → **워커 claim 1.2초**(kick 체인 최초 실증, cron 없음) → **3분 19초 완주** → MP4 다운로드. **Vercel invocation-지속 가정 성립 확정**(5초 abort 후 완주 — 트리거 재설계 불필요).
+> - MP4 QA: 1080×1920 30fps · 36.4s · 8.3MB · **오디오 스트림 MD5가 원본 녹음과 동일**(무필터 비트 증명) · 엔드카드 `friendword.com/p/sumin-n2g2ma` 각인. 파일은 QA 전용(배포·공유 금지).
+> - 과금 불변식 실증: `pitch_render_unlocks` 생성 = 잡 done과 마이크로초 동일 — 소비는 성공 시점.
+> - 같은 QA 세션에서 퍼널 전체 최초 완주(무가입 열람→관심 S2 제출→/inbox 수락 경로). 파생 작업: T016(UI polish), T017(자막 크롬 — dvh 원인 확정), 백로그 B1(초대 이메일 복구 부재)·B2(크롭·전환, 새 schemaVersion 필요).
+>
 > **오케스트레이션 상태 (다음 세션 재개용):** fcp Goal `render-launch-path` = GitHub Issue #1, 태스크 #2~#11+#14. 완료: T001(#2, PR #16)·T003(#4)·T006(#7, PR #12)·T007(#8, PR #13)·T011(#14, PR #15). 진행: T012(#17, 벤치 진단 계측). 대기: T002(#3, 위 블로커)·T008~T010. T004(#5) 결정 완료(2026-08-05): 자막 채택, 단 기성 자막 스타일 금지 — Hype Mixtape 감성의 스타일드 자막 크롬(구현 T005, 시안 승인 게이트; DECISIONS 기록 예정). 로컬 원장: `.claude/fable-control-plane/goals/render-launch-path/`(이 머신 전용, git 미추적 — state.json이 최신 체크포인트). 실행 승인 envelope은 태스크 단위로 사용자에게 재확인.
 
 |             |                                                                                                                                                                                                                      |

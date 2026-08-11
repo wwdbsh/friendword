@@ -6,6 +6,7 @@ import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 import { buildPitchSceneV2, pitchSceneV2Schema, type PitchSceneV2 } from '@friendword/contracts';
 
+import type { CaptionSegment } from '@/pitch/captionChrome';
 import type { SceneTextFields, SceneWord } from '@/pitch/sceneV2';
 import type { RenderPhotoAsset } from '@/lib/pitchRender/renderScene';
 
@@ -80,6 +81,29 @@ export const FIXTURE_TEXT: SceneTextFields = {
   good_match_for: 'Someone who loves slow mornings',
 };
 
+/**
+ * Caption band fixture for the 15s QA scene (T017). Segment boundaries at 4s,
+ * 8s and 11.5s are what the boundary-frame checks in renderCapture.e2e aim at.
+ * The segmentIndexes line up with FIXTURE_WORDS so the keyword highlight has
+ * real word data to select from.
+ */
+export const FIXTURE_CAPTIONS: readonly CaptionSegment[] = [
+  {
+    segmentIndex: 0,
+    startMs: 0,
+    endMs: 4_000,
+    text: 'Honestly, this is the friend who never cancels.',
+  },
+  { segmentIndex: 1, startMs: 4_000, endMs: 8_000, text: 'Loyal in a way that costs her time.' },
+  {
+    segmentIndex: 2,
+    startMs: 8_000,
+    endMs: 11_500,
+    text: 'Kind to strangers, funny with friends.',
+  },
+  { segmentIndex: 3, startMs: 11_500, endMs: 15_000, text: 'Brave enough to say yes to this.' },
+];
+
 export const FIXTURE_WORDS: readonly SceneWord[] = [
   { segmentIndex: 0, wordIndex: 0, text: 'Honestly' },
   { segmentIndex: 1, wordIndex: 0, text: 'Loyal' },
@@ -101,6 +125,7 @@ export function worstCaseScene(): {
   photos: readonly RenderPhotoAsset[];
   words: readonly SceneWord[];
   text: SceneTextFields;
+  captions: readonly CaptionSegment[];
 } {
   const assetIds = [0, 1, 2, 3].map(fixtureAssetId);
   const segments = Array.from({ length: 12 }, (_, index) => ({
@@ -135,5 +160,13 @@ export function worstCaseScene(): {
       text: `Word${word.segmentIndex}`,
     })),
     text: FIXTURE_TEXT,
+    // The worst case has to carry the caption band too, or the measurement
+    // would understate what a real 60s render actually composites (T017).
+    captions: segments.map((segment, index) => ({
+      segmentIndex: index,
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+      text: `Segment ${index}: Word${index} carries this line of the pitch.`,
+    })),
   };
 }

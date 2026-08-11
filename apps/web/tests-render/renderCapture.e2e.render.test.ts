@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import ffmpegPath from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
 import type { Browser, Page } from 'puppeteer-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -12,7 +13,14 @@ import { buildEndCard } from '@/lib/pitchRender/endCard';
 import type { RenderPayload } from '@/lib/pitchRender/payload';
 import { renderScene, type RenderPhotoAsset } from '@/lib/pitchRender/renderScene';
 
-import { FIXTURE_TEXT, FIXTURE_WORDS, audioM4a, photoAsset, qaScene } from './fixtures';
+import {
+  FIXTURE_CAPTIONS,
+  FIXTURE_TEXT,
+  FIXTURE_WORDS,
+  audioM4a,
+  photoAsset,
+  qaScene,
+} from './fixtures';
 
 // Integration: a real headless Chrome against a running production server
 // (`pnpm --filter @friendword/web build && next start`). Gated so machines
@@ -31,9 +39,37 @@ function toPayload(scene: RenderPayload['scene'], photos: readonly RenderPhotoAs
     })),
     words: FIXTURE_WORDS,
     text: FIXTURE_TEXT,
+    captions: FIXTURE_CAPTIONS,
     endCard: buildEndCard('https://friendword-e2e.example', 'demo-blair'),
   };
   return payload;
+}
+
+/** What the caption band actually committed, straight off the capture page. */
+async function captionState(page: Page): Promise<{
+  segment: string | undefined;
+  text: string;
+  keyword: string | null;
+  opacity: string;
+  transform: string;
+  fontSizePx: number;
+} | null> {
+  return page.evaluate(() => {
+    const card = document.querySelector<HTMLElement>('[data-caption-card]');
+    if (card === null) {
+      return null;
+    }
+    const keyword = card.querySelector<HTMLElement>('[data-caption-keyword]');
+    return {
+      segment: card.dataset.captionSegment,
+      text: card.textContent ?? '',
+      keyword: keyword === null ? null : (keyword.textContent ?? ''),
+      opacity: card.style.opacity,
+      transform: card.style.transform,
+      // Proves the container query resolved: 4.8cqw of a 1080-wide stage.
+      fontSizePx: Number.parseFloat(getComputedStyle(card).fontSize),
+    };
+  });
 }
 
 async function seekAndShoot(page: Page, tMs: number): Promise<Buffer> {
@@ -139,6 +175,51 @@ describe.runIf(E2E)('capture purity against the live page', () => {
     expect(before.equals(after)).toBe(false);
   });
 
+  // T017 caption chrome. The band is renderer chrome (like the end card), so it
+  // must be composited into the real capture — and it must obey the same purity
+  // rule the scene layer does, since it is drawn from a pure function of
+  // (segments, t) rather than a CSS animation.
+  it('T017: composites the caption band in container units', async () => {
+    await seekAndShoot(page, 1_000);
+    const state = await captionState(page);
+    expect(state?.segment).toBe('0');
+    expect(state?.text).toBe('Honestly, this is the friend who never cancels.');
+    // Selected from FIXTURE_WORDS, not invented.
+    expect(state?.keyword).toBe('Honestly');
+    // 4.8cqw of the 1080px capture stage.
+    expect(state?.fontSizePx).toBeCloseTo(51.84, 1);
+    expect(state?.transform).toContain('cqh');
+  });
+
+  it('T017: the caption is byte-identical for the same millisecond', async () => {
+    // 60ms into segment 1: mid-entrance, so the spring has not settled yet.
+    const first = await seekAndShoot(page, 4_060);
+    const firstState = await captionState(page);
+    await seekAndShoot(page, 9_400);
+    const again = await seekAndShoot(page, 4_060);
+    const againState = await captionState(page);
+    // Mid-entrance: a wall-clock animation would land somewhere else the second
+    // time through, and these two frames would differ.
+    expect(firstState?.segment).toBe('1');
+    expect(Number(firstState?.opacity)).toBeGreaterThan(0);
+    expect(Number(firstState?.opacity)).toBeLessThan(1);
+    expect(againState).toEqual(firstState);
+    expect(first.equals(again)).toBe(true);
+  });
+
+  it('T017: swaps caption at the segment boundary', async () => {
+    await seekAndShoot(page, 3_900);
+    const before = await captionState(page);
+    await seekAndShoot(page, 4_400);
+    const after = await captionState(page);
+    expect(before?.segment).toBe('0');
+    // Already fading down over the segment's last 260ms.
+    expect(Number(before?.opacity)).toBeLessThan(1);
+    expect(after?.segment).toBe('1');
+    expect(after?.text).toBe('Loyal in a way that costs her time.');
+    expect(after?.keyword).toBe('Loyal');
+  });
+
   it('P4: the end card shows the platform constants and canonical URL only', async () => {
     await page.evaluate(async () => {
       if (window.__friendwordRender === undefined) {
@@ -151,6 +232,8 @@ describe.runIf(E2E)('capture purity against the live page', () => {
     );
     expect(text).toContain('Friendword');
     expect(text).toContain('friendword-e2e.example/p/demo-blair');
+    // T017: the appended card is platform chrome and carries no caption.
+    expect(await captionState(page)).toBeNull();
   });
 });
 
@@ -168,6 +251,7 @@ describe.runIf(E2E)('renderScene end to end (QA scene, 15s)', () => {
         shareOrigin: 'https://friendword-e2e.example',
         words: FIXTURE_WORDS,
         text: FIXTURE_TEXT,
+        captions: FIXTURE_CAPTIONS,
       },
     );
     mkdirSync(OUT_DIR, { recursive: true });
@@ -185,7 +269,37 @@ describe.runIf(E2E)('renderScene end to end (QA scene, 15s)', () => {
     expect(stats.sceneFrames).toBe(450);
     expect(stats.endCardFrames).toBe(45);
 
+    // T017 evidence: pull real frames out of the encoded MP4 so the caption
+    // band can be inspected as pixels, not just as DOM assertions.
+    const frameDir = path.join(OUT_DIR, 'caption-frames');
+    mkdirSync(frameDir, { recursive: true });
+    if (ffmpegPath === null) {
+      throw new Error('ffmpeg-static missing');
+    }
+    for (const [label, at] of [
+      ['seg0-rest', '00:00:01.000'],
+      ['seg1-entering', '00:00:04.060'],
+      ['seg2-rest', '00:00:09.000'],
+      ['seg3-rest', '00:00:13.000'],
+      ['end-card', '00:00:15.800'],
+    ] as const) {
+      execFileSync(ffmpegPath, [
+        '-y',
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-ss',
+        at,
+        '-i',
+        outFile,
+        '-frames:v',
+        '1',
+        path.join(frameDir, `${label}.png`),
+      ]);
+    }
+
     console.log(`[render e2e] MP4 at ${outFile} (${(mp4.byteLength / 1e6).toFixed(1)}MB)`);
+    console.log(`[render e2e] caption frames in ${frameDir}`);
     console.log(`[render e2e] stats ${JSON.stringify(stats)}`);
   });
 });

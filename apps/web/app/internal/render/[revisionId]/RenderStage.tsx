@@ -4,8 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 
 import { MotionSceneV2 } from '@/components/MotionSceneV2';
+import { CaptionLayer, PitchCaptionCard } from '@/components/PitchCaption';
 import { collectFontFaceSources, loadRenderFonts } from '@/lib/pitchRender/fontGate';
 import type { RenderPayload } from '@/lib/pitchRender/payload';
+import { captionFrame, type CaptionFrame } from '@/pitch/captionChrome';
 import { sceneV2Frame, sceneV2PhotoIndexes, type SceneV2Frame } from '@/pitch/sceneV2';
 
 import styles from './RenderStage.module.css';
@@ -43,6 +45,7 @@ function makeNormalizer(): (property: 'transform' | 'filter' | 'opacity', value:
  */
 function expectedSignature(
   frame: SceneV2Frame,
+  caption: CaptionFrame | null,
   norm: (property: 'transform' | 'filter' | 'opacity', value: string) => string,
 ): string {
   const media = frame.photo ?? frame.backdrop;
@@ -80,6 +83,15 @@ function expectedSignature(
       ? 'leak=none'
       : `leak=${norm('opacity', String(frame.lightLeak.opacity))}`,
     frame.progressBar === null ? 'progress=none' : `progress=${frame.progressBar.percent}`,
+    // T017 caption chrome. Included for the same reason every other layer is:
+    // seek() must not resolve until the caption React committed is the one this
+    // millisecond calls for, or a capture could trail the clock by a frame.
+    caption === null
+      ? 'caption=none'
+      : `caption=${caption.segmentIndex};${caption.text};${norm(
+          'opacity',
+          String(caption.motion.opacity),
+        )};${norm('transform', caption.transform)}`,
   ];
   return parts.join('|');
 }
@@ -104,6 +116,7 @@ function domSignature(): string {
   const grain = document.querySelector<HTMLElement>('[data-scene-grain]');
   const leak = document.querySelector<HTMLElement>('[data-scene-light-leak]');
   const progress = document.querySelector<HTMLElement>('[data-scene-progress]');
+  const caption = document.querySelector<HTMLElement>('[data-caption-card]');
   const parts = [
     `shot=${stage.dataset.motionShot ?? '?'}/${stage.dataset.motionShotLevel ?? '?'}`,
     media,
@@ -121,6 +134,11 @@ function domSignature(): string {
       : `grain=${grain.dataset.sceneGrain ?? '?'};${grain.style.opacity}`,
     leak === null ? 'leak=none' : `leak=${leak.style.opacity}`,
     progress === null ? 'progress=none' : `progress=${progress.dataset.sceneProgress ?? '?'}`,
+    caption === null
+      ? 'caption=none'
+      : `caption=${caption.dataset.captionSegment ?? '?'};${caption.textContent ?? ''};${
+          caption.style.opacity
+        };${caption.style.transform}`,
   ];
   return parts.join('|');
 }
@@ -222,6 +240,8 @@ export function RenderStage() {
           text: current.text,
           reducedMotion: false,
         }),
+        // Same millisecond, same pure call the render below made.
+        captionFrame(current.captions, tMs, { words: current.words, reducedMotion: false }),
         norm,
       );
       for (let attempt = 0; attempt < 120; attempt += 1) {
@@ -262,6 +282,20 @@ export function RenderStage() {
           payload.photos.map((photo) => photo.assetId),
         );
 
+  // T017: the caption band, evaluated as a PURE FUNCTION of (segments, atMs).
+  // CSS keyframes are unusable here — they interpolate on the wall clock, so a
+  // seek-and-screenshot capture would smear the band by however fast the loop
+  // happened to run, and the [t1, t2, t1] byte-identity guarantee would fail
+  // (docs/SESSION_HANDOFF §5; RenderStage.module.css already kills animations).
+  // Instead the interpreter hands us opacity and transform for this exact
+  // millisecond and we write them as inline style — the same shape the v2 scene
+  // layers already use. Null in the end-card mode: the appended card carries no
+  // caption.
+  const caption =
+    payload === null || mode !== 'scene'
+      ? null
+      : captionFrame(payload.captions, atMs, { words: payload.words, reducedMotion: false });
+
   return (
     <div className={styles.stage} data-render-stage data-render-mode={mode}>
       {payload !== null && photoIndexes !== null && mode === 'scene' && (
@@ -282,6 +316,16 @@ export function RenderStage() {
           clock={silentClockRef}
           imageMode="plain"
         />
+      )}
+      {caption !== null && (
+        <CaptionLayer>
+          <PitchCaptionCard
+            parts={caption.parts}
+            phase="frame"
+            segmentIndex={caption.segmentIndex}
+            style={{ opacity: caption.motion.opacity, transform: caption.transform }}
+          />
+        </CaptionLayer>
       )}
       {payload !== null && mode === 'endCard' && (
         <div className={styles.endCard} data-render-end-card>

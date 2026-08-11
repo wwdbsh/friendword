@@ -1,0 +1,124 @@
+/* T017 — caption chrome, "sticker pop" (user-approved 2026-08-11, Issue #31).
+   Shared by the web player (MotionPitchPlayer) and the MP4 capture stage
+   (app/internal/render/[revisionId]/RenderStage), so the band the Dater
+   approves in the consent preview is the band that burns into the MP4.
+
+   EVERY metric is a container unit. The old caption sized itself in dvh, which
+   made it a different design in each of the three places it appears: the ~250px
+   consent preview, the published page, and a large monitor. `.layer` is the
+   container — an inset:0 overlay rather than the stage itself, so nothing about
+   the stage's aspect-ratio box, its `position: fixed` mobile CTA descendant, or
+   its layering has to change to introduce size containment. */
+
+.layer {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  /* cqw/cqh below resolve against THIS box, which is exactly the 9:16 stage. */
+  container: pitchStage / size;
+  pointer-events: none;
+}
+
+/* The fixed band: under the header, above the transport. `--caption-bar-clearance`
+   is how much room the surface's own player bar needs — the transport is sized in
+   rem, so on a 250px preview a pure 16cqh band would sit inside the controls. The
+   MP4 stage has no transport and sets it to 0, which is the approved geometry. */
+.zone {
+  position: absolute;
+  right: 6cqw;
+  bottom: max(16cqh, var(--caption-bar-clearance, 0px));
+  left: 6cqw;
+  display: flex;
+  justify-content: center;
+}
+
+.card {
+  max-width: 88%;
+  margin: 0;
+  padding: 2.2cqh 4.5cqw;
+  border: 0.8cqw solid var(--color-ink);
+  border-radius: 4.5cqw;
+  background: color-mix(in srgb, var(--color-background) 96%, transparent);
+  box-shadow: 1.6cqw 1.6cqw 0 color-mix(in srgb, var(--color-ink) 85%, transparent);
+  color: var(--color-ink);
+  font-family: var(--font-body), sans-serif;
+  font-size: 4.8cqw;
+  font-weight: 800;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+  pointer-events: auto;
+  text-align: center;
+  text-wrap: balance;
+  /* The transform origin of the pop; the entrance keyframes below and the
+     renderer's captionTransform() write the same three functions. */
+  transform-origin: 50% 100%;
+}
+
+/* The one highlighted word per segment, chosen from the provider's own word
+   list (see captionChrome.ts). `--color-keyword` is the readable tangerine:
+   `pop` itself measures 2.89:1 on cream and would fail WCAG AA as text. */
+.keyword {
+  color: var(--color-keyword);
+}
+
+/* The honest non-playing states (no transcript, or no recording at all). They
+   wear the same sticker and never animate. Deliberately NOT a scroll container:
+   Chromium makes an overflow:auto region keyboard-focusable, which would insert
+   a tab stop ahead of the interest CTA (caught by tests/pitch.spec.ts). These
+   states size to their content, exactly as the old caption did. */
+.cardStatic {
+  /* These states print a whole written pitch, not one spoken sentence, so they
+     get their own (still container-relative) type size and the full band width.
+     At the caption's 4.8cqw they grew tall enough to cover the header. */
+  max-width: 100%;
+  font-size: 3.6cqw;
+  text-align: left;
+  text-wrap: pretty;
+}
+
+/* Web only. The renderer never uses these: a CSS animation interpolates on the
+   wall clock, so a seek-and-screenshot capture would smear frames by capture
+   speed (docs/SESSION_HANDOFF §5). RenderStage evaluates captionMotion() per
+   frame and writes an inline transform/opacity instead — same numbers, no clock.
+   Keep these keyframes in sync with captionChrome.ts's exported constants;
+   tests-ui/caption-chrome.ui.test.tsx pins them against each other. */
+.cardEntering {
+  animation: captionPopIn 0.38s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+.cardLeaving {
+  animation: captionFadeDown 0.26s ease-in both;
+}
+
+@keyframes captionPopIn {
+  from {
+    opacity: 0;
+    transform: translateY(2.4cqh) scale(0.94) rotate(-0.4deg);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes captionFadeDown {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(1.6cqh) scale(1);
+  }
+}
+
+/* Immediate show/hide, per the approved spec and the app-wide reduce-motion
+   rule in globals.css. */
+@media (prefers-reduced-motion: reduce) {
+  .cardEntering,
+  .cardLeaving {
+    animation: none;
+  }
+}

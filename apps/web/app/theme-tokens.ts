@@ -23,6 +23,7 @@ export const themeCss = `
   --color-stage-text-secondary: ${colors.stageTextSecondary};
   --color-pop: ${colors.pop};
   --color-pop-pressed: ${colors.popPressed};
+  --color-keyword: ${colors.keyword};
   --color-flirt: ${colors.flirt};
   --color-hype: ${colors.hype};
   --color-fresh: ${colors.fresh};

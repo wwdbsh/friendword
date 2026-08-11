@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { PitchSceneAnyVersion } from '@friendword/contracts';
 
 import type { PitchCaption } from '@/fixtures/pitch';
+import { activeCaptionIndex, captionParts, type CaptionSegment } from '@/pitch/captionChrome';
 import {
   activeMotionPhotoIndex,
   legacyMotionWindows,
@@ -14,7 +15,7 @@ import {
   sceneMotionWindows,
   type MotionWindow,
 } from '@/pitch/motion';
-import { activeWindowIndex, type SceneWindow } from '@/pitch/scenes';
+import type { SceneWindow } from '@/pitch/scenes';
 import {
   asPitchSceneV2,
   sceneV2ActivePhotoIndex,
@@ -26,6 +27,7 @@ import {
 } from '@/pitch/sceneV2';
 
 import { MotionSceneV2 } from './MotionSceneV2';
+import { CaptionLayer, PitchCaptionCard } from './PitchCaption';
 import styles from './PitchPlayer.module.css';
 
 // The one player for an approved motion pitch. Both surfaces that must agree —
@@ -302,7 +304,60 @@ export function MotionPitchPlayer({
 
   // Captions are segment-level (real provider timestamps), not fabricated
   // per-word highlights. The active segment is shown as a whole.
-  const activeCaption = hasRealAudio ? captions[activeWindowIndex(captions, elapsedMs)] : undefined;
+  //
+  // T017: the band, its metrics and its motion live in PitchCaption/
+  // captionChrome, which the MP4 renderer shares. Array position IS the
+  // transcript's segmentIndex here — view.ts maps segments 1:1 — and that pair
+  // is what a keyword highlight is looked up by.
+  const captionSegments: readonly CaptionSegment[] = useMemo(
+    () =>
+      captions.map((caption, index) => ({
+        segmentIndex: index,
+        startMs: caption.startMs,
+        endMs: caption.endMs,
+        text: caption.text,
+      })),
+    [captions],
+  );
+  const activeCaptionSegment = hasRealAudio ? activeCaptionIndex(captionSegments, elapsedMs) : null;
+
+  // The approved transition is a SEQUENCE: the outgoing card fades down, then
+  // the incoming one pops in. The web player tweens with CSS (its clock only
+  // ticks at `timeupdate` rate), so the swap is driven by the exit animation
+  // ending rather than by a timer. Reduced motion has no exit to wait for.
+  const [shownCaption, setShownCaption] = useState<{
+    readonly index: number;
+    readonly phase: 'entering' | 'leaving';
+  } | null>(null);
+
+  useEffect(() => {
+    if (activeCaptionSegment === null) {
+      setShownCaption(null);
+      return;
+    }
+    setShownCaption((current) => {
+      if (current === null || reducedMotion) {
+        return { index: activeCaptionSegment, phase: 'entering' };
+      }
+      if (current.index === activeCaptionSegment) {
+        return current;
+      }
+      return { index: current.index, phase: 'leaving' };
+    });
+  }, [activeCaptionSegment, reducedMotion]);
+
+  const onCaptionAnimationEnd = () => {
+    setShownCaption((current) => {
+      if (current === null || current.phase !== 'leaving') {
+        return current;
+      }
+      return activeCaptionSegment === null
+        ? null
+        : { index: activeCaptionSegment, phase: 'entering' };
+    });
+  };
+
+  const shownSegment = shownCaption === null ? undefined : captionSegments[shownCaption.index];
 
   const togglePlayback = () => {
     if (!hasRealAudio) {
@@ -401,26 +456,44 @@ export function MotionPitchPlayer({
 
         {location !== null && <div className={styles.location}>{location}</div>}
 
-        {hasRealAudio ? (
-          activeCaption === undefined ? (
-            // No transcript segments: don't fabricate a caption timeline.
-            <div className={styles.caption} data-testid="no-captions">
-              Captions aren’t available for this recording yet.
-            </div>
+        <CaptionLayer>
+          {hasRealAudio ? (
+            captionSegments.length === 0 ? (
+              // No transcript segments: don't fabricate a caption timeline.
+              <PitchCaptionCard
+                parts={{
+                  before: 'Captions aren’t available for this recording yet.',
+                  keyword: null,
+                  after: '',
+                }}
+                phase="static"
+                testId="no-captions"
+              />
+            ) : shownSegment === undefined ? null : (
+              <PitchCaptionCard
+                key={shownSegment.segmentIndex}
+                parts={captionParts(shownSegment.text, sceneWords, shownSegment.segmentIndex)}
+                phase={shownCaption?.phase ?? 'entering'}
+                segmentIndex={shownSegment.segmentIndex}
+                onAnimationEnd={onCaptionAnimationEnd}
+                ariaLive="polite"
+                testId="segment-caption"
+              />
+            )
           ) : (
-            <div className={styles.caption} aria-live="polite" data-testid="segment-caption">
-              {activeCaption.text}
-            </div>
-          )
-        ) : (
-          // CP-3 honesty: no recording here, so the whole written pitch is shown
-          // at once instead of pretending to play.
-          <div className={styles.caption} data-testid="written-pitch">
-            {captions.map((caption) => (
-              <span key={caption.startMs}>{caption.text} </span>
-            ))}
-          </div>
-        )}
+            // CP-3 honesty: no recording here, so the whole written pitch is
+            // shown at once instead of pretending to play.
+            <PitchCaptionCard
+              parts={{
+                before: captions.map((caption) => caption.text).join(' '),
+                keyword: null,
+                after: '',
+              }}
+              phase="static"
+              testId="written-pitch"
+            />
+          )}
+        </CaptionLayer>
 
         {hasRealAudio ? (
           <div className={styles.controls}>

@@ -6,6 +6,11 @@
 .stage {
   position: relative;
   width: 100%;
+  /* T017: how much room the transport below needs. The caption band is sized in
+     container units, but this bar is not — without the clearance a 16cqh band
+     would sit inside the controls on the ~250px consent preview. Read by
+     PitchCaption.module.css; the MP4 stage, which has no transport, sets 0. */
+  --caption-bar-clearance: 10.5rem;
   max-height: 90dvh;
   aspect-ratio: 9 / 16;
   overflow: hidden;
@@ -52,7 +57,6 @@
 
 .pitchHeader,
 .location,
-.caption,
 .controls,
 .noAudioNote,
 .desktopInterest {
@@ -108,27 +112,9 @@
   font-weight: 700;
 }
 
-.caption {
-  right: var(--space-lg);
-  bottom: 10.5rem;
-  left: var(--space-lg);
-  padding: var(--space-md);
-  border-left: calc(var(--stroke-sticker) * 2) solid var(--color-flirt);
-  background: color-mix(in srgb, var(--color-stage) 86%, transparent);
-  color: var(--color-stage-text-secondary);
-  font-size: clamp(var(--font-size-md), 2.5dvh, var(--font-size-lg));
-  font-weight: 750;
-  line-height: var(--line-normal);
-  text-wrap: balance;
-}
-
-.caption span {
-  transition: color var(--motion-fast) var(--motion-ease-out);
-}
-
-.caption .wordActive {
-  color: var(--color-stage-text);
-}
+/* The caption band moved to PitchCaption.module.css (T017): it is shared with
+   the MP4 capture stage and every metric is a container unit, so it cannot live
+   in a player-only sheet keyed off dvh. */
 
 .controls {
   right: var(--space-lg);
@@ -404,6 +390,8 @@
 
   .stage {
     width: 100vw;
+    /* The transport sits lower on mobile, so the band may drop with it. */
+    --caption-bar-clearance: 6.5rem;
     max-height: none;
     border-right: 0;
     border-left: 0;
@@ -412,7 +400,6 @@
   }
 
   .pitchHeader,
-  .caption,
   .controls,
   .noAudioNote {
     right: var(--space-md);
@@ -426,10 +413,6 @@
   .location {
     top: var(--space-sm);
     right: var(--space-md);
-  }
-
-  .caption {
-    bottom: 6.5rem;
   }
 
   .controls {
@@ -472,7 +455,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .photo,
-  .caption span,
   .playButton,
   .desktopInterest,
   .interestButton {

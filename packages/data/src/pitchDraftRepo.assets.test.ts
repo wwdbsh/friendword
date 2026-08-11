@@ -299,3 +299,54 @@ describe('PitchDraftRepo.removeAsset', () => {
     await expect(repo.removeAsset(EXISTING_ROW.id)).rejects.toBeInstanceOf(DataLayerError);
   });
 });
+
+describe('PitchDraftRepo.deleteDraft', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.createClient.mockReturnValue({
+      auth: { getSession: mocks.getSession },
+      from: mocks.from,
+      rpc: mocks.rpc,
+    });
+    mocks.getSession.mockResolvedValue({
+      data: { session: { user: { id: USER_ID } } },
+      error: null,
+    });
+  });
+
+  it('deletes through the 0059 RPC with its parameter name', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: null });
+    const repo = new PitchDraftRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await repo.deleteDraft(DRAFT_ID);
+
+    expect(mocks.rpc).toHaveBeenCalledWith('delete_my_pitch_draft', {
+      target_draft_id: DRAFT_ID,
+    });
+  });
+
+  it('reports a server refusal rather than a deletion that did not happen', async () => {
+    // 0059 refuses a draft with a campaign, one with a queued or leased media
+    // job, and one carrying a purchase. Swallowing any of those would let the
+    // app clear a pitch from its own list while the server still holds it —
+    // and the local media with it.
+    mocks.rpc.mockResolvedValue({
+      data: null,
+      error: {
+        code: 'P0001',
+        message: 'a published pitch is taken down by the person it is about',
+      },
+    });
+    const repo = new PitchDraftRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await expect(repo.deleteDraft(DRAFT_ID)).rejects.toBeInstanceOf(DataLayerError);
+  });
+
+  it('refuses to send anything that is not a draft id', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: null });
+    const repo = new PitchDraftRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await expect(repo.deleteDraft('not-a-uuid')).rejects.toThrow();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+});

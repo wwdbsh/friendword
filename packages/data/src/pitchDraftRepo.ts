@@ -270,6 +270,32 @@ export class PitchDraftRepo {
   }
 
   /**
+   * Deletes an unpublished pitch draft the caller created, with its assets,
+   * consent requests and consent revisions (0059).
+   *
+   * The server refuses a draft that has a campaign (taking a live page down is
+   * the Dater's act, through /inbox), a draft with a queued or leased media
+   * job, and a draft carrying a purchase credit. None of those refusals are
+   * re-implemented here: a client-side status check would be a hint, and the
+   * only thing standing between a caller and the rows is the RPC.
+   *
+   * The storage objects are not deleted by this call. The draft's pitch-media
+   * prefix simply stops being referenced, which is what hands it to the orphan
+   * sweep (docs/OPS.md) — the same division of labour as
+   * {@link PitchDraftRepo.removeAsset}. Any copy already downloaded or shared
+   * is gone beyond recall, and the product copy says so.
+   */
+  async deleteDraft(draftId: string): Promise<void> {
+    await this.getRequiredSession();
+    const { error } = await this.client.rpc('delete_my_pitch_draft', {
+      target_draft_id: uuidSchema.parse(draftId),
+    });
+    if (error !== null) {
+      throw new DataLayerError('pitchDraft.delete', error);
+    }
+  }
+
+  /**
    * Records an uploaded object in pitch_assets so other surfaces (consent
    * review, public page) can discover it without guessing storage paths.
    *

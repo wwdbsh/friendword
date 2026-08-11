@@ -252,6 +252,7 @@ async function createHarness(options: {
   };
   const repository: PitchDraftRepository = {
     createDraft: unexpected,
+    deleteDraft: unexpected,
     getDraft: unexpected,
     listAssets: async (): Promise<readonly PitchAssetRow[]> => [...assetRows],
     // Models 0046: photos the caller uploaded, on a still-editable draft.

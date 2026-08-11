@@ -35,6 +35,7 @@ import {
 import { requestPitchTextModeration } from './textModeration';
 import {
   MockPitchDraftService,
+  PitchDraftDeletionError,
   PitchDraftSubmissionError,
   settleWithin,
   type LocalDraftErasure,
@@ -71,6 +72,7 @@ export type PitchDraftRepository = Omit<
   Pick<
     PitchDraftRepo,
     | 'createDraft'
+    | 'deleteDraft'
     | 'getDraft'
     | 'listAssets'
     | 'listMyConsentRequests'
@@ -234,6 +236,61 @@ export function clipRegistrationRefusalMessage(error: unknown): string | null {
 /** True when the submit failed because a flagged clip is still attached (0050). */
 export function isFlaggedClipSubmitRejection(error: unknown): boolean {
   return includesServerMessage(error, FLAGGED_CLIP_GATE_MESSAGE);
+}
+
+// ── Deleting a pitch (T010, Issue #47) ────────────────────────────────────
+// The three sentences 0059 raises, and the three the introducer reads. They
+// are separate constants because the server's wording is a stable API this
+// matches on, and the product's wording is not something the DB should own.
+
+/** SQLERRM raised by 0059 for a draft that has a campaign, or is published. */
+const DELETE_PUBLISHED_GATE_MESSAGE = 'a published pitch is taken down by the person it is about';
+/** SQLERRM raised by 0059 while a media job for the draft is queued or leased. */
+const DELETE_IN_FLIGHT_GATE_MESSAGE =
+  'this pitch is still being processed and cannot be deleted yet';
+/** SQLERRM raised by 0059 for a draft carrying a purchase credit. */
+const DELETE_PURCHASED_GATE_MESSAGE =
+  'this pitch has a purchase attached and cannot be deleted here';
+
+/**
+ * §12: says where the control is, not that the person is not allowed. Only the
+ * dater can take their own page down, and the app has no screen for it — the
+ * web Inbox does — so the sentence points there rather than dead-ending.
+ */
+export const DELETE_PUBLISHED_MESSAGE =
+  'This pitch is live as your friend’s page, so it is theirs to take down. They can do that from ' +
+  'their Inbox on the web.';
+/** §12: temporary and true, with no time attached to it. */
+export const DELETE_IN_FLIGHT_MESSAGE =
+  'A video on this pitch is still being checked, so it cannot be deleted yet. Try again once ' +
+  'that finishes.';
+export const DELETE_PURCHASED_MESSAGE =
+  'This pitch has a purchase attached to it, so it is not deleted from here. Contact support and ' +
+  'we will sort it out with you.';
+export const DELETE_NEEDS_SIGN_IN_MESSAGE =
+  'This pitch is saved to your account, so signing in is what lets it be deleted there too. ' +
+  'Nothing was deleted.';
+export const DELETE_FAILED_MESSAGE =
+  'This pitch could not be deleted. Nothing was removed — check your connection and try again.';
+
+/**
+ * The introducer-facing sentence for a deletion the server refused, or null
+ * when the failure is something else (network, auth, an unexpected error).
+ *
+ * Only the three pinned refusals become a specific message. Everything else
+ * falls through to {@link DELETE_FAILED_MESSAGE}, because a message that named
+ * a reason the server did not give would be a guess about someone's data.
+ */
+export function draftDeletionRefusalMessage(error: unknown): string | null {
+  if (includesServerMessage(error, DELETE_PUBLISHED_GATE_MESSAGE)) {
+    return DELETE_PUBLISHED_MESSAGE;
+  }
+  if (includesServerMessage(error, DELETE_IN_FLIGHT_GATE_MESSAGE)) {
+    return DELETE_IN_FLIGHT_MESSAGE;
+  }
+  return includesServerMessage(error, DELETE_PURCHASED_GATE_MESSAGE)
+    ? DELETE_PURCHASED_MESSAGE
+    : null;
 }
 
 const RELATIONSHIP_TYPE_MAP: Record<RelationshipKind, ServerRelationshipType> = {
@@ -400,6 +457,40 @@ export class HybridPitchDraftService implements PitchDraftService {
 
   eraseAllLocalDrafts(): Promise<LocalDraftErasure> {
     return this.local.eraseAllLocalDrafts();
+  }
+
+  /**
+   * Deletes one pitch, SERVER FIRST (T010, Issue #47).
+   *
+   * The order is the contract. This device's copy is removed only after
+   * `delete_my_pitch_draft` has returned, because the failure modes are not
+   * symmetric: a local removal that ran first would delete the recording and
+   * photos off the phone and then discover the server refuses (the pitch is
+   * live, a clip is still being checked, someone paid for it) — leaving a pitch
+   * that reappears on the next sync with its media gone. Server first means
+   * every refusal leaves both sides untouched.
+   *
+   * A draft that never reached the server is local-only and needs no session.
+   * A draft that DID reach the server and has no session cannot be deleted at
+   * all: erasing this device's copy alone would hide a pitch Friendword still
+   * holds, which is the opposite of what was asked for.
+   */
+  async deleteDraft(id: PitchDraftId): Promise<void> {
+    const draft = await findDraft(this.local, id);
+    if (draft.server !== null) {
+      const repo = this.repo;
+      if (repo === null) {
+        throw new PitchDraftDeletionError(DELETE_NEEDS_SIGN_IN_MESSAGE);
+      }
+      try {
+        await repo.deleteDraft(draft.server.draftId);
+      } catch (error: unknown) {
+        throw new PitchDraftDeletionError(
+          draftDeletionRefusalMessage(error) ?? DELETE_FAILED_MESSAGE,
+        );
+      }
+    }
+    await this.local.deleteDraft(id);
   }
 
   /**

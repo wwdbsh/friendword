@@ -30,10 +30,13 @@ import {
   listMyIntroducedCampaigns,
   type IntroducedCampaign,
 } from '../../src/services/introducedCampaigns';
-import type { DraftSyncState } from '../../src/services/pitchDrafts';
-import { isRecoveredServerDraft } from '../../src/services/pitchDraftsSupabase';
+import { PitchDraftDeletionError, type DraftSyncState } from '../../src/services/pitchDrafts';
+import {
+  DELETE_FAILED_MESSAGE,
+  isRecoveredServerDraft,
+} from '../../src/services/pitchDraftsSupabase';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
-import type { PitchDraft } from '../../src/services/types';
+import type { PitchDraft, PitchDraftId } from '../../src/services/types';
 import { buildInboxUrl } from '../../src/services/webOrigin';
 
 type OwnedCampaignLoadState = 'loading' | 'ready' | 'signed_out' | 'error';
@@ -170,6 +173,15 @@ export default function CampaignsScreen() {
   const [copiedCampaignId, setCopiedCampaignId] = useState<string | null>(null);
   const [introducerShareError, setIntroducerShareError] = useState<string | null>(null);
   const [signInVisible, setSignInVisible] = useState(false);
+  // Keyed by draft, all three: an un-keyed confirmation would arm the delete on
+  // every card at once, which is the exact mis-tap a confirmation exists to
+  // prevent, and an un-keyed error would blame the wrong pitch.
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<PitchDraftId | null>(null);
+  const [deletingId, setDeletingId] = useState<PitchDraftId | null>(null);
+  const [deleteError, setDeleteError] = useState<{
+    readonly draftId: PitchDraftId;
+    readonly message: string;
+  } | null>(null);
 
   const shareIntroducedPitch = useCallback(
     async (campaign: IntroducedCampaign, shareUrl: string): Promise<void> => {
@@ -320,6 +332,43 @@ export default function CampaignsScreen() {
   }, []);
 
   useFocusEffect(load);
+
+  /**
+   * Runs the deletion and turns its outcome into what the card says.
+   *
+   * A refusal leaves the list alone on purpose — the pitch is still there, and
+   * re-reading would only redraw the same row. A success reloads, because the
+   * list this screen holds no longer describes the account.
+   *
+   * A `partial` failure is a success on Friendword that did not finish on this
+   * phone, so it reloads AND shows the message: the pitch is gone from the list
+   * and the person still needs to know a recording may be left in the app.
+   */
+  const deleteDraft = useCallback(
+    async (draftId: PitchDraftId): Promise<void> => {
+      setDeletingId(draftId);
+      setDeleteError(null);
+      try {
+        await pitchDraftService.deleteDraft(draftId);
+      } catch (error: unknown) {
+        const partial = error instanceof PitchDraftDeletionError && error.partial;
+        setDeleteError({
+          draftId,
+          message: error instanceof PitchDraftDeletionError ? error.message : DELETE_FAILED_MESSAGE,
+        });
+        setDeletingId(null);
+        if (partial) {
+          setConfirmingDeleteId(null);
+          load();
+        }
+        return;
+      }
+      setDeletingId(null);
+      setConfirmingDeleteId(null);
+      load();
+    },
+    [load],
+  );
 
   // The introduced-campaigns RPC collapses every failure (including "no session")
   // into one generic error, so on its own it can't tell signed-out from a real
@@ -651,6 +700,51 @@ export default function CampaignsScreen() {
                 secondary
               />
             ) : null}
+            {/* T010 (Issue #47): the way out of a dead draft. Quiet until it is
+                asked for — a destructive action does not compete with the card's
+                real work — and then it states what goes before it offers to do
+                it, the way the account screen does. */}
+            {canDeleteDraft(draft) ? (
+              confirmingDeleteId === draft.id ? (
+                <View style={styles.deleteConfirmation}>
+                  <Text style={styles.deleteTitle}>Delete this pitch?</Text>
+                  {DRAFT_DELETION_FACTS.map((fact) => (
+                    <Text key={fact} style={styles.message}>
+                      {fact}
+                    </Text>
+                  ))}
+                  <HypeButton
+                    label={deletingId === draft.id ? 'Deleting…' : 'Yes, delete this pitch'}
+                    disabled={deletingId === draft.id}
+                    onPress={() => {
+                      void deleteDraft(draft.id);
+                    }}
+                    variant="trust"
+                  />
+                  <HypeButton
+                    label="Keep it"
+                    disabled={deletingId === draft.id}
+                    onPress={() => {
+                      setConfirmingDeleteId(null);
+                      setDeleteError(null);
+                    }}
+                    secondary
+                    variant="trust"
+                  />
+                </View>
+              ) : (
+                <QuietNavAction
+                  label="Delete this pitch"
+                  onPress={() => {
+                    setDeleteError(null);
+                    setConfirmingDeleteId(draft.id);
+                  }}
+                />
+              )
+            ) : null}
+            {deleteError !== null && deleteError.draftId === draft.id ? (
+              <Text style={styles.error}>{deleteError.message}</Text>
+            ) : null}
           </StickerCard>
         ))}
       </ScrollView>
@@ -665,6 +759,67 @@ export default function CampaignsScreen() {
     </SafeAreaView>
   );
 }
+
+/**
+ * Whether this screen offers to delete a pitch the introducer started.
+ *
+ * `published` is the one exclusion, and it is the client's echo of a server
+ * rule, not the rule itself: once a pitch is live it is the dater's page, and
+ * 0059 refuses the delete outright (their /inbox takedown is the path). Every
+ * other status the app can show is unpublished work of the introducer's own —
+ * including `consent_pending`, which is the invite nobody ever answered and the
+ * single most common dead draft there is. Hiding the button for it would leave
+ * exactly the state ACC-5 is about with no way out.
+ *
+ * A pitch whose deletion the server refuses for a reason this screen cannot see
+ * (a queued clip check, a purchase) still shows the button and gets a real
+ * sentence back from the server — a client-side guess would be a claim about
+ * data this device does not hold.
+ */
+export function canDeleteDraft(draft: Pick<PitchDraft, 'status'>): boolean {
+  return draft.status !== 'published';
+}
+
+/**
+ * What deleting one pitch does, in the order a person cares about. T007's
+ * account-deletion card is the precedent: every line is a claim the code keeps.
+ *
+ * - "on this phone and on Friendword": `HybridPitchDraftService.deleteDraft`
+ *   calls the server first and clears this device only after it agrees.
+ * - "the recording, photos and videos": the pitch_assets rows go with the
+ *   draft, the local files are deleted here, and the stored objects stop being
+ *   referenced, which is what hands them to the scheduled sweep. No time is
+ *   promised for that, because none is guaranteed (docs/OPS.md).
+ * - "what your friend already saw": the consent request and the revision
+ *   snapshot are deleted with the draft (0059). This is the opposite of account
+ *   deletion, where a draft preserved for someone else's campaign KEEPS its
+ *   revision — here nobody approved anything, so there is no approval record to
+ *   protect, and saying "your friend's copy is kept" would be false.
+ * - the safety line, which has to be exactly as true as docs/PRIVACY_DATA_MAP.md
+ *   says and no truer. Two different things happen, and an earlier draft of this
+ *   copy ("moderation records are kept") flattened them into one claim that is
+ *   false about the second:
+ *     * `reports` are kept. They have no link to a draft and nothing in this
+ *       path touches them.
+ *     * a `video_moderation_reviews` row DOES go with the draft — but deleting
+ *       it writes the `video_moderation_review_deleted` ops trace (0051),
+ *       because cleanup sets `friendword.cleanup`, not `friendword.erasure`,
+ *       and only the latter buys the trigger's silence. So the record of the
+ *       review is not kept; the record of it being deleted is. That is the whole
+ *       reason cleanup is not erasure, and the sentence says the reviewable
+ *       thing — a moderator still learns of it — rather than claiming the review
+ *       itself survives.
+ * - "cannot be undone" and "already shared": there is no restore, and a link
+ *   someone already opened is beyond recall.
+ */
+export const DRAFT_DELETION_FACTS: readonly string[] = [
+  'This pitch is removed from this phone and from Friendword.',
+  'The recording, the photos and any videos on it go with it. Clearing the stored copies happens on a scheduled job afterwards; we will not promise you a time for it.',
+  'If you already sent this pitch for approval, the invite stops working and what your friend was asked to look at is deleted too.',
+  'Safety reports are kept; deleting a pitch does not clear them. If a video here was flagged for review, deleting it is recorded for our moderation team.',
+  'Anything already shared or downloaded by other people cannot be called back.',
+  'This cannot be undone.',
+];
 
 export function getIntroducerDraftName(draft: PitchDraft): string {
   const friendName = draft.relationship?.friendFirstName.trim();
@@ -834,5 +989,16 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontFamily: 'BricolageGrotesqueBold',
     fontSize: fontSizes.sm,
+  },
+  deleteConfirmation: {
+    gap: spacing.sm,
+    borderLeftColor: colors.danger,
+    borderLeftWidth: spacing.xs,
+    paddingLeft: spacing.md,
+  },
+  deleteTitle: {
+    color: colors.ink,
+    fontFamily: 'BricolageGrotesqueBold',
+    fontSize: fontSizes.lg,
   },
 });

@@ -72,6 +72,7 @@ vi.mock('../../services/introducedCampaigns', () => ({
 
 import { PitchDraftSchema } from '../../services/types';
 import {
+  canDeleteDraft,
   canGetCampaignPass,
   countWaitingInterests,
   formatWaitingInterests,
@@ -79,6 +80,7 @@ import {
   getIntroducerDraftName,
   getIntroducedShareActions,
   isCampaignRevival,
+  DRAFT_DELETION_FACTS,
 } from '../../../app/campaigns/index';
 
 describe('Dater-owned Campaign Pass surface', () => {
@@ -229,5 +231,47 @@ describe('Waiting-interest signal on an owned campaign', () => {
         'Interest in this campaign is answered in your Inbox on the web.',
       );
     }
+  });
+});
+
+describe('Deleting a pitch the introducer started (T010, Issue #47)', () => {
+  it('offers the delete on every unpublished status, and never on a live one', () => {
+    // 'consent_pending' is the one that matters most: the invite nobody
+    // answered is the dead draft ACC-5 is about, and an "only finished drafts"
+    // rule would leave it stuck forever. 'published' is excluded because the
+    // pitch is the dater's page by then — 0059 refuses it server-side, and
+    // showing a button that always fails would be worse than showing none.
+    for (const status of [
+      'draft',
+      'consent_pending',
+      'changes_requested',
+      'approved',
+      'paused',
+      'expired',
+      'archived',
+      'deleted',
+    ] as const) {
+      expect(canDeleteDraft({ status })).toBe(true);
+    }
+    expect(canDeleteDraft({ status: 'published' })).toBe(false);
+  });
+
+  it('states the safety records that survive rather than promising a clean sweep', () => {
+    // §12: the confirmation must not read as "everything about this is erased".
+    // The two halves are different facts and docs/PRIVACY_DATA_MAP.md keeps
+    // them apart, so the copy has to as well: `reports` are untouched by this
+    // path, while a `video_moderation_reviews` row DOES go with the draft and
+    // what survives is the ops trace of its deletion (0051, which stays silent
+    // only for `friendword.erasure`). Claiming the review itself is "kept"
+    // would be the one sentence here that is false.
+    const facts = DRAFT_DELETION_FACTS.join(' ');
+    expect(facts).toContain('Safety reports are kept');
+    expect(facts).toContain('deleting it is recorded for our moderation team');
+    expect(facts).not.toMatch(/moderation records are kept/i);
+    expect(facts).toContain('This cannot be undone.');
+    // No time is promised for the stored copies (docs/OPS.md: daily is a floor,
+    // not an SLA).
+    expect(facts).toContain('we will not promise you a time for it');
+    expect(facts).not.toMatch(/\b(24 hours|immediately|instantly|within)\b/i);
   });
 });

@@ -103,10 +103,18 @@
 
 ## 3. 다음에 할 일 (권장 순서)
 
-1. **[사용자] 0058 push + 알림 시크릿 설정 + 스위치 켜기 + 실발송 왕복 1회** — `docs/OPS.md` → 이벤트 이메일 알림 → **활성화 체크리스트**의 7단계를 순서대로. 핵심은 순서입니다: push → 시크릿 등록·재배포 → 스위치 **off인 채로** 라우트 200 확인 → 큐 내용 확인 → 메일함 열어 둔 채 `notification_email_enabled='on'` → 실계정 관심 표현 1건으로 메일 도착 육안 확인. 이 확인 전까지 "알림 완료"라고 주장하지 않습니다.
-2. **첫 실사용자 캠페인 1건을 밀착 관찰** — 창작→승인→publish→렌더(자막 포함 첫 실파일)→릴스 업로드까지. B1(초대 이메일 오입력)이 실사용자에게 터지면 백로그 우선순위 상향.
-3. **릴스 배포 개시** + `real_payments_enabled` 판단(sandbox 드릴 선행).
-4. 9/30 스토어 출시 마감 역산 유지(`HACKATHON_RULES.md`), App Store 제출물 준비 트랙 별도 기립.
+1. **[사용자] 0059 push + 합성 왕복 1회 (T010 / Issue #47 — 데이터 파괴 경로)** — `supabase/migrations/0059_pitch_draft_cleanup.sql`이 아직 hosted에 없습니다(`delete_my_pitch_draft`가 `PGRST202`로 실측 확인됨, 2026-08-12). 순서: `supabase db push --linked` → hosted에 함수·ACL 존재 확인 → **합성 계정 왕복 스크립트 1회**:
+
+   ```sh
+   node scripts/qa/hosted-pitch-draft-cleanup-proof.mjs
+   ```
+
+   스크립트는 자기가 만든 `59010000-0000-4000-8000-0000000000…` 접두 id(`SYNTHETIC_ID_PREFIX`)와 `t010-cleanup-*@friendword.invalid` 계정(`SYNTHETIC_EMAIL_LOCALPART_PREFIX`·`SYNTHETIC_EMAIL_DOMAIN`)만 건드립니다. 확인 항목: **P0** anon 키로 호출 시 함수 본문 이전에 권한 거부(로컬 하니스로는 증명 불가 — hosted 기본 권한이 anon에게 EXECUTE를 주므로), 보호 규칙 **P1**(캠페인 있는 pitch 거부)·**P2**(진행 중 잡 거부)·**P3**(타인 draft 거부)·**P6**(결제 크레딧 거부와 원장 제거 후 성공), **P4** happy path의 정확한 파괴 범위(저장소 객체는 sweep 몫으로 **남김**), **P5** 정리 후 합성 네임스페이스 잔존 0과 **실행 전 존재하던 모든 id의 id 단위 생존**(총계 비교가 아니라 — 라이브 프로젝트에서 실사용자 가입 한 건이 총계를 흔들고, 같은 크기의 맞교환은 총계로 잡히지 않습니다). 픽스처 생성 이후는 try/finally이므로 어느 단계가 던져도 합성 행·객체·계정을 정리하고, 정리하지 못한 항목은 삼키지 않고 이름으로 나열한 뒤 non-zero로 끝냅니다. **이 확인 전에는 "정리 삭제 완료"라고 주장하지 않습니다.** 불가침: QA 캠페인 `sumin-n2g2ma`, 만료 캠페인 `jordan-ba9m1u`(둘 다 `UNTOUCHABLE_CAMPAIGN_SLUGS`로 슬러그·id·status까지 대조), 실계정 죽은 draft 26건 — 스크립트는 이들을 **읽고 id 단위로 생존만 확인**하며 쓰지 않습니다.
+
+2. **[사용자] 0058 push + 알림 시크릿 설정 + 스위치 켜기 + 실발송 왕복 1회** — `docs/OPS.md` → 이벤트 이메일 알림 → **활성화 체크리스트**의 7단계를 순서대로. 핵심은 순서입니다: push → 시크릿 등록·재배포 → 스위치 **off인 채로** 라우트 200 확인 → 큐 내용 확인 → 메일함 열어 둔 채 `notification_email_enabled='on'` → 실계정 관심 표현 1건으로 메일 도착 육안 확인. 이 확인 전까지 "알림 완료"라고 주장하지 않습니다.
+3. **첫 실사용자 캠페인 1건을 밀착 관찰** — 창작→승인→publish→렌더(자막 포함 첫 실파일)→릴스 업로드까지. B1(초대 이메일 오입력)이 실사용자에게 터지면 백로그 우선순위 상향.
+4. **릴스 배포 개시** + `real_payments_enabled` 판단(sandbox 드릴 선행).
+5. 9/30 스토어 출시 마감 역산 유지(`HACKATHON_RULES.md`), App Store 제출물 준비 트랙 별도 기립.
 
 ### 미착수·보류 (범위 밖으로 명시적으로 남긴 것)
 

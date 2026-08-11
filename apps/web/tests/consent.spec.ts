@@ -326,6 +326,17 @@ test('claims, reviews the voice pitch, and publishes when signed in', async ({ p
   await test.step('When the dater confirms claims and approves with the defaults', async () => {
     await page.getByLabel('I confirm the claims above are true.').check();
     await page.getByRole('button', { name: 'Approve & publish my page' }).click();
+    // GAP-4: approval lands on a hand-off screen that names the owner's inbox
+    // before the public page — the page itself has no owner controls.
+    await expect(page.getByRole('heading', { name: 'Your page is live.' })).toBeVisible();
+    // The URL no longer changes on approval, so focus moves to the new heading
+    // in place of the announcement a route change used to give.
+    await expect(page.getByRole('heading', { name: 'Your page is live.' })).toBeFocused();
+    await expect(page.getByRole('link', { name: 'Manage my page' })).toHaveAttribute(
+      'href',
+      '/inbox',
+    );
+    await page.getByRole('link', { name: 'See my public page' }).click();
     await page.waitForURL('**/p/blair-mix123');
     expect(profileBody).toEqual({
       target_birth_date: '1994-05-20',
@@ -428,6 +439,7 @@ test('saves dater edits with voice retained, reloads the revision, and publishes
   await expect(page.getByText('Blair, 32')).toBeVisible();
   await page.getByLabel('I confirm the claims above are true.').check();
   await page.getByRole('button', { name: 'Approve & publish my page' }).click();
+  await page.getByRole('link', { name: 'See my public page' }).click();
   await page.waitForURL('**/p/blair-edited');
 
   expect(preferencesBody).toEqual({
@@ -717,6 +729,7 @@ test('lets the dater edit the five published fields and publishes those exact wo
     await fillDaterProfile(page);
     await page.getByLabel('I confirm the claims above are true.').check();
     await page.getByRole('button', { name: 'Approve & publish my page' }).click();
+    await page.getByRole('link', { name: 'See my public page' }).click();
     await page.waitForURL('**/p/blair-structure');
     expect(approveBody).toMatchObject({
       draft_id: DRAFT_ID,

@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 
 import { getPublishedPitchBySlug } from '@friendword/data';
 
+import { FlowNav } from '@/components/FlowNav';
 import { ReferralTracker } from '@/components/ReferralTracker';
 import { getPitchFixture } from '@/fixtures/pitch';
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
@@ -29,7 +30,7 @@ export default async function InterestPage({ params }: InterestPageProps) {
     return (
       <main className={flowStyles.page}>
         <div className={flowStyles.shell}>
-          <p className={flowStyles.wordmark}>Friendword</p>
+          <FlowNav tabs={false} />
           <section className={flowStyles.card}>
             <span className={flowStyles.badge}>Demo data</span>
             <h1 className={flowStyles.title}>This is a demo — Blair isn’t a real person.</h1>

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { verifyOtpTokenHash, type BrowserSupabaseClient } from '@friendword/data';
 
 import { EmailSignIn } from '@/components/EmailSignIn';
+import { FlowNav } from '@/components/FlowNav';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import styles from '@/styles/flowCard.module.css';
 
@@ -74,7 +75,9 @@ export function ConfirmSignIn() {
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
-        <p className={styles.wordmark}>Friendword</p>
+        {/* Tabs off: this screen exists to spend a one-time sign-in token, and
+            navigating away before the tap wastes it. */}
+        <FlowNav tabs={false} />
 
         {client === null && (
           <section className={styles.card}>

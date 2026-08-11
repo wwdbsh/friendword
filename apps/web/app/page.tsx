@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import Script from 'next/script';
 
+import { AccountNavLink } from '@/components/AccountNavLink';
 import { WaitlistForm } from '@/components/WaitlistForm';
 
 import styles from './page.module.css';
@@ -57,9 +58,14 @@ export default function HomePage() {
           <Link className={styles.wordmark} href="/" aria-label="Friendword home">
             Friendword
           </Link>
-          <Link className={styles.quietLink} href="/p/demo-blair">
-            See the demo
-          </Link>
+          <div className={styles.navLinks}>
+            <Link className={styles.quietLink} href="/p/demo-blair">
+              See the demo
+            </Link>
+            {/* Only rendered for a visitor who already has a session — see
+                AccountNavLink. Signed out, the landing promises no inbox. */}
+            <AccountNavLink className={styles.quietLink} />
+          </div>
         </header>
 
         <section className={styles.hero} aria-labelledby="hero-heading">

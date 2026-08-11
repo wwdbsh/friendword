@@ -34,6 +34,72 @@
   transform: rotate(-1.5deg);
 }
 
+/* Global navigation for the account surfaces (T004 / FUN-1 · ACC-1 · WUI-6).
+   Every signed-in screen used to render the wordmark as plain text and carry no
+   anchor at all, so /inbox, /rooms/[id] and /kit/[id] were reachable only by
+   typing the URL. The shell now always carries a home link and the two account
+   destinations; no new design system — the sticker vocabulary above is reused. */
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.navRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.wordmarkLink {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+}
+
+.wordmarkLink:hover {
+  text-decoration: underline;
+}
+
+.navTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.navTab {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: var(--space-xs) var(--space-md);
+  border: var(--stroke-sticker) solid var(--color-ink);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: var(--font-size-sm);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.navTabActive {
+  background: var(--color-hype);
+  color: var(--color-on-hype);
+}
+
+.navBack {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  align-self: flex-start;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
 .card {
   padding: var(--space-xl);
   border: var(--stroke-sticker) solid var(--color-ink);

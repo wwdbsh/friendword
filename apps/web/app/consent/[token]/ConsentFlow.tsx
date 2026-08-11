@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import {
@@ -168,6 +168,10 @@ type FlowState =
   | ({ readonly step: 'name-confirmation' } & ReviewContext)
   | ({ readonly step: 'review' } & ReviewContext)
   | { readonly step: 'publishing'; readonly preview: ConsentPreview }
+  // GAP-4: approval used to hand the dater straight to their own public page,
+  // which carries no owner controls — the inbox that holds pause/take-down and
+  // every incoming interest was never named. The hand-off is a screen now.
+  | { readonly step: 'published'; readonly campaignSlug: string }
   | { readonly step: 'revision-stale'; readonly preview: ConsentPreview }
   | {
       readonly step: 'responded';
@@ -489,7 +493,6 @@ function daterProfileError(
 }
 
 export function ConsentFlow({ token }: { readonly token: string }) {
-  const router = useRouter();
   const clientRef = useRef<BrowserSupabaseClient | null | undefined>(undefined);
   if (clientRef.current === undefined) {
     clientRef.current = getSupabaseBrowserClient();
@@ -545,6 +548,18 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   const claimStartedRef = useRef(false);
   const approvalStartedRef = useRef(false);
   const [activeReviewStep, setActiveReviewStep] = useState<ReviewStepId>('listen');
+  /**
+   * The sign-in listener that opens the review. It is released the moment the
+   * review is actually open, so a later SIGNED_IN (Supabase re-emits it on tab
+   * focus and token refresh) cannot pull the dater off the approved/published
+   * hand-off screen and back into review. It stays subscribed on the failure
+   * paths, where "sign out and use another email" still depends on it.
+   */
+  const authListenerRef = useRef<(() => void) | null>(null);
+  const releaseAuthListener = useCallback(() => {
+    authListenerRef.current?.();
+    authListenerRef.current = null;
+  }, []);
 
   const enterReview = useCallback(
     async (activeClient: BrowserSupabaseClient, preview: ConsentPreview) => {
@@ -582,6 +597,10 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         setResponseError(null);
         const nameStatus = await getDisplayNameStatus(activeClient);
         setDisplayName(nameStatus.displayName);
+        // The screen is now the dater's, and every later step (name, review,
+        // publishing, published) is downstream of it — no auth event may
+        // reset it from here on.
+        releaseAuthListener();
         if (nameStatus.confirmed) {
           setState({ step: 'review', ...context });
         } else {
@@ -600,7 +619,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         setState({ step: 'error', message: claimErrorMessage(detail) });
       }
     },
-    [token],
+    [token, releaseAuthListener],
   );
 
   useEffect(() => {
@@ -610,7 +629,6 @@ export function ConsentFlow({ token }: { readonly token: string }) {
     }
 
     let cancelled = false;
-    let cleanupAuthListener: (() => void) | undefined;
     const repo = new ConsentRepo(client);
 
     void (async () => {
@@ -639,21 +657,23 @@ export function ConsentFlow({ token }: { readonly token: string }) {
       setState({ step: 'signin', preview });
 
       const { data: subscription } = client.auth.onAuthStateChange((event) => {
-        if (event === 'SIGNED_IN') {
+        // claimStartedRef is the second guard: SIGNED_IN can arrive while the
+        // claim is still in flight, and enterReview must run exactly once.
+        if (event === 'SIGNED_IN' && !claimStartedRef.current) {
           void enterReview(client, preview);
         }
       });
-      cleanupAuthListener = () => subscription.subscription.unsubscribe();
+      authListenerRef.current = () => subscription.subscription.unsubscribe();
       if (cancelled) {
-        cleanupAuthListener();
+        releaseAuthListener();
       }
     })();
 
     return () => {
       cancelled = true;
-      cleanupAuthListener?.();
+      releaseAuthListener();
     };
-  }, [client, token, enterReview]);
+  }, [client, token, enterReview, releaseAuthListener]);
 
   async function handleApprove() {
     if (client === null || state.step !== 'review' || approvalStartedRef.current) {
@@ -700,7 +720,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         includedAssetIds,
         hardClaimsConfirmed,
       });
-      router.push(`/p/${campaignSlug}`);
+      setState({ step: 'published', campaignSlug });
     } catch (error: unknown) {
       if (!(error instanceof Error)) {
         throw error;
@@ -1253,6 +1273,19 @@ export function ConsentFlow({ token }: { readonly token: string }) {
     return () => observer.disconnect();
   }, [state.step, showClaims]);
 
+  /**
+   * Approval no longer changes the URL (GAP-4), so nothing announces the new
+   * screen. Moving focus to its heading is the replacement a route change used
+   * to give for free: the heading is read out and the keyboard lands on the
+   * hand-off card rather than back at the top of the document.
+   */
+  const publishedHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  useEffect(() => {
+    if (state.step === 'published') {
+      publishedHeadingRef.current?.focus();
+    }
+  }, [state.step]);
+
   const goToReviewStep = useCallback((id: ReviewStepId) => {
     const section = document.getElementById(`consent-step-${id}`);
     if (section === null) {
@@ -1273,7 +1306,30 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
-        <p className={styles.wordmark}>Friendword</p>
+        <Link className={styles.wordmark} href="/" aria-label="Friendword home">
+          Friendword
+        </Link>
+
+        {state.step === 'published' && (
+          <section className={styles.card}>
+            <span className={styles.badge}>Approved &amp; live</span>
+            <h1 className={styles.title} ref={publishedHeadingRef} tabIndex={-1}>
+              Your page is live.
+            </h1>
+            <p className={styles.lede}>
+              Only what you approved is public. Pausing the page, taking it down, and every person
+              who reaches out are all in your inbox.
+            </p>
+            <div className={styles.actionRow}>
+              <Link className={styles.primary} href="/inbox">
+                Manage my page
+              </Link>
+              <Link className={styles.secondary} href={`/p/${state.campaignSlug}`}>
+                See my public page
+              </Link>
+            </div>
+          </section>
+        )}
 
         {state.step === 'loading' && (
           <section className={styles.card} aria-live="polite">

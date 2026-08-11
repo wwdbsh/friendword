@@ -1,7 +1,9 @@
 import {
   BenefitsRepo,
+  InterestRepo,
   trackEvent,
   UnauthenticatedError,
+  type CampaignInterest,
   type OwnedCampaignBenefit,
 } from '@friendword/data';
 import { colors, fonts, fontSizes, radii, spacing, strokes } from '@friendword/ui-tokens';
@@ -32,6 +34,7 @@ import type { DraftSyncState } from '../../src/services/pitchDrafts';
 import { isRecoveredServerDraft } from '../../src/services/pitchDraftsSupabase';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 import type { PitchDraft } from '../../src/services/types';
+import { buildInboxUrl } from '../../src/services/webOrigin';
 
 type OwnedCampaignLoadState = 'loading' | 'ready' | 'signed_out' | 'error';
 
@@ -59,6 +62,67 @@ export function canGetCampaignPass(campaign: {
 // pending) rather than promising live analytics.
 export function isCampaignRevival(status: CampaignPassStatus): boolean {
   return status === 'expired';
+}
+
+/**
+ * FUN-2: the "Campaigns about me" card never said anyone was waiting, so a
+ * dater had no reason to open the web Inbox where accepting actually happens.
+ * The count is aggregated on the client from `list_campaign_interests` — the
+ * same owner-gated RPC the web inbox consumes (0037: it refuses any caller who
+ * does not own the campaign) — so no migration and no new read surface.
+ */
+export function countWaitingInterests(
+  interests: readonly Pick<CampaignInterest, 'interestStatus'>[],
+): number {
+  return interests.filter((interest) => interest.interestStatus === 'submitted').length;
+}
+
+/**
+ * The PII boundary for that count. `list_campaign_interests` returns each
+ * sender's display name, age, bio, location and photo paths; this screen needs
+ * one integer. Everything else is dropped here, inside the fetch, so no
+ * sender's profile can reach component state, a re-render or a screenshot.
+ * Null means the read failed — see `formatWaitingInterests`.
+ */
+async function readWaitingCount(
+  repo: Pick<InterestRepo, 'listCampaignInterests'>,
+  campaignId: string,
+): Promise<number | null> {
+  const rows = await repo.listCampaignInterests(campaignId).catch(() => null);
+  if (rows === null) {
+    return null;
+  }
+  return countWaitingInterests(rows.map(({ interestStatus }) => ({ interestStatus })));
+}
+
+/**
+ * Undefined means the count could not be read — it must not read as zero.
+ *
+ * The wording is bounded by what the server actually allows: `decide_interest`
+ * (0044) refuses an accept unless the campaign is `published` AND inside its
+ * window, so "waiting for your answer" is only true on a live campaign. A
+ * paused campaign can be resumed from the web Inbox, which is exactly what the
+ * paused copy asks for; an ended one cannot (a Campaign Pass revival is the
+ * only path, and its CTA is on this same card), so that copy promises nothing.
+ */
+export function formatWaitingInterests(
+  count: number | undefined,
+  status: CampaignPassStatus,
+): string {
+  if (count === undefined) {
+    return 'Interest in this campaign is answered in your Inbox on the web.';
+  }
+  if (count === 0) {
+    return 'Nobody is waiting on your answer right now.';
+  }
+  const subject = count === 1 ? '1 person is' : `${count} people are`;
+  if (status === 'published') {
+    return `${subject} waiting for your answer.`;
+  }
+  if (status === 'paused') {
+    return `${subject} waiting — resume your page in your Inbox on the web to answer them.`;
+  }
+  return `${subject} waiting, but this campaign has ended — reviving it is what reopens your answer.`;
 }
 
 export function getCampaignName(campaign: Pick<OwnedCampaignBenefit, 'headline' | 'slug'>): string {
@@ -97,6 +161,10 @@ export default function CampaignsScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [ownedCampaigns, setOwnedCampaigns] = useState<readonly OwnedCampaignBenefit[]>([]);
   const [ownedCampaignState, setOwnedCampaignState] = useState<OwnedCampaignLoadState>('loading');
+  const [waitingInterests, setWaitingInterests] = useState<Record<string, number>>({});
+  // Keyed by campaign (like copiedCampaignId): an un-keyed string rendered the
+  // same failure under every card on the screen.
+  const [inboxErrorCampaignId, setInboxErrorCampaignId] = useState<string | null>(null);
   const [introduced, setIntroduced] = useState<readonly IntroducedCampaign[]>([]);
   const [introducedState, setIntroducedState] = useState<IntroducedLoadState>('loading');
   const [copiedCampaignId, setCopiedCampaignId] = useState<string | null>(null);
@@ -136,6 +204,15 @@ export default function CampaignsScreen() {
     [],
   );
 
+  const openWebInbox = useCallback(async (campaignId: string): Promise<void> => {
+    setInboxErrorCampaignId(null);
+    try {
+      await Linking.openURL(buildInboxUrl());
+    } catch {
+      setInboxErrorCampaignId(campaignId);
+    }
+  }, []);
+
   const openIntroducedPitch = useCallback(async (shareUrl: string): Promise<void> => {
     setIntroducerShareError(null);
     try {
@@ -150,6 +227,8 @@ export default function CampaignsScreen() {
     setLoading(true);
     setOwnedCampaigns([]);
     setOwnedCampaignState('loading');
+    setWaitingInterests({});
+    setInboxErrorCampaignId(null);
     setIntroduced([]);
     setIntroducedState('loading');
     setCopiedCampaignId(null);
@@ -186,21 +265,39 @@ export default function CampaignsScreen() {
       setIntroducedState('signed_out');
     } else {
       const benefits = new BenefitsRepo(client);
-      void benefits
-        .listMyOwnedCampaigns()
-        .then((campaigns) => {
+      const interests = new InterestRepo(client);
+      void (async () => {
+        let campaigns: readonly OwnedCampaignBenefit[];
+        try {
+          campaigns = await benefits.listMyOwnedCampaigns();
+        } catch (error: unknown) {
           if (active) {
-            setOwnedCampaigns(campaigns);
-            setOwnedCampaignState('ready');
+            setOwnedCampaigns([]);
+            setOwnedCampaignState(error instanceof UnauthenticatedError ? 'signed_out' : 'error');
           }
-        })
-        .catch((error: unknown) => {
-          if (!active) {
-            return;
-          }
-          setOwnedCampaigns([]);
-          setOwnedCampaignState(error instanceof UnauthenticatedError ? 'signed_out' : 'error');
-        });
+          return;
+        }
+        if (!active) {
+          return;
+        }
+        setOwnedCampaigns(campaigns);
+        setOwnedCampaignState('ready');
+
+        // A campaign whose interest list cannot be read is simply left out of
+        // the map: an unreadable count must never render as "nobody waiting".
+        const counts: Record<string, number> = {};
+        await Promise.all(
+          campaigns.map(async (campaign) => {
+            const waiting = await readWaitingCount(interests, campaign.id);
+            if (waiting !== null) {
+              counts[campaign.id] = waiting;
+            }
+          }),
+        );
+        if (active) {
+          setWaitingInterests(counts);
+        }
+      })();
 
       void listMyIntroducedCampaigns()
         .then((campaigns) => {
@@ -289,6 +386,18 @@ export default function CampaignsScreen() {
               </View>
             </View>
             <Text style={styles.meta}>/{campaign.slug ?? 'campaign'}</Text>
+            <Text style={styles.waiting}>
+              {formatWaitingInterests(waitingInterests[campaign.id], campaign.status)}
+            </Text>
+            <QuietNavAction
+              label="Open my Inbox on the web"
+              onPress={() => {
+                void openWebInbox(campaign.id);
+              }}
+            />
+            {inboxErrorCampaignId === campaign.id ? (
+              <Text style={styles.error}>Your Inbox could not open. Please try again.</Text>
+            ) : null}
             {campaign.pass.active ? (
               <Text style={styles.message}>{formatActivePass(campaign.pass.expiresAt)}</Text>
             ) : campaign.status === 'paused' ? (
@@ -690,6 +799,12 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.xs,
   },
   meta: { color: colors.fresh, fontFamily: 'BricolageGrotesqueSemiBold', fontSize: fontSizes.sm },
+  waiting: {
+    color: colors.ink,
+    fontFamily: 'BricolageGrotesqueSemiBold',
+    fontSize: fontSizes.md,
+    lineHeight: 24,
+  },
   linkBox: {
     borderColor: colors.ink,
     borderWidth: strokes.sticker,

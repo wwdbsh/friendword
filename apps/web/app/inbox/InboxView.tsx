@@ -14,6 +14,7 @@ import {
 } from '@friendword/data';
 
 import { EmailSignIn } from '@/components/EmailSignIn';
+import { FlowNav } from '@/components/FlowNav';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { useSession } from '@/lib/useSession';
 
@@ -261,7 +262,7 @@ export function InboxView() {
     return (
       <main className={styles.page}>
         <div className={styles.shell}>
-          <p className={styles.wordmark}>Friendword</p>
+          <FlowNav tabs={false} />
           <section className={styles.card}>
             <h1 className={styles.title}>Your account is being deleted.</h1>
             <p className={styles.muted}>
@@ -277,7 +278,7 @@ export function InboxView() {
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
-        <p className={styles.wordmark}>Friendword</p>
+        <FlowNav current="inbox" />
 
         {client === null && (
           <section className={styles.card}>
@@ -451,6 +452,15 @@ export function InboxView() {
                   When someone with a complete dating profile sends interest on your page, their
                   profile shows up here for you to accept or decline.
                 </p>
+                {/* T004: the empty inbox was the end of the road. Only the one
+                    destination this card does not already offer is added — the
+                    campaign card above carries "View my page" for a live page,
+                    and repeating it here made two links to one screen. */}
+                <div className={styles.actionRow}>
+                  <Link className={styles.secondary} href="/rooms">
+                    My intro rooms
+                  </Link>
+                </div>
               </section>
             )}
 

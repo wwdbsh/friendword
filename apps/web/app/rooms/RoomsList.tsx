@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { IntroRoomRepo, type BrowserSupabaseClient, type IntroRoomSummary } from '@friendword/data';
 
 import { EmailSignIn } from '@/components/EmailSignIn';
+import { FlowNav } from '@/components/FlowNav';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { useSession } from '@/lib/useSession';
 
@@ -47,7 +48,7 @@ export function RoomsList() {
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
-        <p className={styles.wordmark}>Friendword</p>
+        <FlowNav current="rooms" />
 
         {client === null && (
           <section className={styles.card}>
@@ -77,6 +78,17 @@ export function RoomsList() {
             <p className={styles.muted}>
               A private room opens the moment an interest is accepted — by you or about you.
             </p>
+            {/* T004: an empty room list is where both sides of the funnel land.
+                The dater's next move is their interest inbox; a viewer's is a
+                public pitch, so both are linked rather than described. */}
+            <div className={styles.actionRow}>
+              <Link className={styles.secondary} href="/inbox">
+                My interest inbox
+              </Link>
+              <Link className={styles.secondary} href="/p/demo-blair">
+                See a demo pitch
+              </Link>
+            </div>
           </section>
         )}
 

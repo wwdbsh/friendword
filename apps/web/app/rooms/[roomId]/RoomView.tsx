@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 
@@ -12,6 +11,7 @@ import {
 } from '@friendword/data';
 
 import { EmailSignIn } from '@/components/EmailSignIn';
+import { FlowNav } from '@/components/FlowNav';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { useSession } from '@/lib/useSession';
 
@@ -177,7 +177,9 @@ export function RoomView({ roomId }: RoomViewProps) {
   return (
     <main className={flowStyles.page}>
       <div className={flowStyles.shell}>
-        <p className={flowStyles.wordmark}>Friendword</p>
+        {/* No `current`: this is one room, not the room list — the list is the
+            explicit return link instead. */}
+        <FlowNav back={{ href: '/rooms', label: 'All my rooms' }} />
 
         {client === null && (
           <section className={flowStyles.card}>
@@ -209,9 +211,9 @@ export function RoomView({ roomId }: RoomViewProps) {
             <p className={flowStyles.muted}>
               It may have been left, blocked, or the link is wrong.
             </p>
-            <Link className={flowStyles.secondary} href="/rooms">
-              Back to my rooms
-            </Link>
+            {/* No second link to /rooms here: the shell above already offers
+                "← All my rooms". Two anchors to one screen under two different
+                labels read as two different places. */}
           </section>
         )}
 

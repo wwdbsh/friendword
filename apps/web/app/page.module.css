@@ -52,6 +52,15 @@
   text-decoration: none;
 }
 
+/* The header's right-hand links: the demo, plus the account door that only a
+   signed-in visitor is shown (T004). */
+.navLinks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-lg);
+}
+
 .quietLink,
 .textLink {
   display: inline-flex;

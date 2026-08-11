@@ -23,6 +23,7 @@ import {
   type OwnContentConsentState,
 } from '@/lib/aiConsent';
 import { EmailSignIn } from '@/components/EmailSignIn';
+import { FlowNav } from '@/components/FlowNav';
 import { requestTextModeration } from '@/lib/moderateText';
 import { removeOwnProfilePhotos } from '@/lib/profileMedia';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
@@ -475,7 +476,10 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
-        <p className={styles.wordmark}>Friendword</p>
+        {/* Tabs stay off while the profile-and-consent steps are in progress —
+            losing them mid-flow costs the visitor the whole form. The wordmark
+            is still a way out (WUI-6). */}
+        <FlowNav tabs={false} />
 
         {client === null && (
           <section className={styles.card}>
@@ -511,9 +515,16 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
               timeline. If they accept, a private intro room opens for the two of you — your email
               and phone number stay hidden either way.
             </p>
-            <Link className={styles.secondary} href={`/p/${campaignSlug}`}>
-              Back to the pitch
-            </Link>
+            {/* T004: the room this sentence names is a real screen — link it
+                instead of leaving the sender to guess the URL. */}
+            <div className={styles.actionRow}>
+              <Link className={styles.secondary} href={`/p/${campaignSlug}`}>
+                Back to the pitch
+              </Link>
+              <Link className={styles.secondary} href="/rooms">
+                My intro rooms
+              </Link>
+            </div>
           </section>
         )}
 

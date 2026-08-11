@@ -26,6 +26,12 @@ vi.mock('@friendword/data', () => ({
   InterestRepo: class {},
   UnauthenticatedError: class extends Error {},
 }));
+// The real module reads the web origin from expo-constants, which cannot load
+// outside a native runtime. The URL itself is proven in
+// src/services/webOrigin.test.ts.
+vi.mock('../../services/webOrigin', () => ({
+  buildRoomsUrl: () => 'https://friendword.example/rooms',
+}));
 vi.mock('@friendword/ui-tokens', () => ({
   colors: {
     background: '',
@@ -44,6 +50,7 @@ vi.mock('expo-router', () => ({ useFocusEffect: vi.fn() }));
 vi.mock('react-native', async () => {
   const { createElement } = await import('react');
   return {
+    Linking: { openURL: vi.fn(() => Promise.resolve(true)) },
     ScrollView: ({ children }: { readonly children?: ReactNode }) =>
       createElement('main', null, children),
     StyleSheet: { create: (styles: object) => styles },
@@ -62,6 +69,8 @@ vi.mock('react-native-safe-area-context', async () => {
 vi.mock('../../components', async () => {
   const { createElement } = await import('react');
   return {
+    QuietNavAction: ({ label }: { readonly label: string; readonly onPress: () => void }) =>
+      createElement('button', null, label),
     TrustCard: ({ children }: { readonly children?: ReactNode }) =>
       createElement('article', null, children),
     SignInPromptCard: ({
@@ -143,8 +152,52 @@ describe('My interests mobile states', () => {
     expect(markup).toContain('A thoughtful person worth meeting');
     expect(markup).toContain('Campaign expired');
     expect(markup).toContain('Your interest was accepted.');
-    expect(markup).toContain('Open intro rooms on the Friendword web app');
+    expect(markup).toContain('Your intro room is on the Friendword web app');
     expect(markup).toContain('Submitted');
+  });
+
+  // FUN-6: the accepted card used to name the web intro rooms in prose with no
+  // URL and no control — the one screen where the introduction continues was
+  // unreachable from the app. It must be a real press target now.
+  it('offers a pressable way into the web intro rooms once accepted', () => {
+    const onOpenRooms = vi.fn();
+    const markup = renderToStaticMarkup(
+      <InterestsContent state="ready" interests={[ACCEPTED_INTEREST]} onOpenRooms={onOpenRooms} />,
+    );
+
+    expect(markup).toContain('<button>Open my intro rooms on the web</button>');
+  });
+
+  it('offers no room action while the interest is still undecided', () => {
+    const markup = renderToStaticMarkup(
+      <InterestsContent
+        state="ready"
+        interests={[{ ...ACCEPTED_INTEREST, interestStatus: 'submitted' }]}
+      />,
+    );
+
+    expect(markup).not.toContain('Open my intro rooms on the web');
+  });
+
+  it('opens the configured web origin rather than a hard-coded host', async () => {
+    const { Linking } = await import('react-native');
+    const { openIntroRoomsOnWeb } = await import('../../../app/interests/index');
+    vi.mocked(Linking.openURL).mockResolvedValueOnce(true);
+
+    await expect(openIntroRoomsOnWeb()).resolves.toBeNull();
+
+    expect(Linking.openURL).toHaveBeenCalledWith('https://friendword.example/rooms');
+  });
+
+  // A swallowed openURL rejection left a pressed button looking like it worked.
+  it('reports a refused open instead of failing silently', async () => {
+    const { Linking } = await import('react-native');
+    const { openIntroRoomsOnWeb } = await import('../../../app/interests/index');
+    vi.mocked(Linking.openURL).mockRejectedValueOnce(new Error('no handler'));
+
+    await expect(openIntroRoomsOnWeb()).resolves.toBe(
+      'Your intro rooms could not open. Please try again.',
+    );
   });
 
   it('falls back to the headline when no dater display name is available', () => {

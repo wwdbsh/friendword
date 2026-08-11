@@ -236,7 +236,9 @@ test('closes an already-open room when the other side blocks', async ({ page }) 
   });
   await expect(page.getByLabel('Message Jordan')).toHaveCount(0);
   await expect(page.getByText('Hey there.')).toHaveCount(0);
-  await expect(page.getByRole('link', { name: 'Back to my rooms' })).toBeVisible();
+  // One label for one destination: the shell's return link (T004 review).
+  await expect(page.getByRole('link', { name: '← All my rooms' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Back to my rooms' })).toHaveCount(0);
   // The poll budget is one membership read per 4s tick, not a request storm.
   expect(backend.membershipReads()).toBeLessThanOrEqual(6);
 });

@@ -362,11 +362,18 @@
 }
 
 .wordmark {
+  display: inline-block;
   margin: var(--space-xxl) 0 0;
+  color: inherit;
   font-family: var(--font-display), sans-serif;
   font-size: clamp(var(--font-size-display), 8vw, var(--font-size-hero));
   font-weight: 900;
   letter-spacing: -0.06em;
+  text-decoration: none;
+}
+
+.wordmark:hover {
+  text-decoration: underline;
 }
 
 .tagline {

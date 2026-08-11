@@ -239,7 +239,11 @@ export default async function PitchPage({ params }: PitchPageProps) {
             Create my Friendword
           </Link>
         </div>
-        <p className={styles.wordmark}>Friendword</p>
+        {/* One wordmark contract across the product (T004): everywhere it
+            appears it is the way home, with the same accessible name. */}
+        <Link className={styles.wordmark} href="/" aria-label="Friendword home">
+          Friendword
+        </Link>
         <p className={styles.tagline}>Dating, in your friends&apos; words.</p>
         <ReportCampaignLink campaignSlug={campaignSlug} />
       </footer>

@@ -153,3 +153,30 @@ Slice I acceptance로 한다.
 - 잉크 on 크림 대비 ≥ 13:1, secondary ≥ 4.5:1
 - `onPop`/`onHype` 텍스트 대비 4.5:1 이상 유지 (팝 필 위 텍스트는 크게)
 - 터치 타깃 44pt+, 오디오에는 항상 자막, reduced-motion 시 바운스 제거
+
+### 읽는 색과 채우는 색 (확정 2026-08-12, T014 / 감사 MUI-6)
+
+팝 컬러는 **채우는 색**이다. cream 위에서 `pop` 2.89:1, `flirt` 3.12:1,
+`fresh` 2.35:1, `hype` 1.46:1, `textFaint` 2.72:1 — 전부 본문 텍스트 기준
+미달이다. 같은 신호를 텍스트로 말해야 할 때는 밝기만 낮춘 짝을 쓴다:
+
+| 신호            | fill·아이콘 | 경계(≥3:1)      | 텍스트(≥4.5:1)  |
+| --------------- | ----------- | --------------- | --------------- |
+| 탠저린(에너지)  | `pop`       | `ink`           | **`keyword`**   |
+| teal(검증·성공) | `fresh`     | `borderSuccess` | **`verified`**  |
+| 중립 hairline   | —           | `borderMuted`   | `textSecondary` |
+| placeholder     | `textFaint` | 금지            | 금지            |
+
+이 금지는 주석이 아니라 **데이터**다: `nonTextColorTokens`·
+`nonBorderColorTokens`가 토큰 패키지에서 목록을 내보내고,
+`packages/ui-tokens/src/contrast.test.ts`가 각 항목의 실측 미달을 증명하며,
+`apps/mobile/src/components/tokenTextColors.test.ts`가 앱 소스의 `color:`
+스타일 키를 스캔해 위반을 파일·줄 번호로 red 처리한다.
+
+### 동적 글자 크기 (확정 2026-08-12, T014 / 감사 MUI-14)
+
+`allowFontScaling={false}`는 **쓰지 않는다**. 본문 카피는 시스템 설정만큼
+커진다. 컨테이너가 글자를 따라 자라지 못하는 **고정 높이 컨트롤**(44/48/52pt
+버튼, pill 배지, 자간 고정 OTP 필드)의 라벨만 `maxControlFontScale`(1.4)로
+제한한다 — iOS 표준 최대 설정은 그 안에 들어가고, 그 위 접근성 크기에서
+잘리는 대신 상한에 멈춘다. 긴 카피의 흐름은 실기기 QA 대상이다.

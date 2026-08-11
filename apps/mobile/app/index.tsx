@@ -1,4 +1,4 @@
-import { colors, fonts, fontSizes, spacing } from '@friendword/ui-tokens';
+import { colors, fonts, fontSizes, spacing, strokes } from '@friendword/ui-tokens';
 import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -53,15 +53,19 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
+  // MUI-7: `justifyContent: 'space-between'` with `flexGrow: 1` made the gap
+  // between the hero and "My page" a function of the phone's height — flush on
+  // a small screen, half a screen apart on a large one, and different again
+  // once Dynamic Type grew the hero. The screen now reads top-down with one
+  // spacing rule, and short content simply leaves the bottom empty.
   container: {
     flexGrow: 1,
-    justifyContent: 'space-between',
     gap: spacing.lg,
     padding: spacing.lg,
     paddingBottom: spacing.xl,
   },
   eyebrow: {
-    color: colors.pop,
+    color: colors.keyword,
     fontFamily: 'BricolageGrotesqueBold',
     fontSize: fontSizes.xs,
     letterSpacing: 1,
@@ -75,8 +79,10 @@ const styles = StyleSheet.create({
   subtitle: { color: colors.textSecondary, fontFamily: fonts.body, fontSize: fontSizes.lg },
   intro: {
     gap: spacing.sm,
-    borderTopColor: colors.textFaint,
-    borderTopWidth: 1,
+    // MUI-6: textFaint is 2.72:1 and fails WCAG 1.4.11 as a boundary;
+    // borderMuted is the hairline that passes on cream and on white.
+    borderTopColor: colors.borderMuted,
+    borderTopWidth: strokes.trust,
     paddingTop: spacing.md,
   },
   introTitle: {

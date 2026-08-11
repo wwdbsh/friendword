@@ -36,11 +36,11 @@ vi.mock('@friendword/ui-tokens', () => ({
   colors: {
     background: '',
     danger: '',
-    fresh: '',
     ink: '',
-    pop: '',
+    keyword: '',
     surface: '',
     textSecondary: '',
+    verified: '',
   },
   fonts: { body: '', display: '' },
   fontSizes: { xs: 1, sm: 1, md: 1, lg: 1, xl: 1 },
@@ -69,6 +69,26 @@ vi.mock('react-native-safe-area-context', async () => {
 vi.mock('../../components', async () => {
   const { createElement } = await import('react');
   return {
+    LoadFailureCard: ({
+      title,
+      message,
+      onRetry,
+    }: {
+      readonly title: string;
+      readonly message: string;
+      readonly onRetry: () => void;
+    }) =>
+      createElement(
+        'article',
+        null,
+        createElement('span', null, title),
+        createElement('span', null, message),
+        createElement('button', { onClick: onRetry }, 'Try again'),
+      ),
+    PendingCard: ({ label }: { readonly label: string }) =>
+      createElement('output', { 'data-pending': label }, label),
+    ScreenHeading: ({ title }: { readonly title: string }) => createElement('header', null, title),
+    StatusBadge: ({ label }: { readonly label: string }) => createElement('mark', null, label),
     QuietNavAction: ({ label }: { readonly label: string; readonly onPress: () => void }) =>
       createElement('button', null, label),
     TrustCard: ({ children }: { readonly children?: ReactNode }) =>
@@ -205,5 +225,37 @@ describe('My interests mobile states', () => {
 
     expect(getInterestTitle(headlineOnly)).toBe('A thoughtful person worth meeting');
     expect(getInterestStatusLabel(ACCEPTED_INTEREST)).toBe('Campaign expired');
+  });
+});
+
+// MUI-13 (T014). This card's entire recovery path was the sentence "Check your
+// connection and reopen this screen." — an instruction to navigate by hand, on
+// a screen whose read is one already-bound callback away.
+describe('an interests read that failed', () => {
+  it('offers the read again instead of telling someone to reopen the screen', () => {
+    const onRetry = vi.fn();
+    const markup = renderToStaticMarkup(
+      <InterestsContent state="error" interests={[]} onRetry={onRetry} />,
+    );
+
+    expect(markup).toContain('Interests could not be loaded');
+    expect(markup).toContain('Try again');
+    expect(markup).not.toContain('reopen this screen');
+  });
+
+  it('says what was not changed, so a failed read is not read as a lost interest', () => {
+    const markup = renderToStaticMarkup(
+      <InterestsContent state="error" interests={[]} onRetry={vi.fn()} />,
+    );
+
+    expect(markup).toContain('None of your interests were changed');
+  });
+
+  // MUI-8: the loading state was a bare line of text, so the list jumped when
+  // it resolved.
+  it('reserves a card-shaped block while the read is in flight', () => {
+    const markup = renderToStaticMarkup(<InterestsContent state="loading" interests={[]} />);
+
+    expect(markup).toContain('data-pending="Loading your interests…"');
   });
 });

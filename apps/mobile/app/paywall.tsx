@@ -385,7 +385,9 @@ const styles = StyleSheet.create({
   },
   heading: { gap: spacing.sm },
   eyebrow: {
-    color: colors.pop,
+    // MUI-6: `pop` is a fill token (2.89:1 on cream). `keyword` is the same
+    // tangerine, dark enough to be read.
+    color: colors.keyword,
     fontFamily: 'BricolageGrotesqueBold',
     fontSize: fontSizes.xs,
     letterSpacing: 1,
@@ -408,7 +410,9 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: fontSizes.sm,
   },
-  price: { color: colors.pop, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.xl },
+  // The price is the single most consequential number on this screen; it does
+  // not get to be the least readable text on it.
+  price: { color: colors.keyword, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.xl },
   finePrint: {
     color: colors.textSecondary,
     fontFamily: fonts.body,

@@ -15,8 +15,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   HypeButton,
+  LoadFailureCard,
+  PendingCard,
   QuietNavAction,
+  ScreenHeading,
   SignInPromptCard,
+  StatusBadge,
   StickerCard,
   TrustCard,
 } from '../../src/components';
@@ -382,14 +386,11 @@ export default function CampaignsScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.heading}>
-          <Text style={styles.eyebrow}>CAMPAIGN HOME</Text>
-          <Text style={styles.title}>My campaigns</Text>
-          <Text style={styles.subtitle}>
-            Manage campaigns where you are the dater, then revisit pitches you are making for
-            friends.
-          </Text>
-        </View>
+        <ScreenHeading
+          eyebrow="CAMPAIGN HOME"
+          title="My campaigns"
+          subtitle="Manage campaigns where you are the dater, then revisit pitches you are making for friends."
+        />
 
         <View style={styles.sectionHeading}>
           <Text style={styles.sectionTitle}>Campaigns about me</Text>
@@ -398,9 +399,12 @@ export default function CampaignsScreen() {
           </Text>
         </View>
 
-        {ownedCampaignState === 'loading' ? (
-          <Text style={styles.message}>Loading your campaigns…</Text>
-        ) : null}
+        {/* MUI-8: each of this screen's three sections used to wait behind a
+            single line of text, so every section that resolved re-laid out
+            everything under it — three jumps, in RPC-answer order. A
+            placeholder card of roughly the right height turns each of those
+            into a repaint. */}
+        {ownedCampaignState === 'loading' ? <PendingCard label="Loading your campaigns…" /> : null}
 
         {ownedCampaignState === 'signed_out' ? (
           <SignInPromptCard
@@ -411,10 +415,13 @@ export default function CampaignsScreen() {
         ) : null}
 
         {ownedCampaignState === 'error' ? (
-          <TrustCard tone="danger">
-            <Text style={styles.emptyTitle}>Campaigns could not be loaded</Text>
-            <Text style={styles.message}>Check your connection and reopen this screen.</Text>
-          </TrustCard>
+          <LoadFailureCard
+            title="Campaigns could not be loaded"
+            message="Nothing about your campaigns was changed. Check your connection and read them again."
+            onRetry={() => {
+              load();
+            }}
+          />
         ) : null}
 
         {ownedCampaignState === 'ready' && ownedCampaigns.length === 0 ? (
@@ -430,9 +437,7 @@ export default function CampaignsScreen() {
           <TrustCard key={campaign.id}>
             <View style={styles.draftHeader}>
               <Text style={styles.friendName}>{getCampaignName(campaign)}</Text>
-              <View style={styles.quietStatusBadge}>
-                <Text style={styles.quietStatus}>{formatCampaignStatus(campaign.status)}</Text>
-              </View>
+              <StatusBadge label={formatCampaignStatus(campaign.status)} tone="trust" />
             </View>
             <Text style={styles.meta}>/{campaign.slug ?? 'campaign'}</Text>
             <Text style={styles.waiting}>
@@ -496,9 +501,7 @@ export default function CampaignsScreen() {
           </Text>
         </View>
 
-        {introducedState === 'loading' ? (
-          <Text style={styles.message}>Loading your live pitches…</Text>
-        ) : null}
+        {introducedState === 'loading' ? <PendingCard label="Loading your live pitches…" /> : null}
 
         {introducerSignedOut ? (
           <SignInPromptCard
@@ -509,10 +512,13 @@ export default function CampaignsScreen() {
         ) : null}
 
         {introducedState === 'error' && !introducerSignedOut ? (
-          <StickerCard>
-            <Text style={styles.emptyTitle}>Live pitches could not be loaded</Text>
-            <Text style={styles.message}>Check your connection and reopen this screen.</Text>
-          </StickerCard>
+          <LoadFailureCard
+            title="Live pitches could not be loaded"
+            message="Your live pitches are still live; this device just could not read them. Try again."
+            onRetry={() => {
+              load();
+            }}
+          />
         ) : null}
 
         {introducedState === 'ready' && introduced.length === 0 ? (
@@ -532,11 +538,7 @@ export default function CampaignsScreen() {
                 <Text style={styles.friendName}>
                   {getIntroducerLiveHeadline(campaign.daterDisplayName)}
                 </Text>
-                <View style={styles.statusBadge}>
-                  <Text style={styles.status}>
-                    {formatIntroducedCampaignStatus(campaign.status)}
-                  </Text>
-                </View>
+                <StatusBadge label={formatIntroducedCampaignStatus(campaign.status)} />
               </View>
               {canShare && shareUrl !== null ? (
                 <>
@@ -544,9 +546,10 @@ export default function CampaignsScreen() {
                     Your free public pitch link is live. Share it anywhere to bring people in.
                   </Text>
                   <View style={styles.linkBox}>
-                    <Text numberOfLines={2} style={styles.link}>
-                      {shareUrl}
-                    </Text>
+                    {/* MUI-14: the URL used to be clipped at two lines, so a
+                        person reading at an accessibility size saw a cut link
+                        and no way to see the rest. The box grows instead. */}
+                    <Text style={styles.link}>{shareUrl}</Text>
                   </View>
                   <HypeButton
                     label="Share the pitch"
@@ -566,6 +569,22 @@ export default function CampaignsScreen() {
                     onPress={() => {
                       void openIntroducedPitch(shareUrl);
                     }}
+                  />
+                  {/* MUI-3: the share screen's free-public-share card is built
+                      from a `slug` navigation param — and until now nothing in
+                      the app passed one, so that card could never be reached.
+                      This card is the only place the app holds a slug: it comes
+                      from `list_my_introduced_campaigns`, which masks it for
+                      any campaign that is not public, so passing it on leaks
+                      nothing the server did not already release. */}
+                  <QuietNavAction
+                    label="Open the launch kit"
+                    onPress={() =>
+                      router.push({
+                        pathname: '/pitch/share',
+                        params: { slug: campaign.slug ?? '' },
+                      })
+                    }
                   />
                   {introducerShareError ? (
                     <Text style={styles.error}>{introducerShareError}</Text>
@@ -591,7 +610,7 @@ export default function CampaignsScreen() {
           <Text style={styles.message}>Drafts and approval requests you started for friends.</Text>
         </View>
 
-        {loading ? <Text style={styles.message}>Loading your mixes…</Text> : null}
+        {loading ? <PendingCard label="Loading your mixes…" /> : null}
         {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
 
         {/* The draft read falls back to this device's copies rather than failing,
@@ -636,9 +655,7 @@ export default function CampaignsScreen() {
           <StickerCard key={draft.id}>
             <View style={styles.draftHeader}>
               <Text style={styles.friendName}>{getIntroducerDraftName(draft)}</Text>
-              <View style={styles.statusBadge}>
-                <Text style={styles.status}>{formatStatus(draft.status)}</Text>
-              </View>
+              <StatusBadge label={formatStatus(draft.status)} />
             </View>
             <Text style={styles.message}>
               {draft.relationship
@@ -895,25 +912,11 @@ function assertNever(value: never): never {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   content: { gap: spacing.lg, padding: spacing.lg, paddingBottom: spacing.xxl },
-  heading: { gap: spacing.sm },
   sectionHeading: { gap: spacing.xs, marginTop: spacing.sm },
   sectionTitle: {
     color: colors.ink,
     fontFamily: 'BricolageGrotesqueBold',
     fontSize: fontSizes.lg,
-  },
-  eyebrow: {
-    color: colors.pop,
-    fontFamily: 'BricolageGrotesqueBold',
-    fontSize: fontSizes.xs,
-    letterSpacing: 1,
-  },
-  title: { color: colors.ink, fontFamily: fonts.display, fontSize: fontSizes.xl, lineHeight: 32 },
-  subtitle: {
-    color: colors.textSecondary,
-    fontFamily: fonts.body,
-    fontSize: fontSizes.md,
-    lineHeight: 24,
   },
   emptyTitle: { color: colors.ink, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.lg },
   message: {
@@ -935,25 +938,13 @@ const styles = StyleSheet.create({
     fontFamily: 'BricolageGrotesqueBold',
     fontSize: fontSizes.lg,
   },
-  statusBadge: {
-    backgroundColor: colors.hype,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
+  // MUI-6: `fresh` reads at 2.35:1 on cream. `verified` is the same teal
+  // signal at 4.93:1, which is what a line of metadata needs to be read.
+  meta: {
+    color: colors.verified,
+    fontFamily: 'BricolageGrotesqueSemiBold',
+    fontSize: fontSizes.sm,
   },
-  status: { color: colors.onHype, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.xs },
-  quietStatusBadge: {
-    borderColor: colors.textSecondary,
-    borderWidth: 1,
-    backgroundColor: colors.surface,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  quietStatus: {
-    color: colors.ink,
-    fontFamily: 'BricolageGrotesqueBold',
-    fontSize: fontSizes.xs,
-  },
-  meta: { color: colors.fresh, fontFamily: 'BricolageGrotesqueSemiBold', fontSize: fontSizes.sm },
   waiting: {
     color: colors.ink,
     fontFamily: 'BricolageGrotesqueSemiBold',
@@ -970,19 +961,20 @@ const styles = StyleSheet.create({
   link: { color: colors.ink, fontFamily: 'BricolageGrotesqueSemiBold', fontSize: fontSizes.sm },
   changeNote: {
     gap: spacing.xs,
-    borderLeftColor: colors.fresh,
+    // borderSuccess is the teal that clears 3:1 as a boundary; fresh does not.
+    borderLeftColor: colors.borderSuccess,
     borderLeftWidth: spacing.xs,
     paddingLeft: spacing.md,
   },
   changeNoteTitle: {
-    color: colors.fresh,
+    color: colors.verified,
     fontFamily: 'BricolageGrotesqueBold',
     fontSize: fontSizes.sm,
   },
   recoveredNotice: {
     gap: spacing.xs,
-    borderLeftColor: colors.textSecondary,
-    borderLeftWidth: 1,
+    borderLeftColor: colors.borderMuted,
+    borderLeftWidth: strokes.trust,
     paddingLeft: spacing.md,
   },
   recoveredTitle: {

@@ -40,6 +40,7 @@ vi.mock('@friendword/ui-tokens', () => ({
   },
   fonts: { body: 'body' },
   fontSizes: { sm: 12, md: 16, lg: 20 },
+  maxControlFontScale: 1.4,
   radii: { md: 20 },
   spacing: { xs: 4, sm: 8, md: 16, lg: 24 },
   strokes: { sticker: 2, trust: 1 },

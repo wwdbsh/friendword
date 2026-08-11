@@ -206,7 +206,9 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.md,
   },
   captionHint: {
-    color: colors.textFaint,
+    // MUI-6: textFaint is the placeholder/disabled fill (2.72:1). A hint people
+    // are meant to read is textSecondary.
+    color: colors.textSecondary,
     fontFamily: 'BricolageGrotesque',
     fontSize: fontSizes.sm,
   },

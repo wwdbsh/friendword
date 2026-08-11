@@ -6,7 +6,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { Linking, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { HypeButton, QuietNavAction, TrustCard } from '../../src/components';
+import {
+  HypeButton,
+  LoadFailureCard,
+  QuietNavAction,
+  ScreenHeading,
+  TrustCard,
+} from '../../src/components';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
 import { buildIntroducerShareUrl } from '../../src/services/introducedCampaigns';
 import {
@@ -190,6 +196,17 @@ export default function SharePitchScreen() {
   const kitUrl = serverDraftId === null ? null : `${getWebOrigin()}/kit/${serverDraftId}`;
   const creatorKitSurface = getCreatorKitSurface(creatorBenefitState);
   const publicShareUrl = getPublishedFreeShareUrl(slug);
+  /**
+   * MUI-3. The free-share card was gated on `isPublished`, which is read off a
+   * DRAFT — and the campaigns screen holds the slug on a different card, the
+   * one built from `list_my_introduced_campaigns`, which carries no draft id.
+   * There is no client-side join between the two (no migration may add one
+   * here), so the two conditions could never both be true and the card was
+   * unreachable. The slug is the server's own release token — masked NULL for
+   * any campaign that is not public — so its presence is proof enough that this
+   * pitch is live, with or without a draft in hand.
+   */
+  const isLaunchKit = isPublished || publicShareUrl !== null;
 
   useFocusEffect(
     useCallback(() => {
@@ -311,7 +328,7 @@ export default function SharePitchScreen() {
     <SafeAreaView style={styles.safeArea}>
       <Stack.Screen
         options={{
-          title: isPublished
+          title: isLaunchKit
             ? 'Social launch kit'
             : isResent
               ? 'Revision ready'
@@ -319,43 +336,43 @@ export default function SharePitchScreen() {
         }}
       />
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.heading}>
-          <Text style={styles.eyebrow}>
-            {isPublished
+        <ScreenHeading
+          eyebrow={
+            isLaunchKit
               ? 'SOCIAL LAUNCH KIT'
               : isResent
                 ? 'LATEST REVISION READY'
-                : 'TRACK 6 · RELEASE DAY'}
-          </Text>
-          <Text style={styles.title}>
-            {isPublished
+                : 'TRACK 6 · RELEASE DAY'
+          }
+          title={
+            isLaunchKit
               ? 'Your approved pitch is live'
               : isResent
                 ? 'The existing link is up to date'
-                : 'Your mix is ready to send!'}
-          </Text>
-          <Text style={styles.subtitle}>
-            {isPublished
+                : 'Your mix is ready to send!'
+          }
+          subtitle={
+            isLaunchKit
               ? publicShareUrl !== null
-                ? `Share ${friendName}’s live pitch for free — anywhere you like. The Creator Kit below is an optional extra, never a lock on sharing.`
+                ? `Sharing this pitch is free and always will be.${isPublished ? ' The Creator Kit below is an optional extra, never a lock on sharing.' : ''}`
                 : 'Sharing the live pitch is always free from your campaigns list. The Creator Kit here is an optional 9:16 share card and caption pack.'
               : isResent
                 ? `${friendName} can review the latest revision at the same private link.`
-                : `One last move: send ${friendName} the private approval invite. Nothing goes public until they say yes.`}
-          </Text>
-        </View>
+                : `One last move: send ${friendName} the private approval invite. Nothing goes public until they say yes.`
+          }
+        />
 
-        {isPublished && publicShareUrl !== null ? (
+        {publicShareUrl !== null ? (
           <TrustCard>
-            <Text style={styles.cardTitle}>{friendName}’s pitch is live — share it free</Text>
+            <Text style={styles.cardTitle}>The free public pitch link</Text>
             <Text style={styles.subtitle}>
               This is your public pitch link. Share it anywhere to bring people in — no purchase
               needed.
             </Text>
             <View style={styles.linkBox}>
-              <Text numberOfLines={2} style={styles.link}>
-                {publicShareUrl}
-              </Text>
+              {/* MUI-14: the link is shown whole. Clipped at two lines, an
+                  accessibility text size cut the URL with nothing to expand. */}
+              <Text style={styles.link}>{publicShareUrl}</Text>
             </View>
             <HypeButton
               label="Share the pitch"
@@ -383,7 +400,7 @@ export default function SharePitchScreen() {
 
         {loading ? <Text style={styles.subtitle}>Loading your invite…</Text> : null}
 
-        {!loading && !isResent && !isPublished && consentUrl === null ? (
+        {!loading && !isResent && !isLaunchKit && consentUrl === null ? (
           <TrustCard tone="danger">
             <Text style={styles.cardTitle}>Invite not found</Text>
             <Text style={styles.subtitle}>
@@ -395,9 +412,10 @@ export default function SharePitchScreen() {
         {isResent && !isPublished && draft !== null ? (
           <TrustCard>
             <Text style={styles.cardTitle}>Existing link updated</Text>
+            {/* MUI-9: three hand-placed breaks that lined up on one width and
+                broke mid-sentence on every other. The sentence wraps itself. */}
             <Text style={styles.subtitle}>
-              The existing link now opens the{`\n`}latest revision.{`\n`}No new link or re-share
-              needed.
+              The existing link now opens the latest revision. No new link or re-share needed.
             </Text>
             <Text style={styles.finePrint}>
               {friendName}’s existing private approval link now opens the latest revision. No new
@@ -414,9 +432,7 @@ export default function SharePitchScreen() {
                 Invite details sent to Friendword · contact removed from this device.
               </Text>
               <View style={styles.linkBox}>
-                <Text numberOfLines={2} style={styles.link}>
-                  {consentUrl}
-                </Text>
+                <Text style={styles.link}>{consentUrl}</Text>
               </View>
               <Text style={styles.finePrint}>
                 Only {friendName} should get this link — it’s how they claim, review, and approve
@@ -486,9 +502,7 @@ export default function SharePitchScreen() {
               pack you already unlocked.
             </Text>
             <View style={styles.linkBox}>
-              <Text numberOfLines={2} style={styles.link}>
-                {kitUrl}
-              </Text>
+              <Text style={styles.link}>{kitUrl}</Text>
             </View>
             <HypeButton
               label="Open Creator Kit"
@@ -502,16 +516,11 @@ export default function SharePitchScreen() {
         ) : null}
 
         {isPublished && creatorKitSurface === 'error' ? (
-          <TrustCard tone="danger">
-            <Text style={styles.cardTitle}>Creator Launch access could not be checked</Text>
-            <Text style={styles.subtitle}>
-              No purchase was started. Check your connection and try again.
-            </Text>
-            <QuietNavAction
-              label="Try again"
-              onPress={() => setCreditRefresh((current) => current + 1)}
-            />
-          </TrustCard>
+          <LoadFailureCard
+            title="Creator Launch access could not be checked"
+            message="No purchase was started and nothing was charged. Check your connection and try again."
+            onRetry={() => setCreditRefresh((current) => current + 1)}
+          />
         ) : null}
 
         <QuietNavAction label="Back to my campaigns" onPress={() => router.replace('/campaigns')} />
@@ -527,14 +536,6 @@ function assertNever(value: never): never {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   content: { gap: spacing.lg, padding: spacing.lg, paddingBottom: spacing.xxl },
-  heading: { gap: spacing.sm },
-  eyebrow: {
-    color: colors.pop,
-    fontFamily: 'BricolageGrotesqueBold',
-    fontSize: fontSizes.xs,
-    letterSpacing: 1,
-  },
-  title: { color: colors.ink, fontFamily: fonts.display, fontSize: fontSizes.xl, lineHeight: 32 },
   subtitle: {
     color: colors.textSecondary,
     fontFamily: fonts.body,

@@ -12,6 +12,7 @@ import {
 } from '../../src/features/pitch/AiConsentDisclosure';
 import { ClipIngestNotice } from '../../src/features/pitch/ClipIngestNotice';
 import { PitchReviewEditor } from '../../src/features/pitch/PitchReviewEditor';
+import { PitchReviewLoadState } from '../../src/features/pitch/PitchReviewLoadState';
 import { useClipIngestStatus } from '../../src/features/pitch/useClipIngestStatus';
 import {
   getAiDraftFailureMessage,
@@ -282,14 +283,28 @@ export default function PitchReviewScreen() {
   }
 
   if (draft === null || review === null || review.generationMode === 'pending') {
+    // A read is still in flight while `preparing` or `loading`; anything else
+    // that lands here is a failure, and PitchReviewLoadState is what turns that
+    // distinction into a card with a way out (MUI-5).
+    const pending = preparing || loading;
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <>
         <Stack.Screen options={{ title: 'Review your draft' }} />
-        <Text style={styles.message}>
-          {preparing ? 'Preparing your draft…' : (errorMessage ?? 'Loading your draft…')}
-        </Text>
-        {!loading && errorMessage ? <HypeButton label="Try again" onPress={loadReview} /> : null}
-      </SafeAreaView>
+        <PitchReviewLoadState
+          message={
+            preparing
+              ? 'Preparing your draft…'
+              : loading
+                ? 'Loading your draft…'
+                : (errorMessage ?? 'This draft could not be found.')
+          }
+          pending={pending}
+          onRetry={() => {
+            void loadReview();
+          }}
+          onBackToCampaigns={() => router.replace('/campaigns')}
+        />
+      </>
     );
   }
 
@@ -365,7 +380,6 @@ export default function PitchReviewScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background, padding: spacing.lg },
   disclosureContent: { flexGrow: 1, justifyContent: 'center' },
-  message: { color: colors.textSecondary, fontFamily: fonts.body, fontSize: fontSizes.md },
   blockedTitle: { color: colors.ink, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.lg },
   blockedNotice: {
     color: colors.textSecondary,

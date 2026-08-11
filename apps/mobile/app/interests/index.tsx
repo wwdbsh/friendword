@@ -5,7 +5,15 @@ import { useCallback, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { QuietNavAction, SignInPromptCard, TrustCard } from '../../src/components';
+import {
+  LoadFailureCard,
+  PendingCard,
+  QuietNavAction,
+  ScreenHeading,
+  SignInPromptCard,
+  StatusBadge,
+  TrustCard,
+} from '../../src/components';
 import { SignInSheet } from '../../src/features/auth/SignInSheet';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 import { buildRoomsUrl } from '../../src/services/webOrigin';
@@ -16,6 +24,8 @@ type InterestsContentProps = {
   readonly state: InterestsLoadState;
   readonly interests: readonly MyInterest[];
   readonly onSignIn?: () => void;
+  /** Re-runs the read that failed. Required by the error state (MUI-13). */
+  readonly onRetry?: () => void;
   /** Injected in tests; defaults to opening the web intro rooms. */
   readonly onOpenRooms?: () => void;
 };
@@ -75,6 +85,7 @@ export function InterestsContent({
   state,
   interests,
   onSignIn,
+  onRetry,
   onOpenRooms,
 }: InterestsContentProps) {
   // Keyed by interest so one failed open does not caption every accepted card.
@@ -92,7 +103,7 @@ export function InterestsContent({
   };
 
   if (state === 'loading') {
-    return <Text style={styles.message}>Loading your interests…</Text>;
+    return <PendingCard label="Loading your interests…" />;
   }
   if (state === 'signed_out') {
     return (
@@ -104,11 +115,15 @@ export function InterestsContent({
     );
   }
   if (state === 'error') {
+    // MUI-13: this card used to end at "reopen this screen" — an instruction to
+    // do by hand what the screen can do in one line, and one that means nothing
+    // on a screen you arrived at from the home list.
     return (
-      <TrustCard tone="danger">
-        <Text style={styles.cardTitle}>Interests could not be loaded</Text>
-        <Text style={styles.message}>Check your connection and reopen this screen.</Text>
-      </TrustCard>
+      <LoadFailureCard
+        title="Interests could not be loaded"
+        message="None of your interests were changed. Check your connection and read them again."
+        onRetry={onRetry ?? (() => {})}
+      />
     );
   }
   if (interests.length === 0) {
@@ -126,9 +141,7 @@ export function InterestsContent({
     <TrustCard key={interest.interestId}>
       <View style={styles.cardHeader}>
         <Text style={styles.cardTitle}>{getInterestTitle(interest)}</Text>
-        <View style={styles.statusBadge}>
-          <Text style={styles.statusText}>{getInterestStatusLabel(interest)}</Text>
-        </View>
+        <StatusBadge label={getInterestStatusLabel(interest)} tone="trust" />
       </View>
       {interest.daterDisplayName !== null && interest.campaignHeadline !== null ? (
         <Text style={styles.headline}>{interest.campaignHeadline}</Text>
@@ -203,16 +216,15 @@ export default function InterestsScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.heading}>
-          <Text style={styles.eyebrow}>MY CONTEXT</Text>
-          <Text style={styles.title}>My interests</Text>
-          <Text style={styles.subtitle}>
-            Follow the campaigns you reached out to and see each decision clearly.
-          </Text>
-        </View>
+        <ScreenHeading
+          eyebrow="MY CONTEXT"
+          title="My interests"
+          subtitle="Follow the campaigns you reached out to and see each decision clearly."
+        />
         <InterestsContent
           state={state}
           interests={interests}
+          onRetry={load}
           onSignIn={() => setSignInVisible(true)}
         />
       </ScrollView>
@@ -269,20 +281,6 @@ function assertNever(value: never): never {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   content: { gap: spacing.lg, padding: spacing.lg, paddingBottom: spacing.xxl },
-  heading: { gap: spacing.sm },
-  eyebrow: {
-    color: colors.pop,
-    fontFamily: 'BricolageGrotesqueBold',
-    fontSize: fontSizes.xs,
-    letterSpacing: 1,
-  },
-  title: { color: colors.ink, fontFamily: fonts.display, fontSize: fontSizes.xl, lineHeight: 32 },
-  subtitle: {
-    color: colors.textSecondary,
-    fontFamily: fonts.body,
-    fontSize: fontSizes.md,
-    lineHeight: 24,
-  },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -295,25 +293,19 @@ const styles = StyleSheet.create({
     fontFamily: 'BricolageGrotesqueBold',
     fontSize: fontSizes.lg,
   },
-  statusBadge: {
-    borderColor: colors.textSecondary,
-    borderWidth: 1,
-    backgroundColor: colors.surface,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  statusText: {
-    color: colors.ink,
-    fontFamily: 'BricolageGrotesqueBold',
-    fontSize: fontSizes.xs,
-  },
   headline: {
     color: colors.ink,
     fontFamily: fonts.body,
     fontSize: fontSizes.md,
     lineHeight: 24,
   },
-  meta: { color: colors.fresh, fontFamily: 'BricolageGrotesqueSemiBold', fontSize: fontSizes.sm },
+  // MUI-6: `fresh` is 2.35:1 on cream; `verified` carries the same signal at
+  // 4.93:1, which a date line has to reach to be read.
+  meta: {
+    color: colors.verified,
+    fontFamily: 'BricolageGrotesqueSemiBold',
+    fontSize: fontSizes.sm,
+  },
   message: {
     color: colors.textSecondary,
     fontFamily: fonts.body,

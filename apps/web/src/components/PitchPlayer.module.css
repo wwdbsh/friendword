@@ -125,9 +125,18 @@
   align-items: center;
 }
 
+/* T013 (T005 carry-over): this note REPLACES the transport — it is only
+   rendered when there is no real audio — so it used to sit at the transport's
+   height, 6.75rem up, with nothing underneath it. At 390px that put its three
+   wrapped lines from y=522 to y=583 straight through the caption card, which
+   ends at y=581: on the demo page the written pitch and this sentence were
+   printed on top of each other. It now sits on the stage floor, below the band
+   the caption clearance already reserves. The caption's own geometry — shared
+   with the MP4 stage — is untouched, and an MP4 is only ever made from a pitch
+   that HAS audio, so nothing that burns into a file is affected. */
 .noAudioNote {
   right: var(--space-lg);
-  bottom: 6.75rem;
+  bottom: var(--space-lg);
   left: var(--space-lg);
   margin: 0;
   color: var(--color-stage-text-secondary);

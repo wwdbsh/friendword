@@ -5,10 +5,12 @@ import { notFound } from 'next/navigation';
 
 import { getPublishedPitchBySlug } from '@friendword/data';
 
+import { CampaignEnded } from '@/components/CampaignEnded';
 import { PitchPlayer } from '@/components/PitchPlayer';
 import { ReferralTracker } from '@/components/ReferralTracker';
 import { ReportCampaignLink } from '@/components/ReportCampaignLink';
 import { getPitchFixture } from '@/fixtures/pitch';
+import { loadPitchAbsence } from '@/lib/publicPitchAbsence';
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
 import { daterControlLine, structureProvenanceLine, transcriptProvenanceLine } from '@/pitch/copy';
 import { fromFixture, fromPublishedPitch, toPitchPlayerView, type PitchView } from '@/pitch/view';
@@ -66,7 +68,15 @@ export async function generateMetadata({ params }: PitchPageProps): Promise<Meta
   const pitch = await loadPitch(campaignSlug);
 
   if (pitch === null) {
-    return { robots: { index: false, follow: false } };
+    // The extra lookup only ever runs on a URL that already has no pitch, and
+    // it buys the ended screen a tab title that matches what it says (GAP-7).
+    const absence = await loadPitchAbsence(campaignSlug);
+    return absence === 'ended'
+      ? {
+          title: 'This campaign has ended — Friendword',
+          robots: { index: false, follow: false },
+        }
+      : { robots: { index: false, follow: false } };
   }
 
   const title = `${pitch.daterName} — introduced by a friend`;
@@ -118,6 +128,11 @@ export default async function PitchPage({ params }: PitchPageProps) {
   const pitch = await loadPitch(campaignSlug);
 
   if (pitch === null) {
+    // GAP-7: an ended campaign is a known, tellable outcome; everything else
+    // falls through to the segment's 404, which deliberately does not guess.
+    if ((await loadPitchAbsence(campaignSlug)) === 'ended') {
+      return <CampaignEnded />;
+    }
     notFound();
   }
 

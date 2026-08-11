@@ -4,9 +4,11 @@ import { notFound } from 'next/navigation';
 
 import { getPublishedPitchBySlug } from '@friendword/data';
 
+import { CampaignEnded } from '@/components/CampaignEnded';
 import { FlowNav } from '@/components/FlowNav';
 import { ReferralTracker } from '@/components/ReferralTracker';
 import { getPitchFixture } from '@/fixtures/pitch';
+import { loadPitchAbsence } from '@/lib/publicPitchAbsence';
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
 import flowStyles from '@/styles/flowCard.module.css';
 
@@ -55,6 +57,13 @@ export default async function InterestPage({ params }: InterestPageProps) {
     serviceClient === null ? null : await getPublishedPitchBySlug(serviceClient, campaignSlug);
 
   if (pitch === null) {
+    // GAP-7 (T013): the same two answers the pitch page gives, because this is
+    // where a stranger lands after tapping the CTA on a page they had already
+    // opened. Being told the window closed is the difference between "I did
+    // something wrong" and "I was too late".
+    if ((await loadPitchAbsence(campaignSlug)) === 'ended') {
+      return <CampaignEnded />;
+    }
     notFound();
   }
 

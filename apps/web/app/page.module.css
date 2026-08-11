@@ -177,12 +177,21 @@
   box-shadow: var(--shadow-card);
 }
 
+/* The corner glow (T013 / WUI-10). At 1440px the old 15rem blob sat under the
+   bottom-right of the card from x=1120, while the approval caption's text ran
+   to x=1141 and the quote's last line to x=1132 — hot pink at 42% behind
+   `--color-stage-text-secondary`, which is the palest text on the darkest
+   surface in the product. Colour is not the fix (the tokens are frozen and the
+   pair is fine on the plain stage): the blob is. It keeps its hue, its blur and
+   its corner, and is pulled clear of the text column so nothing readable is
+   printed over it — the visible wedge is now 8rem, inside the 9.7rem of card
+   the caption never reaches. */
 .voiceCard::before {
   position: absolute;
   right: -4rem;
-  bottom: -5rem;
-  width: 15rem;
-  height: 15rem;
+  bottom: -4rem;
+  width: 12rem;
+  height: 12rem;
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--color-flirt) 42%, transparent);
   content: '';

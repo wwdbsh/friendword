@@ -4,6 +4,15 @@
 .page {
   min-height: 100dvh;
   padding: var(--space-xl) var(--space-lg) var(--space-xxl);
+  /* T013 / WUI-12: a signed-out gate is one 514px card, and on a 1440x900
+     desktop it was pinned to the top with 278px of empty gradient under it —
+     the page looked cut off rather than composed. `margin-block: auto` on the
+     shell (below) centres it, and because this box grows with its content the
+     auto margins collapse to zero the moment there is more than a screenful,
+     so a long inbox still starts at the top and nothing is ever scrolled off
+     above the viewport. */
+  display: flex;
+  flex-direction: column;
   background:
     radial-gradient(
       circle at 12% 10%,
@@ -21,6 +30,8 @@
 .shell {
   width: min(100%, 38rem);
   margin-inline: auto;
+  /* See .page: centres a short screen, no-ops on a long one. */
+  margin-block: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
@@ -240,6 +251,15 @@
   letter-spacing: 0.08em;
 }
 
+/* A sentence-length label for a typed confirmation gate (T013 / account
+   deletion). NOT `.label`: that one is uppercased for two-word field names, and
+   an uppercased sentence both shouts and makes the visible text disagree with
+   the accessible name a screen reader announces. */
+.confirmLabel {
+  font-weight: 800;
+  line-height: var(--line-relaxed);
+}
+
 .input,
 .textarea {
   min-height: 44px;
@@ -359,9 +379,29 @@
   transform: rotate(1.2deg);
 }
 
+/* One set of pills, one width (T013 / WUI-12). Measured on /inbox at 1440px the
+   three controls in a single row came out 225px, 179px and 232px wide, and at
+   390px "Accept & open intro room" was 258px next to a 114px "Decline" — every
+   row a different ragged edge, because a flex row is as wide as each label
+   happens to be. `auto-fill` (not `auto-fit`) lays uniform tracks and leaves
+   them standing when a row has fewer items, so a lone link keeps a pill's width
+   instead of stretching across the card. At phone width the card fits exactly
+   one track and every action becomes full-bleed, which is where a thumb wants
+   them anyway. */
 .actionRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: var(--space-sm);
+  align-items: start;
+}
+
+/* A caption and its Copy button are NOT a set of actions — they are a line of
+   text with a control on the end, and the equal tracks above would halve the
+   caption. /kit's caption pack keeps the old flex row. */
+.captionRow {
   display: flex;
   gap: var(--space-sm);
+  align-items: center;
   flex-wrap: wrap;
 }
 
@@ -371,7 +411,9 @@
    where the two groups meet rather than on every row: /kit's caption pack is a
    run of .actionRow siblings that is meant to stay tight. */
 .actionRow + .title,
-.actionRow + .subTitle {
+.actionRow + .subTitle,
+.captionRow + .title,
+.captionRow + .subTitle {
   margin-top: var(--space-lg);
 }
 

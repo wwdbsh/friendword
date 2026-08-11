@@ -76,25 +76,38 @@ export function RoomsList() {
           </section>
         )}
 
+        {/* T013 / WUI-9: the empty state used to put the badge and the page
+            title INSIDE a card while the populated state put them outside it,
+            so the two screens for the same URL disagreed about where the page
+            header lives — the badge moved 42px and the heading changed both
+            level and indent between them. Both now carry the same bare header
+            section (the shape /inbox has used since T004) with the state's own
+            card beneath it. */}
         {client !== null && session !== null && rooms !== null && rooms.length === 0 && (
-          <section className={styles.card}>
-            <span className={styles.badge}>Intro rooms</span>
-            <h1 className={styles.title}>No rooms yet.</h1>
-            <p className={styles.muted}>
-              A private room opens the moment an interest is accepted — by you or about you.
-            </p>
-            {/* T004: an empty room list is where both sides of the funnel land.
-                The dater's next move is their interest inbox; a viewer's is a
-                public pitch, so both are linked rather than described. */}
-            <div className={styles.actionRow}>
-              <Link className={styles.secondary} href="/inbox">
-                My interest inbox
-              </Link>
-              <Link className={styles.secondary} href="/p/demo-blair">
-                See a demo pitch
-              </Link>
-            </div>
-          </section>
+          <>
+            <section>
+              <span className={styles.badge}>Intro rooms</span>
+              <h1 className={styles.title}>Your introductions.</h1>
+            </section>
+            <section className={styles.card}>
+              <h2 className={styles.subTitle}>No rooms yet.</h2>
+              <p className={styles.muted}>
+                A private room opens the moment an interest is accepted — by you or about you.
+              </p>
+              {/* T004: an empty room list is where both sides of the funnel
+                  land. The dater's next move is their interest inbox; a
+                  viewer's is a public pitch, so both are linked rather than
+                  described. */}
+              <div className={styles.actionRow}>
+                <Link className={styles.secondary} href="/inbox">
+                  My interest inbox
+                </Link>
+                <Link className={styles.secondary} href="/p/demo-blair">
+                  See a demo pitch
+                </Link>
+              </div>
+            </section>
+          </>
         )}
 
         {client !== null && session !== null && rooms !== null && rooms.length > 0 && (

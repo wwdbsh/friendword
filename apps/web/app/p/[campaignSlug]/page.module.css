@@ -3,6 +3,18 @@
   min-height: 100dvh;
   padding: var(--space-lg) var(--space-lg) var(--space-xxl);
   overflow: clip;
+  /* ONE reading column for the whole page (T013 / WUI-7). The 2026-08-11 audit
+     measured three different content widths stacked down this page at 1440px —
+     a 456px stage, a 704px story card floating inside a 928px band, and a 928px
+     trust note and footer — so nothing lined up with anything above it. The
+     card's 44rem measure wins: it is the width the prose was set for. */
+  --pitch-column: 44rem;
+  /* Half the widest the 9:16 stage can ever be here, written with the SAME
+     expression PitchPlayer sizes itself with. The decorative stickers key off
+     it (see .star/.smile/.squiggle) so they stay outside the phone frame at
+     every viewport instead of at the handful of widths someone happened to
+     screenshot. `100%` there is this box minus its inline padding. */
+  --stage-half: min(calc(45dvh * 9 / 16), calc(50vw - var(--space-lg)));
   background:
     radial-gradient(
       circle at 8% 14%,
@@ -35,16 +47,24 @@
   stroke-linejoin: round;
 }
 
+/* T013 / WUI-11: these were placed at viewport percentages, which put all three
+   of them ON the phone frame at ~768px (the star overlapped it by 44x118px, the
+   squiggle by 86x102px). Each is now pinned two rem outside the stage's own
+   edge — `--stage-half` is the stage's half-width, so the clearance holds at
+   every width AND every height rather than only where the percentages happened
+   to work out. Sizes, rotations and vertical positions are untouched. */
 .star {
   top: var(--space-xl);
-  left: 7%;
+  /* 7rem wide + 2rem of air. */
+  left: calc(50% - var(--stage-half) - 9rem);
   width: 7rem;
   transform: rotate(-3deg);
 }
 
 .smile {
   top: 42rem;
-  right: 7%;
+  /* 6rem wide + 2rem of air. */
+  right: calc(50% - var(--stage-half) - 8rem);
   width: 6rem;
   transform: rotate(2.5deg);
 }
@@ -59,7 +79,8 @@
 
 .squiggle {
   top: 20rem;
-  right: 4%;
+  /* 11rem wide + 2rem of air. */
+  right: calc(50% - var(--stage-half) - 13rem);
   width: 11rem;
   fill: none !important;
   stroke: var(--color-pop) !important;
@@ -73,7 +94,7 @@
 .footer {
   position: relative;
   z-index: 2;
-  width: min(100%, 58rem);
+  width: min(100%, var(--pitch-column));
   margin-inline: auto;
 }
 
@@ -82,7 +103,9 @@
 }
 
 .storyCard {
-  max-width: 44rem;
+  /* The column IS this card's measure now (WUI-7), so it fills it rather than
+     floating inside a wider band. */
+  max-width: var(--pitch-column);
   margin-inline: auto;
   padding: var(--space-xl);
   border: var(--stroke-sticker) solid var(--color-ink);
@@ -444,6 +467,19 @@
     padding: var(--space-lg);
   }
 
+  /* T013 / WUI-5. Measured at 390x844: the stage ends at y=693 and the fixed
+     interest bar starts at y=754, and the story card's top edge landed at
+     y=757 — three pixels UNDER the bar. The first screen therefore ended in a
+     61px strip of empty background with the next thing on the page hidden
+     behind the CTA, which reads as "that's all there is". The section's top
+     padding is the whole of that strip, so trimming it to `lg` lifts the card
+     to y=717 and leaves ~37px of it showing above the bar: the page now says
+     it continues. Nothing inside the stage moves — the crop itself is scene
+     work and stays out of scope (backlog B2). */
+  .storySection {
+    padding-top: var(--space-lg);
+  }
+
   .vouchSection {
     padding-top: var(--space-xxl);
   }
@@ -461,7 +497,12 @@
     font-size: var(--font-size-lg);
   }
 
+  /* T013 / WUI-8: side by side, the ✓ badge and its gap took 60 of the card's
+     302 usable pixels and squeezed the body into a 238x410 column — a pillar of
+     text three or four words wide. The badge gets its own line on a phone and
+     the sentence gets the whole card. */
   .trustNote {
+    flex-direction: column;
     gap: var(--space-md);
     padding: var(--space-lg);
   }

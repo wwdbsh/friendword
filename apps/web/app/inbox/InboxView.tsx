@@ -16,6 +16,11 @@ import {
 import { EmailSignIn } from '@/components/EmailSignIn';
 import { FlowNav } from '@/components/FlowNav';
 import { SignedOutNotice } from '@/components/SignedOutNotice';
+import {
+  ACCOUNT_DELETION_CONFIRMATION_WORD,
+  ACCOUNT_DELETION_FACTS,
+  accountDeletionConfirmationMatches,
+} from '@/lib/accountDeletion';
 import { campaignStatusLabel, displayCampaignStatus } from '@/lib/campaignStatus';
 import { kickNotificationSender } from '@/lib/notifications/kick';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
@@ -86,6 +91,10 @@ export function InboxView() {
   const [submittingReport, setSubmittingReport] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [accountDeleted, setAccountDeleted] = useState(false);
+  // T013 (T007 carry-over): the two-step confirmation the mobile screen uses.
+  // 'idle' shows the facts and the opener; 'confirming' shows the typed gate.
+  const [deletionStep, setDeletionStep] = useState<'idle' | 'confirming'>('idle');
+  const [deletionTyped, setDeletionTyped] = useState('');
 
   const loadInbox = useCallback(async () => {
     if (client === null) {
@@ -239,16 +248,16 @@ export function InboxView() {
     }
   }
 
+  /**
+   * T013 (T007 carry-over): the web used to gate this on ONE `window.confirm()`
+   * — a system dialog whose OK button people press without reading — for the
+   * same irreversible RPC the app makes you type a word to reach. The gate is
+   * now the app's: the facts are on the page, and the button does not arm until
+   * the confirmation word is typed exactly. The guard is re-checked here so the
+   * function is safe on its own, not only behind a disabled attribute.
+   */
   async function deleteAccount() {
-    if (client === null) {
-      return;
-    }
-    if (
-      !window.confirm(
-        'Delete your account for good? Your pages, interests, and chats are ' +
-          'removed and cannot be recovered.',
-      )
-    ) {
+    if (client === null || !accountDeletionConfirmationMatches(deletionTyped)) {
       return;
     }
     setDeletingAccount(true);
@@ -601,20 +610,72 @@ export function InboxView() {
           (state.step === 'ready' || state.step === 'error') && (
             <section className={styles.card} id="account">
               <h2 className={styles.subTitle}>Your account</h2>
-              <p className={styles.muted}>
-                Deleting your account removes your pages, interests, chats, and photos. This cannot
-                be undone.
-              </p>
-              <button
-                className={styles.danger}
-                type="button"
-                disabled={deletingAccount}
-                onClick={() => {
-                  void deleteAccount();
-                }}
-              >
-                {deletingAccount ? 'Deleting…' : 'Delete my account'}
-              </button>
+              {/* The same facts the app's account screen prints, for the same
+                  reason: this is the only screen where a person can find out
+                  what deletion actually takes, and the RPC behind both buttons
+                  is identical. */}
+              {ACCOUNT_DELETION_FACTS.map((fact) => (
+                <p className={styles.muted} key={fact}>
+                  {fact}
+                </p>
+              ))}
+              {deletionStep === 'idle' ? (
+                <div className={styles.actionRow}>
+                  <button
+                    className={styles.danger}
+                    type="button"
+                    onClick={() => {
+                      setDeletionTyped('');
+                      setDeletionStep('confirming');
+                    }}
+                  >
+                    Delete my account
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <label className={styles.confirmLabel} htmlFor="account-deletion-confirmation">
+                    Type {ACCOUNT_DELETION_CONFIRMATION_WORD} to confirm.
+                  </label>
+                  <input
+                    id="account-deletion-confirmation"
+                    className={styles.input}
+                    type="text"
+                    autoComplete="off"
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                    placeholder={ACCOUNT_DELETION_CONFIRMATION_WORD}
+                    value={deletionTyped}
+                    disabled={deletingAccount}
+                    onChange={(event) => setDeletionTyped(event.target.value)}
+                  />
+                  <div className={styles.actionRow}>
+                    <button
+                      className={styles.danger}
+                      type="button"
+                      disabled={
+                        deletingAccount || !accountDeletionConfirmationMatches(deletionTyped)
+                      }
+                      onClick={() => {
+                        void deleteAccount();
+                      }}
+                    >
+                      {deletingAccount ? 'Deleting…' : 'Permanently delete my account'}
+                    </button>
+                    <button
+                      className={styles.secondary}
+                      type="button"
+                      disabled={deletingAccount}
+                      onClick={() => {
+                        setDeletionTyped('');
+                        setDeletionStep('idle');
+                      }}
+                    >
+                      Keep my account
+                    </button>
+                  </div>
+                </>
+              )}
             </section>
           )}
       </div>

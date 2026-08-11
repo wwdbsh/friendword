@@ -61,6 +61,70 @@ export const ACCOUNT_DELETION_FACTS: readonly string[] = [
   'This cannot be undone.',
 ];
 
+/**
+ * What signing out does, and — the part people get wrong — what it does not.
+ *
+ * Sign-out is not a small deletion. It ends the session and nothing else:
+ *
+ * - "The pitches saved on this phone stay": deliberate. `eraseAllLocalDrafts`
+ *   belongs to account deletion; sign-out never calls it, because the same
+ *   person signing back in expects their unfinished pitch to still be there
+ *   (see the contract note on `PitchDraftService.eraseAllLocalDrafts`).
+ * - "the approval links … stop working on this device": `_layout` purges every
+ *   draft's raw consent bearer token on `SIGNED_OUT`
+ *   (`shouldPurgeConsentTokensOnAuthChange`). That token opens a dater's
+ *   private approval flow for whoever holds it, so it must not survive on a
+ *   signed-out phone. Saying "nothing is deleted" would therefore be false, and
+ *   a person who signs out mid-consent needs to know why the link went quiet.
+ * - Nothing is said about the server: sign-out touches this device only.
+ */
+export const SIGN_OUT_FACTS: readonly string[] = [
+  'Signing out ends your session on this phone. Your account, your campaigns, and your chats are untouched.',
+  'The pitches saved on this phone stay where they are, ready for when you sign back in.',
+  'The approval links you have already sent stop working on this device — sign back in to open them again.',
+];
+
+export const SIGN_OUT_UNCONFIGURED_MESSAGE =
+  'This build is not connected to Friendword, so there is no session to end.';
+/**
+ * §12: `signOut` clears the stored session before it talks to the server, so a
+ * failure leaves a state this screen has not verified. It says what failed and
+ * where to look, and claims nothing about which side of the line the session
+ * landed on.
+ */
+export const SIGN_OUT_FAILED_MESSAGE =
+  'Signing out did not finish. Open this screen again to see where your session stands.';
+
+export type AccountSignOutStep = 'idle' | 'signing_out';
+
+export type SignOutOutcome = 'signed_out' | 'unconfigured' | 'failed';
+
+/** All sign-out needs from the client — narrow on purpose, see {@link endSession}. */
+type SignOutClient = { readonly auth: { signOut(): Promise<{ readonly error: unknown }> } };
+
+/**
+ * Ending the session, and ONLY the session (T008, Issue #45).
+ *
+ * Split out of the screen because the local half of sign-out is defined by what
+ * it does NOT do, and "does not do" is only testable if there is something to
+ * call. It takes an auth client and nothing else: it cannot reach
+ * `pitchDraftService`, so it cannot erase a draft. That separation is the
+ * difference between this and account deletion, which erases every local draft
+ * and its media through `closeLocally`.
+ *
+ * The consent bearer tokens ARE cleared, but not from here: the root layout
+ * purges them off the `SIGNED_OUT` event for every sign-out in the app.
+ */
+export async function endSession(client: SignOutClient | null): Promise<SignOutOutcome> {
+  if (client === null) {
+    return 'unconfigured';
+  }
+  return client.auth
+    .signOut()
+    .then(({ error }): SignOutOutcome => (error === null ? 'signed_out' : 'failed'))
+    .catch((): SignOutOutcome => 'failed');
+}
+
 export type AccountDeletionStep = 'idle' | 'confirming' | 'deleting' | 'deleted';
 
 /**
@@ -84,10 +148,13 @@ export type LocalClosureOutcome = 'pending' | 'done' | 'partial';
 type AccountContentProps = {
   readonly session: AccountSessionState;
   readonly step: AccountDeletionStep;
+  readonly signOutStep: AccountSignOutStep;
+  readonly signOutError: string | null;
   readonly typed: string;
   readonly errorMessage: string | null;
   readonly localClosure: LocalClosureOutcome;
   readonly onSignIn: () => void;
+  readonly onSignOut: () => void;
   readonly onStartConfirmation: () => void;
   readonly onCancel: () => void;
   readonly onTyped: (value: string) => void;
@@ -98,10 +165,13 @@ type AccountContentProps = {
 export function AccountContent({
   session,
   step,
+  signOutStep,
+  signOutError,
   typed,
   errorMessage,
   localClosure,
   onSignIn,
+  onSignOut,
   onStartConfirmation,
   onCancel,
   onTyped,
@@ -145,46 +215,76 @@ export function AccountContent({
   }
 
   return (
-    <TrustCard tone="danger">
-      <Text style={styles.cardTitle}>Delete your account</Text>
-      {ACCOUNT_DELETION_FACTS.map((fact) => (
-        <Text key={fact} style={styles.message}>
-          {fact}
-        </Text>
-      ))}
-      {step === 'idle' ? (
-        <HypeButton label="Delete my account" onPress={onStartConfirmation} variant="trust" />
-      ) : (
-        <View style={styles.confirmation}>
-          <Text style={styles.confirmationLabel}>Type {DELETE_CONFIRMATION_WORD} to confirm.</Text>
-          <TextInput
-            accessibilityLabel={`Type ${DELETE_CONFIRMATION_WORD} to confirm`}
-            autoCapitalize="characters"
-            autoCorrect={false}
-            editable={step === 'confirming'}
-            onChangeText={onTyped}
-            placeholder={DELETE_CONFIRMATION_WORD}
-            placeholderTextColor={colors.textFaint}
-            style={styles.input}
-            value={typed}
-          />
+    <>
+      {/* T008 (Issue #45): leaving and being erased are different acts, so they
+          are different cards. This one is `neutral` and its button is
+          `secondary` — nothing here is destructive, and dressing it in the
+          danger tone next to a real deletion would teach people to fear the
+          safe one and stop reading the other. It is also FIRST: it is the thing
+          almost everyone who opens this screen actually wants. Hidden once the
+          deletion confirmation is armed, so the screen never offers two
+          competing account actions at the same time. */}
+      {step === 'idle' && (
+        <TrustCard>
+          <Text style={styles.cardTitle}>Sign out</Text>
+          {SIGN_OUT_FACTS.map((fact) => (
+            <Text key={fact} style={styles.message}>
+              {fact}
+            </Text>
+          ))}
           <HypeButton
-            label={step === 'deleting' ? 'Deleting…' : 'Permanently delete my account'}
-            disabled={step === 'deleting' || !isDeleteConfirmed(typed)}
-            onPress={onConfirmDelete}
-            variant="trust"
-          />
-          <HypeButton
-            label="Keep my account"
-            disabled={step === 'deleting'}
-            onPress={onCancel}
+            label={signOutStep === 'signing_out' ? 'Signing out…' : 'Sign out'}
+            disabled={signOutStep === 'signing_out'}
+            onPress={onSignOut}
             secondary
             variant="trust"
           />
-        </View>
+          {signOutError === null ? null : <Text style={styles.error}>{signOutError}</Text>}
+        </TrustCard>
       )}
-      {errorMessage === null ? null : <Text style={styles.error}>{errorMessage}</Text>}
-    </TrustCard>
+      <TrustCard tone="danger">
+        <Text style={styles.cardTitle}>Delete your account</Text>
+        {ACCOUNT_DELETION_FACTS.map((fact) => (
+          <Text key={fact} style={styles.message}>
+            {fact}
+          </Text>
+        ))}
+        {step === 'idle' ? (
+          <HypeButton label="Delete my account" onPress={onStartConfirmation} variant="trust" />
+        ) : (
+          <View style={styles.confirmation}>
+            <Text style={styles.confirmationLabel}>
+              Type {DELETE_CONFIRMATION_WORD} to confirm.
+            </Text>
+            <TextInput
+              accessibilityLabel={`Type ${DELETE_CONFIRMATION_WORD} to confirm`}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              editable={step === 'confirming'}
+              onChangeText={onTyped}
+              placeholder={DELETE_CONFIRMATION_WORD}
+              placeholderTextColor={colors.textFaint}
+              style={styles.input}
+              value={typed}
+            />
+            <HypeButton
+              label={step === 'deleting' ? 'Deleting…' : 'Permanently delete my account'}
+              disabled={step === 'deleting' || !isDeleteConfirmed(typed)}
+              onPress={onConfirmDelete}
+              variant="trust"
+            />
+            <HypeButton
+              label="Keep my account"
+              disabled={step === 'deleting'}
+              onPress={onCancel}
+              secondary
+              variant="trust"
+            />
+          </View>
+        )}
+        {errorMessage === null ? null : <Text style={styles.error}>{errorMessage}</Text>}
+      </TrustCard>
+    </>
   );
 }
 
@@ -215,6 +315,8 @@ export default function AccountScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [localClosure, setLocalClosure] = useState<LocalClosureOutcome>('pending');
   const [signInVisible, setSignInVisible] = useState(false);
+  const [signOutStep, setSignOutStep] = useState<AccountSignOutStep>('idle');
+  const [signOutError, setSignOutError] = useState<string | null>(null);
 
   /**
    * Clears this device and ends the session, and reports whether both finished.
@@ -275,6 +377,26 @@ export default function AccountScreen() {
 
   useFocusEffect(readSession);
 
+  /** Runs {@link endSession} and turns its outcome into what the screen shows. */
+  async function signOut(): Promise<void> {
+    if (client === null) {
+      setSignOutError(SIGN_OUT_UNCONFIGURED_MESSAGE);
+      return;
+    }
+    setSignOutStep('signing_out');
+    setSignOutError(null);
+    const outcome = await endSession(client);
+    setSignOutStep('idle');
+    if (outcome !== 'signed_out') {
+      setSignOutError(
+        outcome === 'unconfigured' ? SIGN_OUT_UNCONFIGURED_MESSAGE : SIGN_OUT_FAILED_MESSAGE,
+      );
+      return;
+    }
+    setSession('signed_out');
+    router.replace('/');
+  }
+
   async function deleteAccount(): Promise<void> {
     if (client === null) {
       setErrorMessage(DELETION_UNCONFIGURED_MESSAGE);
@@ -313,10 +435,15 @@ export default function AccountScreen() {
         <AccountContent
           session={session}
           step={step}
+          signOutStep={signOutStep}
+          signOutError={signOutError}
           typed={typed}
           errorMessage={errorMessage}
           localClosure={localClosure}
           onSignIn={() => setSignInVisible(true)}
+          onSignOut={() => {
+            void signOut();
+          }}
           onStartConfirmation={() => {
             setErrorMessage(null);
             setStep('confirming');

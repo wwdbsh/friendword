@@ -7,6 +7,7 @@ import { InterestRepo, type BrowserSupabaseClient, type MyInterest } from '@frie
 
 import { EmailSignIn } from '@/components/EmailSignIn';
 import { FlowNav } from '@/components/FlowNav';
+import { SignedOutNotice } from '@/components/SignedOutNotice';
 import {
   campaignStateNote,
   formatSentAt,
@@ -43,12 +44,15 @@ export function MyInterestsView() {
     clientRef.current = getSupabaseBrowserClient();
   }
   const client = clientRef.current;
-  const { session, loading } = useSession(client);
+  const { session, loading, ended } = useSession(client);
 
   const [state, setState] = useState<ListState>({ step: 'loading' });
 
   useEffect(() => {
     if (client === null || session === null) {
+      // T008: interest a person sent is private to the account that sent it,
+      // so it must not survive that account's session in this tab.
+      setState({ step: 'loading' });
       return;
     }
     let cancelled = false;
@@ -89,6 +93,7 @@ export function MyInterestsView() {
 
         {client !== null && !loading && session === null && (
           <section className={styles.card}>
+            <SignedOutNotice ended={ended} />
             <span className={styles.badge}>My interests</span>
             <h1 className={styles.title}>The interest you sent lives here.</h1>
             <EmailSignIn

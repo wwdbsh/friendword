@@ -100,6 +100,67 @@
   font-weight: 700;
 }
 
+/* The account exit (T008 / Issue #45). Deliberately NOT a fourth pill: the
+   tabs are destinations a signed-in person taps constantly and this is a
+   utility they use once, so it takes the quiet text-link grammar (.quietAction,
+   .navBack) rather than competing with them. Full 44px target regardless. */
+.navAccount {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-xs);
+  /* Real-device QA: the three tabs plus this wrap to a second line at 390px,
+     and `space-between` parks a lone item on a wrapped line at the START —
+     putting "Sign out" under the wordmark as if it were a heading. The auto
+     margin keeps it at the far edge on both one-line and wrapped layouts. */
+  margin-left: auto;
+}
+
+.navSignOut {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.navSignOut:hover {
+  color: var(--color-ink);
+}
+
+.navSignOut:disabled {
+  cursor: default;
+  text-decoration: none;
+}
+
+.navError {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  text-align: right;
+}
+
+/* Why the sign-in card is being shown to someone who WAS signed in. Sits above
+   the form inside the same card, in the .lede size so it is read before the
+   heading's instruction rather than after it. */
+.signedOutNotice {
+  margin: 0 0 var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border: var(--stroke-sticker) solid var(--color-ink);
+  border-radius: var(--radius-sm);
+  background: var(--color-background);
+  font-weight: 700;
+  line-height: var(--line-relaxed);
+}
+
 .card {
   padding: var(--space-xl);
   border: var(--stroke-sticker) solid var(--color-ink);

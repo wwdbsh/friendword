@@ -76,8 +76,11 @@ export function ConfirmSignIn() {
     <main className={styles.page}>
       <div className={styles.shell}>
         {/* Tabs off: this screen exists to spend a one-time sign-in token, and
-            navigating away before the tap wastes it. */}
-        <FlowNav tabs={false} />
+            navigating away before the tap wastes it. Sign-out off for the same
+            reason turned up a notch (T008): this is the act of signing IN, and
+            the previous session is exactly what the confirm button is about to
+            replace. */}
+        <FlowNav tabs={false} signOut={false} />
 
         {client === null && (
           <section className={styles.card}>

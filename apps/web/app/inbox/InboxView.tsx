@@ -15,6 +15,7 @@ import {
 
 import { EmailSignIn } from '@/components/EmailSignIn';
 import { FlowNav } from '@/components/FlowNav';
+import { SignedOutNotice } from '@/components/SignedOutNotice';
 import { kickNotificationSender } from '@/lib/notifications/kick';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { useSession } from '@/lib/useSession';
@@ -90,7 +91,7 @@ export function InboxView() {
     clientRef.current = getSupabaseBrowserClient();
   }
   const client = clientRef.current;
-  const { session, loading } = useSession(client);
+  const { session, loading, ended } = useSession(client);
 
   const [state, setState] = useState<InboxState>({ step: 'loading' });
   const [deciding, setDeciding] = useState<string | null>(null);
@@ -142,9 +143,18 @@ export function InboxView() {
   }, [client]);
 
   useEffect(() => {
-    if (session !== null) {
-      void loadInbox();
+    if (session === null) {
+      // T008: drop the loaded inbox with the session. Without this the rows
+      // survive in state and are re-shown the instant ANY session appears —
+      // including a different person signing in on the same browser, who would
+      // see the previous account's interests until their own load returned.
+      setState({ step: 'loading' });
+      setFunnels({});
+      setDecisionNote(null);
+      setOpenedRoomId(null);
+      return;
     }
+    void loadInbox();
   }, [session, loadInbox]);
 
   async function changeCampaignStatus(
@@ -308,6 +318,7 @@ export function InboxView() {
 
         {client !== null && !loading && session === null && (
           <section className={styles.card}>
+            <SignedOutNotice ended={ended} />
             <span className={styles.badge}>Interest inbox</span>
             <h1 className={styles.title}>See who wants to meet you.</h1>
             <EmailSignIn

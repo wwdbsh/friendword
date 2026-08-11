@@ -12,6 +12,7 @@ import {
 
 import { EmailSignIn } from '@/components/EmailSignIn';
 import { FlowNav } from '@/components/FlowNav';
+import { SignedOutNotice } from '@/components/SignedOutNotice';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { useSession } from '@/lib/useSession';
 
@@ -31,7 +32,7 @@ export function RoomView({ roomId }: RoomViewProps) {
     clientRef.current = getSupabaseBrowserClient();
   }
   const client = clientRef.current;
-  const { session, loading } = useSession(client);
+  const { session, loading, ended } = useSession(client);
 
   const [room, setRoom] = useState<IntroRoomSummary | null | undefined>(undefined);
   const [messages, setMessages] = useState<readonly MessageRow[]>([]);
@@ -55,6 +56,11 @@ export function RoomView({ roomId }: RoomViewProps) {
 
   useEffect(() => {
     if (client === null || session === null) {
+      // T008: a private conversation must not outlive the session that opened
+      // it — including on the browser of whoever signs in next.
+      setRoom(undefined);
+      setMessages([]);
+      setDraft('');
       return;
     }
     let cancelled = false;
@@ -198,6 +204,7 @@ export function RoomView({ roomId }: RoomViewProps) {
 
         {client !== null && !loading && session === null && (
           <section className={flowStyles.card}>
+            <SignedOutNotice ended={ended} />
             <span className={flowStyles.badge}>Intro room</span>
             <h1 className={flowStyles.title}>This room is private.</h1>
             <EmailSignIn client={client} reason="Sign in to open your intro room." />

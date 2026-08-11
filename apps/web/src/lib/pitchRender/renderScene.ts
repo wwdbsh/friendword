@@ -5,6 +5,7 @@ import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 import type { Page } from 'puppeteer-core';
 
+import type { CaptionSegment } from '@/pitch/captionChrome';
 import type { SceneTextFields, SceneWord } from '@/pitch/sceneV2';
 
 import { launchRenderBrowser } from './browser';
@@ -50,6 +51,8 @@ export type RenderSceneOptions = {
   readonly shareOrigin: string;
   readonly words?: readonly SceneWord[];
   readonly text?: SceneTextFields | null;
+  /** Subtitle band (T017); renderer chrome, never part of the approved scene. */
+  readonly captions?: readonly CaptionSegment[];
   readonly executablePath?: string;
   readonly workDir?: string;
   /** Abort mid-capture once exceeded, leaving headroom under maxDuration. */
@@ -228,6 +231,7 @@ export async function renderScene(
     }),
     words: options.words ?? [],
     text: options.text ?? null,
+    captions: options.captions ?? [],
     endCard: buildEndCard(options.shareOrigin, options.campaignSlug),
   };
 

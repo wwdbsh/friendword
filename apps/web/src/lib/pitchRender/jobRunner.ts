@@ -10,12 +10,8 @@ import {
   type ServiceSupabaseClient,
 } from '@friendword/data';
 
-import {
-  sceneV2ReferencesText,
-  sceneV2ReferencesWords,
-  type SceneTextFields,
-  type SceneWord,
-} from '@/pitch/sceneV2';
+import type { CaptionSegment } from '@/pitch/captionChrome';
+import { sceneV2ReferencesText, type SceneTextFields, type SceneWord } from '@/pitch/sceneV2';
 
 import { renderScene } from './renderScene';
 import {
@@ -167,6 +163,7 @@ export async function processRenderJob(
       shareOrigin: options.shareOrigin,
       words: inputs.words,
       text: inputs.text,
+      captions: inputs.captions,
       timeBudgetMs,
     });
 
@@ -220,6 +217,7 @@ type RenderInputs = {
   readonly campaignSlug: string;
   readonly words: readonly SceneWord[];
   readonly text: SceneTextFields | null;
+  readonly captions: readonly CaptionSegment[];
 };
 
 async function loadRenderInputs(
@@ -286,10 +284,15 @@ async function loadRenderInputs(
     });
   }
 
-  // Same gating as the public player (toPitchPlayerView): words and sentences
-  // travel only when the approved scene actually references them.
-  const words = sceneV2ReferencesWords(scene) ? sceneWordsFromTranscript(revision.transcript) : [];
+  // The five reviewed sentences still travel only when the approved scene
+  // actually names one (same gating as the public player, toPitchPlayerView).
   const text = sceneV2ReferencesText(scene) ? sceneTextFromStructure(revision.structure) : null;
+  // Words are no longer gated on the scene: since T017 the caption chrome reads
+  // them too, to pick the one highlighted word per segment. They come from the
+  // same frozen transcript the caption text itself comes from, so gating them
+  // would only make the MP4's highlight disagree with the web player's.
+  const words = sceneWordsFromTranscript(revision.transcript);
+  const captions = captionsFromTranscript(revision.transcript);
 
   return {
     sceneJson,
@@ -297,6 +300,7 @@ async function loadRenderInputs(
     campaignSlug,
     words,
     text,
+    captions,
   };
 }
 
@@ -443,6 +447,51 @@ function sceneWordsFromTranscript(transcript: unknown): readonly SceneWord[] {
     wordIndex: word.wordIndex,
     text: word.text,
   }));
+}
+
+const transcriptCaptionsSchema = z
+  .object({
+    segments: z
+      .array(
+        z
+          .object({ start: z.number(), end: z.number(), text: z.string() })
+          .passthrough()
+          .nullable()
+          .catch(null),
+      )
+      .catch([]),
+  })
+  .passthrough();
+
+/**
+ * The MP4's subtitle band (T017), from the SAME frozen transcript segments the
+ * published page prints and the Dater read at consent — never a re-transcribe
+ * and never generated copy.
+ *
+ * `segmentIndex` is the position in the FULL segment list, kept even when an
+ * unreadable entry is dropped: a keyword highlight is a (segmentIndex,
+ * wordIndex) pair, so renumbering would move the accent to another sentence.
+ * Timestamp rounding matches view.ts exactly, so both surfaces cut at the same
+ * millisecond.
+ */
+function captionsFromTranscript(transcript: unknown): readonly CaptionSegment[] {
+  const parsed = transcriptCaptionsSchema.safeParse(transcript);
+  if (!parsed.success) {
+    return [];
+  }
+  const captions: CaptionSegment[] = [];
+  parsed.data.segments.forEach((segment, segmentIndex) => {
+    if (segment === null || segment.text.trim().length === 0) {
+      return;
+    }
+    captions.push({
+      segmentIndex,
+      startMs: Math.max(0, Math.round(segment.start * 1000)),
+      endMs: Math.max(1, Math.round(segment.end * 1000)),
+      text: segment.text.trim(),
+    });
+  });
+  return captions;
 }
 
 /** Queue-safe failure text: bounded, and never a signed URL or personal data. */

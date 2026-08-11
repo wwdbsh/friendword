@@ -47,6 +47,10 @@ const READABLE_PAIRS: readonly (readonly [string, string, string])[] = [
   ['text on hype fill', colors.onHype, colors.hype],
   ['text on danger fill', colors.onDanger, colors.danger],
   ['danger text on cream', colors.danger, colors.background],
+  // T017: the caption keyword sits on the cream sticker card; the card also
+  // appears over white surfaces in the consent preview.
+  ['keyword text on cream', colors.keyword, colors.background],
+  ['keyword text on surface', colors.keyword, colors.surface],
   ['ink on fresh fill', colors.ink, colors.fresh],
 ];
 

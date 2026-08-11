@@ -5,6 +5,9 @@
   position: fixed;
   top: 0;
   left: 0;
+  /* T017: the MP4 has no transport bar, so the caption band sits at the
+     approved 16cqh with nothing to clear. */
+  --caption-bar-clearance: 0px;
   overflow: hidden;
   width: 1080px;
   height: 1920px;

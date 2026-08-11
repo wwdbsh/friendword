@@ -78,7 +78,7 @@ function dirBytes(dir: string): number {
 
 describe.runIf(MEASURE)('worst case: 60s scene, 1800 frames', () => {
   it('renders and reports throughput, memory and /tmp profile', async () => {
-    const { scene, photos, words, text } = worstCaseScene();
+    const { scene, photos, words, text, captions } = worstCaseScene();
     const workDir = path.join(os.tmpdir(), 'friendword-render-measure-work');
     mkdirSync(workDir, { recursive: true });
 
@@ -115,6 +115,7 @@ describe.runIf(MEASURE)('worst case: 60s scene, 1800 frames', () => {
           shareOrigin: 'https://friendword-e2e.example',
           words,
           text,
+          captions,
           workDir,
           keepWorkFiles: true,
           timeBudgetMs: 570_000,

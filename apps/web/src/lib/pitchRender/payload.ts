@@ -1,5 +1,6 @@
 import type { PitchSceneV2 } from '@friendword/contracts';
 
+import type { CaptionSegment } from '@/pitch/captionChrome';
 import type { SceneTextFields, SceneWord } from '@/pitch/sceneV2';
 
 // The wire shape the render engine injects into the capture page
@@ -29,6 +30,14 @@ export type RenderPayload = {
   readonly photos: readonly RenderPayloadPhoto[];
   readonly words: readonly SceneWord[];
   readonly text: SceneTextFields | null;
+  /**
+   * Subtitle band data (T017). Renderer chrome, exactly like the end card: the
+   * scene JSON is frozen and says nothing about captions, so these ride on the
+   * payload and cannot touch `scene_hash`. The text is the provider's own
+   * transcript segments — the same sentences the published page prints and the
+   * Dater read at consent — never anything unreviewed.
+   */
+  readonly captions: readonly CaptionSegment[];
   readonly endCard: RenderEndCard;
 };
 

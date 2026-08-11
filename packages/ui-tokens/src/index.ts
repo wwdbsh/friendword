@@ -49,6 +49,13 @@ export const colors = {
   pop: '#FF5B2E',
   /** Pressed tangerine (ink text stays >=4.5:1 in the pressed state too). */
   popPressed: '#E8501F',
+  /**
+   * Readable tangerine — the caption keyword accent (T017). Same hue as `pop`,
+   * darkened until it passes WCAG AA as TEXT on both canvases (4.71:1 on cream,
+   * 5.04:1 on white); `pop` itself measures 2.89:1 on cream and must never be
+   * used for readable copy. Fills and icons still use `pop`.
+   */
+  keyword: '#C24523',
   /** Hot pink — romance, flirt moments, waveforms. */
   flirt: '#FF3D8A',
   /** Sunshine yellow — hype badges, vouch highlights. */

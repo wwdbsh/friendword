@@ -10,6 +10,7 @@ import { NextResponse } from 'next/server';
 
 import { buildPitchSceneV2, type PitchSceneV2 } from '@friendword/contracts';
 
+import type { CaptionSegment } from '@/pitch/captionChrome';
 import type { SceneTextFields, SceneWord } from '@/pitch/sceneV2';
 import {
   DIAGNOSTIC_LIMITS,
@@ -101,6 +102,7 @@ function benchScene(): {
   assetIds: readonly string[];
   words: readonly SceneWord[];
   text: SceneTextFields;
+  captions: readonly CaptionSegment[];
 } {
   const assetIds = [0, 1, 2, 3].map(benchAssetId);
   const segments = Array.from({ length: 12 }, (_, index) => ({
@@ -135,6 +137,14 @@ function benchScene(): {
       text: `Word${word.segmentIndex}`,
     })),
     text: BENCH_TEXT,
+    // T017: the bench composites the caption band too, or it would measure a
+    // cheaper frame than production actually renders.
+    captions: segments.map((segment, index) => ({
+      segmentIndex: index,
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+      text: `Segment ${index}: Word${index} carries this line of the pitch.`,
+    })),
   };
 }
 
@@ -224,7 +234,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   try {
     await mkdir(workDir, { recursive: true });
-    const { scene, assetIds, words, text } = benchScene();
+    const { scene, assetIds, words, text, captions } = benchScene();
     const photos: RenderPhotoAsset[] = [];
     for (const [index, assetId] of assetIds.entries()) {
       photos.push(await benchPhoto(workDir, assetId, index));
@@ -244,6 +254,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         shareOrigin,
         words,
         text,
+        captions,
         workDir,
         timeBudgetMs: BENCH_TIME_BUDGET_MS,
         diagnostics: {

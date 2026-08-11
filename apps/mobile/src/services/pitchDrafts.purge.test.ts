@@ -252,3 +252,80 @@ describe('auth-change purge policy', () => {
     expect(shouldPurgeConsentTokensOnAuthChange('TOKEN_REFRESHED', 'user-1', 'user-1')).toBe(false);
   });
 });
+
+describe('account deletion purge of every local draft', () => {
+  it('erases the drafts and deletes their media, uploaded or not', async () => {
+    // Sign-out keeps drafts (the same person comes back). Account deletion is
+    // the opposite case: the server copy is being erased, so a recording left
+    // on this phone would be the only copy nobody can reach to delete.
+    const { storage, values } = createStorage();
+    const deleteMediaFile = vi.fn(async () => {});
+    const service = new MockPitchDraftService(storage, deleteMediaFile);
+    await createSubmittedDraft(service);
+
+    await expect(service.eraseAllLocalDrafts()).resolves.toEqual({
+      erasedDrafts: 1,
+      complete: true,
+    });
+
+    await expect(service.getMyDrafts()).resolves.toEqual([]);
+    expect(deleteMediaFile).toHaveBeenCalledWith('file:///voice.m4a');
+    expect(deleteMediaFile).toHaveBeenCalledWith('file:///one.jpg');
+    const serialized = values.get(STORAGE_KEY) ?? '';
+    expect(serialized).not.toContain('file:///voice.m4a');
+    expect(serialized).not.toContain(TOKEN);
+  });
+
+  it('is a no-op with nothing stored', async () => {
+    const { storage } = createStorage();
+    const deleteMediaFile = vi.fn(async () => {});
+    const service = new MockPitchDraftService(storage, deleteMediaFile);
+
+    await expect(service.eraseAllLocalDrafts()).resolves.toEqual({
+      erasedDrafts: 0,
+      complete: true,
+    });
+
+    expect(deleteMediaFile).not.toHaveBeenCalled();
+  });
+
+  // The blob is unreadable, so the media files cannot be named — but the blob
+  // is still full of personal data. Refusing to clear it because the parse
+  // failed would leave a raw consent bearer token and the invited friend's
+  // email address on a phone whose account no longer exists.
+  it('clears the stored blob even when it cannot be parsed', async () => {
+    const { storage, values } = createStorage();
+    const deleteMediaFile = vi.fn(async () => {});
+    const service = new MockPitchDraftService(storage, deleteMediaFile);
+    await createSubmittedDraft(service);
+    const stored = values.get(STORAGE_KEY) ?? '';
+    expect(stored).toContain(TOKEN);
+    values.set(STORAGE_KEY, `${stored.slice(0, 40)} not json at all ${TOKEN}`);
+
+    await expect(service.eraseAllLocalDrafts()).resolves.toEqual({
+      erasedDrafts: 0,
+      // Honest: the token blob is gone, the media files were never named.
+      complete: false,
+    });
+
+    expect(values.get(STORAGE_KEY)).toBe('[]');
+    expect(values.get(STORAGE_KEY) ?? '').not.toContain(TOKEN);
+  });
+
+  it('reports an incomplete erasure when a media file will not delete', async () => {
+    const { storage } = createStorage();
+    const deleteMediaFile = vi.fn(async (uri: string) => {
+      if (uri === 'file:///voice.m4a') throw new Error('file busy');
+    });
+    const service = new MockPitchDraftService(storage, deleteMediaFile);
+    await createSubmittedDraft(service);
+
+    await expect(service.eraseAllLocalDrafts()).resolves.toEqual({
+      erasedDrafts: 1,
+      complete: false,
+    });
+
+    // One rejection must not stop the rest of the media from going.
+    expect(deleteMediaFile).toHaveBeenCalledWith('file:///one.jpg');
+  });
+});

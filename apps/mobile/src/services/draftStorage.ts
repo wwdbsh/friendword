@@ -78,6 +78,27 @@ export function purgeableMediaUris(draft: PitchDraft): readonly string[] {
 }
 
 /**
+ * Every on-device media file a draft points at, uploaded or not.
+ *
+ * Unlike {@link purgeableMediaUris} this does not wait for the server to hold a
+ * copy: it exists for account deletion, where "the server has it" is no longer
+ * a reason to keep the local file — the server copy is being erased too.
+ */
+export function localMediaUris(draft: PitchDraft): readonly string[] {
+  const uris: string[] = [];
+  if (draft.recording !== null) {
+    uris.push(draft.recording.uri);
+  }
+  for (const photo of draft.photos) {
+    uris.push(photo.uri);
+  }
+  for (const clip of draft.clips) {
+    uris.push(clip.uri);
+  }
+  return uris;
+}
+
+/**
  * Clears the on-device recording/photo/clip copies once the server holds the
  * originals. A no-op until the media has been uploaded.
  */

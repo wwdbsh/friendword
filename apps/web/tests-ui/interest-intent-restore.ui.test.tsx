@@ -42,7 +42,14 @@ vi.mock('@friendword/data', () => {
       });
     }
   }
-  class InterestRepo {}
+  // T006 added a second S1 read. It resolves empty here so these tests keep
+  // asserting the INTENT branch: with a sent interest in the list the flow
+  // would (correctly) render the delivered card instead of either stage.
+  class InterestRepo {
+    listMyInterests(): Promise<readonly unknown[]> {
+      return Promise.resolve([]);
+    }
+  }
   return {
     DataLayerError,
     InterestIntentRepo,

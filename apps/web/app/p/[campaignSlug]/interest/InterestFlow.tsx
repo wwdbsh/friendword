@@ -12,6 +12,7 @@ import {
   InterestRepo,
   trackEvent,
   type BrowserSupabaseClient,
+  type MyInterest,
 } from '@friendword/data';
 
 import {
@@ -24,6 +25,12 @@ import {
 } from '@/lib/aiConsent';
 import { EmailSignIn } from '@/components/EmailSignIn';
 import { FlowNav } from '@/components/FlowNav';
+import {
+  formatSentAt,
+  isDeliveredInterest,
+  senderStatusBody,
+  senderStatusLabel,
+} from '@/lib/interestStatusCopy';
 import { requestTextModeration } from '@/lib/moderateText';
 import { kickNotificationSender } from '@/lib/notifications/kick';
 import { removeOwnProfilePhotos } from '@/lib/profileMedia';
@@ -70,8 +77,16 @@ type UploadedPhoto = {
  *    existing gate. Only then is the interest delivered.
  * A promotion rejected by the private-beta gate is shown as "not open yet",
  * never as a failure — the intent stays saved.
+ *
+ * `delivered` (T006, Issue #43) is the memory of a finished send.
+ * `promote_interest_intent` DELETES the intent row on success (0053), so the
+ * intent lookup alone reports a returning sender as brand new: they were shown
+ * step 1 of 2 and walked the entire profile form again — re-uploading photos —
+ * only to be refused at the last call ('this interest was already answered')
+ * when the dater had answered, or to silently re-deliver an interest that was
+ * already sitting in the inbox. The interests read is what remembers.
  */
-type IntentStage = 'checking' | 'offer' | 'saved' | 'profile';
+type IntentStage = 'checking' | 'offer' | 'saved' | 'profile' | 'delivered';
 
 function errorDetail(error: unknown): string {
   const cause = error instanceof DataLayerError ? error.cause : error;
@@ -135,6 +150,7 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
   const [prefillDone, setPrefillDone] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [intentStage, setIntentStage] = useState<IntentStage>('checking');
+  const [deliveredInterest, setDeliveredInterest] = useState<MyInterest | null>(null);
   const [intentBusy, setIntentBusy] = useState(false);
   const [betaClosed, setBetaClosed] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -146,9 +162,15 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
   const [aiConsentBusy, setAiConsentBusy] = useState(false);
   const aiConsentGranted = canProcessOwnContentMedia(aiConsentState);
 
-  // Stage S1: is there already a saved intent for this campaign? A lookup
-  // failure (including the intent RPCs not being deployed yet) falls back to
-  // the offer stage — saving will then surface its own honest error.
+  // Stage S1: has this visitor already sent this interest, and if not, is there
+  // already a saved intent for this campaign? A lookup failure (including the
+  // intent RPCs not being deployed yet) falls back to the offer stage — saving
+  // will then surface its own honest error.
+  //
+  // The two reads answer different questions and fail independently: the
+  // interests read is wrapped in its own catch so a failing `list_my_interests`
+  // degrades to exactly the pre-T006 behaviour (the staged flow) instead of
+  // taking the intent result down with it.
   //
   // The run-once guard is a ref, NOT state: a state guard listed in the deps
   // and set synchronously inside the effect re-fires the effect, whose cleanup
@@ -168,8 +190,23 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
     let cancelled = false;
     void (async () => {
       await ensureUserRow(client);
-      const intent = await new InterestIntentRepo(client).getMyIntent(campaignId);
+      const [intent, sentInterests] = await Promise.all([
+        new InterestIntentRepo(client).getMyIntent(campaignId),
+        Promise.resolve()
+          .then(() => new InterestRepo(client).listMyInterests())
+          .catch((): readonly MyInterest[] => []),
+      ]);
+      const alreadySent =
+        sentInterests.find(
+          (candidate) =>
+            candidate.campaignId === campaignId && isDeliveredInterest(candidate.interestStatus),
+        ) ?? null;
       if (!cancelled) {
+        if (alreadySent !== null) {
+          setDeliveredInterest(alreadySent);
+          setIntentStage('delivered');
+          return;
+        }
         setIntentStage(intent === null ? 'offer' : 'saved');
       }
     })().catch(() => {
@@ -556,6 +593,52 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
           intentStage === 'checking' && (
             <section className={styles.card} aria-live="polite">
               <h1 className={styles.title}>One second…</h1>
+            </section>
+          )}
+
+        {/* T006: the returning sender's screen. It is FIRST because the form
+            behind it is a dead end for them — an answered interest is refused
+            by submit_interest at the very last step, after the photos are
+            re-uploaded. The dater's name is only in the heading; the state
+            sentences are shared with /interests so both screens say one thing
+            about one row. */}
+        {client !== null &&
+          !loading &&
+          session !== null &&
+          !submitted &&
+          !betaClosed &&
+          intentStage === 'delivered' &&
+          deliveredInterest !== null && (
+            <section className={styles.card}>
+              <span
+                className={
+                  deliveredInterest.interestStatus === 'accepted' ? styles.badgeFresh : styles.badge
+                }
+              >
+                {senderStatusLabel(deliveredInterest.interestStatus)}
+              </span>
+              <h1 className={styles.title}>
+                {deliveredInterest.interestStatus === 'accepted'
+                  ? `${daterName} accepted your interest.`
+                  : deliveredInterest.interestStatus === 'declined'
+                    ? `${daterName} decided not to continue.`
+                    : `Your interest is already with ${daterName}.`}
+              </h1>
+              <p className={styles.muted}>{formatSentAt(deliveredInterest.submittedAt)}</p>
+              <p className={styles.lede}>{senderStatusBody(deliveredInterest.interestStatus)}</p>
+              <div className={styles.actionRow}>
+                {deliveredInterest.interestStatus === 'accepted' && (
+                  <Link className={styles.primary} href="/rooms">
+                    Open my intro rooms
+                  </Link>
+                )}
+                <Link className={styles.secondary} href={`/p/${campaignSlug}`}>
+                  Back to the pitch
+                </Link>
+                <Link className={styles.secondary} href="/interests">
+                  All my interests
+                </Link>
+              </div>
             </section>
           )}
 

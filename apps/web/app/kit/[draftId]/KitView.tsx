@@ -13,6 +13,7 @@ import {
 
 import { EmailSignIn } from '@/components/EmailSignIn';
 import { FlowNav } from '@/components/FlowNav';
+import { SignedOutNotice } from '@/components/SignedOutNotice';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { useSession } from '@/lib/useSession';
 
@@ -62,7 +63,7 @@ export function KitView({ draftId }: { readonly draftId: string }) {
     clientRef.current = getSupabaseBrowserClient();
   }
   const client = clientRef.current;
-  const { session, loading } = useSession(client);
+  const { session, loading, ended } = useSession(client);
 
   const [state, setState] = useState<KitState>({ step: 'loading' });
   const [unlocking, setUnlocking] = useState(false);
@@ -112,9 +113,15 @@ export function KitView({ draftId }: { readonly draftId: string }) {
   }, [client, draftId]);
 
   useEffect(() => {
-    if (session !== null) {
-      void load();
+    if (session === null) {
+      // T008: the kit carries the campaign's headline, share card and captions.
+      // It goes with the session rather than waiting in state for whoever signs
+      // in next on this browser.
+      setState({ step: 'loading' });
+      setCampaign(null);
+      return;
     }
+    void load();
   }, [session, load]);
 
   async function unlock() {
@@ -162,6 +169,7 @@ export function KitView({ draftId }: { readonly draftId: string }) {
 
         {client !== null && !loading && session === null && (
           <section className={styles.card}>
+            <SignedOutNotice ended={ended} />
             <span className={styles.badge}>Social launch kit</span>
             <h1 className={styles.title}>Sign in to open your kit.</h1>
             <EmailSignIn client={client} reason="Use the email you pitch your friends with." />

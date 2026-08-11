@@ -82,6 +82,13 @@ vi.mock('@/lib/supabaseServer', () => ({
   getSupabaseServiceClient: () => ({}),
 }));
 
+// The FlowNav shell now carries the sign-out control (T008, Issue #45), and it
+// reads the app router. Same stub as the other UI suites.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: () => {}, replace: () => {}, refresh: () => {} }),
+  useSearchParams: () => new URLSearchParams(''),
+}));
+
 describe('referral claim is armed on every login-return surface (F2)', () => {
   beforeEach(() => {
     harness.rpcCalls = [];

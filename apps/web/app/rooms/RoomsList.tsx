@@ -7,6 +7,7 @@ import { IntroRoomRepo, type BrowserSupabaseClient, type IntroRoomSummary } from
 
 import { EmailSignIn } from '@/components/EmailSignIn';
 import { FlowNav } from '@/components/FlowNav';
+import { SignedOutNotice } from '@/components/SignedOutNotice';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { useSession } from '@/lib/useSession';
 
@@ -18,12 +19,15 @@ export function RoomsList() {
     clientRef.current = getSupabaseBrowserClient();
   }
   const client = clientRef.current;
-  const { session, loading } = useSession(client);
+  const { session, loading, ended } = useSession(client);
 
   const [rooms, setRooms] = useState<readonly IntroRoomSummary[] | null>(null);
 
   useEffect(() => {
     if (client === null || session === null) {
+      // T008: the room list goes with the session, so the next account to sign
+      // in on this browser cannot be shown the previous one's rooms.
+      setRooms(null);
       return;
     }
     let cancelled = false;
@@ -65,6 +69,7 @@ export function RoomsList() {
 
         {client !== null && !loading && session === null && (
           <section className={styles.card}>
+            <SignedOutNotice ended={ended} />
             <span className={styles.badge}>Intro rooms</span>
             <h1 className={styles.title}>Your conversations live here.</h1>
             <EmailSignIn client={client} reason="Sign in to open your intro rooms." />

@@ -1,5 +1,7 @@
 import Link from 'next/link';
 
+import { SignOutButton } from '@/components/SignOutButton';
+
 import styles from '@/styles/flowCard.module.css';
 
 export type FlowNavTab = 'inbox' | 'interests' | 'rooms';
@@ -20,6 +22,16 @@ type FlowNavProps = {
    * wordmark still goes home so no screen is a dead end.
    */
   readonly tabs?: boolean;
+  /**
+   * The sign-out control (T008, Issue #45). On by default — a session must be
+   * endable from wherever it can be used, and the button renders nothing at
+   * all without one, so a signed-out surface is unaffected either way.
+   *
+   * Turned off only where signing out contradicts the screen itself: /auth/
+   * confirm is a person in the act of signing IN, and offering them the
+   * opposite in the same shell is not a choice, it is a trap.
+   */
+  readonly signOut?: boolean;
 };
 
 /**
@@ -29,7 +41,7 @@ type FlowNavProps = {
  * completed by typing URLs. Anything added here must stay inside the existing
  * flowCard (Hype Mixtape) vocabulary.
  */
-export function FlowNav({ current, back, tabs = true }: FlowNavProps) {
+export function FlowNav({ current, back, tabs = true, signOut = true }: FlowNavProps) {
   return (
     <nav className={styles.nav} aria-label="Friendword">
       <div className={styles.navRow}>
@@ -72,6 +84,7 @@ export function FlowNav({ current, back, tabs = true }: FlowNavProps) {
             </Link>
           </div>
         )}
+        {signOut && <SignOutButton />}
       </div>
       {back !== undefined && (
         <Link className={styles.navBack} href={back.href}>

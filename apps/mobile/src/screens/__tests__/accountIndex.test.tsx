@@ -84,18 +84,37 @@ vi.mock('react-native-safe-area-context', async () => {
 vi.mock('../../components', async () => {
   const { createElement } = await import('react');
   return {
+    // `secondary` is rendered as a data attribute so a test can assert that
+    // sign-out is NOT dressed as the destructive control next to it. It is
+    // emitted only when set, so the existing exact-markup assertions on the
+    // primary buttons keep matching.
     HypeButton: ({
       label,
       disabled = false,
+      secondary = false,
     }: {
       readonly label: string;
       readonly onPress: () => void;
       readonly disabled?: boolean;
-    }) => createElement('button', { disabled }, label),
+      readonly secondary?: boolean;
+      readonly variant?: string;
+    }) =>
+      createElement(
+        'button',
+        secondary ? { disabled, 'data-secondary': 'true' } : { disabled },
+        label,
+      ),
     SignInPromptCard: ({ title }: { readonly title: string; readonly onSignIn: () => void }) =>
       createElement('article', null, createElement('span', null, title)),
-    TrustCard: ({ children }: { readonly children?: ReactNode }) =>
-      createElement('article', null, children),
+    // The tone is what visually separates leaving from being erased, so it has
+    // to survive into the markup for the test that pins the difference.
+    TrustCard: ({
+      children,
+      tone = 'neutral',
+    }: {
+      readonly children?: ReactNode;
+      readonly tone?: string;
+    }) => createElement('article', { 'data-tone': tone }, children),
   };
 });
 vi.mock('../../features/auth/SignInSheet', () => ({ SignInSheet: () => null }));
@@ -109,6 +128,8 @@ import {
   DELETION_REFUSED_MESSAGE,
   DELETION_UNCONFIGURED_MESSAGE,
   DELETION_UNCONFIRMED_MESSAGE,
+  SIGN_OUT_FACTS,
+  SIGN_OUT_FAILED_MESSAGE,
   isDeleteConfirmed,
 } from '../../../app/account/index';
 
@@ -119,10 +140,13 @@ function render(overrides: Partial<Parameters<typeof AccountContent>[0]> = {}): 
     <AccountContent
       session="signed_in"
       step="idle"
+      signOutStep="idle"
+      signOutError={null}
       typed=""
       errorMessage={null}
       localClosure="pending"
       onSignIn={noop}
+      onSignOut={noop}
       onStartConfirmation={noop}
       onCancel={noop}
       onTyped={noop}
@@ -132,6 +156,92 @@ function render(overrides: Partial<Parameters<typeof AccountContent>[0]> = {}): 
     />,
   );
 }
+
+// SIGN OUT — T008 / Issue #45. Until this, the app's only account action was
+// deletion: a person who wanted to hand the phone over, or switch accounts, had
+// no choice on this screen except the irreversible one.
+describe('signing out', () => {
+  it('offers sign-out to a signed-in person, above the deletion card', () => {
+    const markup = render();
+
+    expect(markup).toContain('>Sign out<');
+    expect(markup.indexOf('>Sign out<')).toBeLessThan(markup.indexOf('Delete my account'));
+  });
+
+  // The whole visual point: leaving is not being erased. A destructive-looking
+  // sign-out teaches people to fear the safe action and stop reading the other.
+  it('is not dressed as a destructive control', () => {
+    const markup = render();
+    // Everything before the deletion card opens.
+    const signOutCard = markup.slice(0, markup.indexOf('data-tone="danger"'));
+
+    expect(signOutCard).toContain('data-tone="neutral"');
+    expect(signOutCard).toContain('>Sign out<');
+    expect(signOutCard).toContain('data-secondary="true"');
+    // The deletion card that follows is the one carrying the danger tone.
+    expect(markup).toContain('data-tone="danger"');
+  });
+
+  it('locks the control while the sign-out is in flight', () => {
+    expect(render({ signOutStep: 'signing_out' })).toContain(
+      '<button disabled="" data-secondary="true">Signing out…</button>',
+    );
+  });
+
+  // Two account actions armed at once is how a mis-tap becomes a deleted
+  // account. Once DELETE is being typed, this screen offers one thing.
+  it('steps aside once the deletion confirmation is armed', () => {
+    const markup = render({ step: 'confirming', typed: '' });
+
+    expect(markup).not.toContain('>Sign out<');
+    expect(markup).toContain('Permanently delete my account');
+  });
+
+  it('is not offered to a signed-out visitor or a closed account', () => {
+    expect(render({ session: 'signed_out' })).not.toContain('>Sign out<');
+    expect(render({ session: 'closed' })).not.toContain('>Sign out<');
+  });
+
+  it('shows the failure without claiming which side of the line the session landed on', () => {
+    const markup = render({ signOutError: SIGN_OUT_FAILED_MESSAGE });
+
+    expect(markup).toContain('Signing out did not finish');
+    expect(SIGN_OUT_FAILED_MESSAGE).not.toMatch(/you are (still )?signed (in|out)/i);
+    expect(SIGN_OUT_FAILED_MESSAGE).toContain('Open this screen again');
+  });
+});
+
+// §12: sign-out is the one account action where the tempting lie is by
+// omission. `eraseAllLocalDrafts` is NOT called here (it belongs to deletion),
+// and the root layout DOES purge consent bearer tokens on `SIGNED_OUT` — the
+// copy has to match both facts, not the comfortable half of each.
+describe('sign-out copy', () => {
+  const copy = SIGN_OUT_FACTS.join(' ');
+
+  it('says the pitches saved on this phone are kept', () => {
+    expect(copy).toContain('stay where they are');
+    expect(copy).not.toMatch(/delete[sd]? (your|the) (pitches|drafts|recordings)/i);
+  });
+
+  it('says the account itself is untouched', () => {
+    expect(copy).toContain('untouched');
+  });
+
+  // A person who signs out mid-consent needs to know why the approval link they
+  // sent went quiet, rather than believing the pitch itself broke.
+  it('does not hide that the approval links stop working on this device', () => {
+    expect(copy).toContain('approval links');
+    expect(copy).toContain('stop working on this device');
+  });
+
+  it('claims nothing was deleted nowhere and everywhere', () => {
+    // "Nothing is deleted" would be false (the consent tokens go), and
+    // "everything is deleted" would be false (the drafts stay). Neither
+    // absolute may appear.
+    expect(copy).not.toMatch(/nothing is deleted|nothing gets deleted/i);
+    expect(copy).not.toMatch(/everything is (deleted|erased|removed)/i);
+  });
+});
 
 describe('account deletion confirmation gate', () => {
   it('arms only on the exact word', () => {
@@ -171,7 +281,7 @@ describe('account deletion confirmation gate', () => {
     const markup = render({ step: 'deleting', typed: 'DELETE' });
 
     expect(markup).toContain('<button disabled="">Deleting…</button>');
-    expect(markup).toContain('<button disabled="">Keep my account</button>');
+    expect(markup).toContain('<button disabled="" data-secondary="true">Keep my account</button>');
   });
 
   it('asks a signed-out visitor to sign in rather than offering deletion', () => {

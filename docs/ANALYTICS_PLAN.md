@@ -13,7 +13,7 @@
 **Client interaction 이벤트** — `track_event` RPC로만 수집. 속성은 allowlist
 (`campaign_id`·`campaign_slug`·`pitch_draft_id`·`source`·`platform`·`channel`·`duration_ms`·`product_id`)와
 실재 검증(campaign/draft id는 존재해야 함, slug형 값은 `[A-Za-z0-9_-]{1,64}`)을 통과해야 하고,
-익명 호출은 `pitch_viewed_unique`/`interest_started`만 허용됩니다.
+익명 호출은 `pitch_viewed_unique`/`reel_visit`/`interest_started`만 허용됩니다(`reel_visit`는 migration 0057에서 추가).
 
 ```text
 introducer_started
@@ -22,10 +22,15 @@ draft_generated
 consent_invite_shared      # 비공개 승인 초대 공유 (공개 캠페인 공유 아님)
 campaign_shared            # 공개 캠페인 공유 상호작용 (channel: kit_card_download | kit_caption_copy | …)
 pitch_viewed_unique        # sessionStorage 단위 dedupe(브라우저 세션당 1회) + source attribution
+reel_visit                 # 릴스 퍼널 진입: 캠페인 페이지 도착 (익명 허용, channel attribution)
 interest_started
+s1_intent_created          # S1 비공개 의사 저장 성공 (로그인 필요)
 creator_launch_paywall_viewed
 campaign_pass_paywall_viewed
 ```
+
+릴스 퍼널의 이후 단계는 client가 보낼 수 없습니다: S2 전달은 `interests` INSERT 트리거의
+`interest_submitted`, S3 매칭은 `interest_accepted`/`intro_room_created`입니다.
 
 **Server-recorded outcome 이벤트** — 상태가 실제로 바뀌는 테이블의 AFTER 트리거가
 기록하며(`properties.recorded_by = "server"`), client가 보내면 RPC가 거부합니다.

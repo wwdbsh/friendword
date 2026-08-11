@@ -12,9 +12,9 @@ import type { Json } from './database.types';
  * saved) are client interactions. The later stages are server-recorded
  * outcomes and must NOT be sent from clients: S2 delivery is the existing
  * `interest_submitted` trigger event on the `interests` INSERT, and S3 match
- * is `interest_accepted` / `intro_room_created`. Both new names require the
- * server-side track_event allowlist to accept them (reel_visit anonymously)
- * before they land in analytics_events; until then they are dropped.
+ * is `interest_accepted` / `intro_room_created`. The server-side track_event
+ * allowlist accepts both names as of migration 0057 (reel_visit anonymously),
+ * so they land in analytics_events once that migration is applied.
  */
 export type AnalyticsEventName =
   | 'introducer_started'

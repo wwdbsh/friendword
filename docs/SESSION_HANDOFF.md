@@ -37,7 +37,7 @@
 |             |                                                                                                                                                                                                                                                          |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 코드        | `858ccbe` on `main` (자막 크롬 — Goal 마지막 코드 병합)                                                                                                                                                                                                  |
-| hosted DB   | **0056까지 적용·정합** (`supabase migration list` 로컬=원격). `0040`은 의도적 갭                                                                                                                                                                         |
+| hosted DB   | **0056까지 적용·정합** (`supabase migration list` 로컬=원격). **`0057`(릴스 계측 allowlist)은 브랜치에만 존재 — push 대기**, 적용 전까지 hosted에서 `reel_visit`·`s1_intent_created`는 계속 400. `0040`은 의도적 갭                                      |
 | 런치 게이트 | **`public_beta_enabled=on` (2026-08-11 사용자 전환 — 공개 베타 개방)** · `real_payments_enabled=off` · `identity_enforcement=off` · `media_validation_enforcement=off` · `media_render_concurrency_cap=1`                                                |
 | 전 게이트   | green (2026-08-11 통합 재실행): DB 하니스 29 exit 0 · 패키지 730(contracts 293·mobile 256·data 135·domain 13·adapters 11·ui-tokens 22) · audit3 182 · ui 35 · render 98(+e2e 106, 실 Chromium 자막 포함) · Playwright 75 · build·typecheck·lint·format ✓ |
 

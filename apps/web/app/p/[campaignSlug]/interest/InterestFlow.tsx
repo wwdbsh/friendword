@@ -640,7 +640,7 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
               {aiDisclosureRevision !== null && (
                 <p className={styles.finePrint}>Disclosure version {aiDisclosureRevision}</p>
               )}
-              <label className={styles.label} style={{ display: 'flex', gap: '0.6rem' }}>
+              <label className={styles.confirmationRow}>
                 <input
                   type="checkbox"
                   checked={aiConsentChecked}

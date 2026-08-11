@@ -91,13 +91,24 @@
   letter-spacing: 0.08em;
 }
 
+/* T016: the native date input (step 3 "About you") sized itself from its own
+   shadow content and its UA font — 56px tall in a monospace face next to the
+   54px Arial text fields, so REGION/CITY and DATE OF BIRTH never shared a
+   height or a baseline. Every control here is single-line, so the box is
+   pinned instead of derived: border-box + an explicit height + horizontal-only
+   padding (single-line controls centre their own text), and an inherited font
+   family so date, text, number and select all render in the body face. */
 .input {
+  box-sizing: border-box;
+  height: 3.375rem;
   min-height: 44px;
-  padding: var(--space-md);
+  padding: 0 var(--space-md);
   border: var(--stroke-trust) solid var(--color-border-muted);
   border-radius: var(--radius-md);
   background: var(--color-background);
+  font-family: inherit;
   font-size: var(--font-size-md);
+  line-height: 1.2;
 }
 
 .primary,
@@ -691,10 +702,14 @@
 
 /* The reassurance note is the one place teal reads as a verification signal
    (DESIGN.md Trust Layer: teal / borderSuccess for trust-positive states). */
+/* T016: the note sat flush against the preview card above it (0px) while the
+   approve button kept its own 8px offset. Give it the section's own rhythm:
+   24px above, 24px below once the button's margin is counted. */
 .controlNote {
   display: flex;
   gap: var(--space-sm);
   align-items: flex-start;
+  margin-top: var(--space-lg);
   margin-bottom: var(--space-md);
   padding: var(--space-md);
   border: var(--stroke-trust) solid var(--color-border-success);

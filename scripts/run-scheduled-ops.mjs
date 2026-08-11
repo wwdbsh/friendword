@@ -2,9 +2,9 @@
 // Second audit Slice 6: one entry point for the recurring ops passes so
 // "manual and forgettable" becomes "one scheduled command". Runs the
 // account-deletion processor and the orphan-media sweep in order and
-// exits non-zero if any pass fails. Scheduling itself (cron, CI
-// schedule, or a host scheduler) is an ops/user decision — see
-// docs/OPS.md; nothing here self-schedules.
+// exits non-zero if any pass fails. The schedule lives outside this file:
+// .github/workflows/scheduled-ops.yml runs it daily (fcp Issue #39), and
+// the pure-SQL passes also run in hosted pg_cron (0043) — see docs/OPS.md.
 
 import { spawnSync } from 'node:child_process';
 

@@ -1,0 +1,62 @@
+# Safety queue escalation (fcp Issue #39, GAP-2).
+#
+# WHY THIS IS AN ALERT AND NOT A REPORT: `reports` and `ops_alerts` had no
+# automatic consumer. During public beta a UGC report only reached the operator
+# if someone remembered to run the SQL in docs/OPS.md. This job reads both
+# queues with the service role and FAILS ON PURPOSE while anything is
+# unhandled, because a failed run is the only notification channel this repo
+# already has: GitHub mails the repository owner (wwdbsh@gmail.com) on a failed
+# scheduled run. The failure is the alert. A red run here means "an operator is
+# needed", not "the infrastructure broke" — the log line distinguishes them
+# (exit 2 = queue not empty, exit 1 = the check itself could not run).
+#
+# The owner must keep GitHub → Settings → Notifications → Actions → "Send
+# notifications for failed workflows only" enabled, or the channel is silent.
+# Runbook and the plan to replace this with a real channel: docs/OPS.md.
+#
+# PRIVACY: the script prints counts, row ids, ages and allowlisted type labels
+# only — never report text, user ids, emails or alert payloads. Keep it that
+# way; these logs end up in mail.
+#
+# STATE: there is no "already notified" bookkeeping. The job stays red every
+# hour until the operator resolves the rows (reports.status, ops_alerts
+# .resolved_at). Repeat mail is the intended nag; no new schema was added for
+# an ack flag (docs/OPS.md records the trade-off).
+#
+# MINUTE BUDGET (private repo — Actions minutes ran out on 2026-07-24 and
+# killed the previous hourly workflow, DECISIONS 2026-07-25): this job has no
+# `pnpm install` and no build; it checks out and runs one dependency-free
+# script, so it bills the 1-minute minimum. Hourly ≈ 730 min/month. Do not add
+# an install step here — put heavy work in scheduled-ops.yml (daily).
+
+name: Safety escalation
+
+on:
+  # Hourly at :17 to stay off the top-of-hour runner rush.
+  schedule:
+    - cron: '17 * * * *'
+  # Manual drill from the Actions tab.
+  workflow_dispatch:
+
+concurrency:
+  group: safety-escalation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check-safety-queues:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      # Registered by the maintainer on 2026-08-11. Values never appear here.
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Check open reports and unresolved ops alerts
+        run: node scripts/check-safety-escalations.mjs

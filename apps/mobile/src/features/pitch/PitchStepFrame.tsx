@@ -1,4 +1,13 @@
-import { colors, fonts, fontSizes, motion, radii, spacing, strokes } from '@friendword/ui-tokens';
+import {
+  colors,
+  fonts,
+  fontSizes,
+  maxControlFontScale,
+  motion,
+  radii,
+  spacing,
+  strokes,
+} from '@friendword/ui-tokens';
 import type { PropsWithChildren, ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -63,7 +72,10 @@ export function PitchStepFrame({
             <Text style={styles.back}>Back</Text>
           </Pressable>
           <View style={styles.trackBadge}>
-            <Text style={styles.track}>Track {track} of 5</Text>
+            {/* MUI-14: a fixed-padding pill, so its label is capped. */}
+            <Text maxFontSizeMultiplier={maxControlFontScale} style={styles.track}>
+              Track {track} of 5
+            </Text>
           </View>
         </View>
 

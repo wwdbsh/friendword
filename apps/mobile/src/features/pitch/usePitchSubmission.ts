@@ -98,7 +98,13 @@ export function usePitchSubmission(
       await preparePitchReview(pitchDraftService, activeDraftId, choice);
       pendingChoice.current = null;
       setErrorMessage(null);
-      router.push({ pathname: '/pitch/review', params: { draftId: activeDraftId } });
+      // MUI-4: REPLACE, never push. The draft is on the server from here, and
+      // the five-track composer behind this screen is a copy of state that no
+      // longer decides anything. Pushing left it in the stack, so after the
+      // pitch was sent (review replaces itself with /pitch/share) one back
+      // gesture landed on a wizard for a pitch that had already gone — the
+      // audit's "empty new-pitch wizard". Replacing makes back mean home.
+      router.replace({ pathname: '/pitch/review', params: { draftId: activeDraftId } });
     } catch (error: unknown) {
       if (error instanceof NeedsSignInError) {
         setSignInVisible(true);

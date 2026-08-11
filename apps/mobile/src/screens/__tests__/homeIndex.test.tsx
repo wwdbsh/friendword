@@ -27,17 +27,30 @@ const navActions: { label: string; onPress: () => void }[] = [];
 const push = vi.fn();
 
 vi.mock('@friendword/ui-tokens', () => ({
-  colors: { background: '', ink: '', pop: '', textFaint: '', textSecondary: '' },
+  colors: {
+    background: '',
+    borderMuted: 'border-muted',
+    ink: '',
+    keyword: 'keyword',
+    textFaint: 'text-faint',
+    textSecondary: '',
+  },
   fonts: { body: '', display: '' },
   fontSizes: { xs: 1, sm: 1, md: 1, lg: 1, xl: 1, hero: 1 },
   spacing: { xs: 1, sm: 1, md: 1, lg: 1, xl: 1 },
+  strokes: { sticker: 2, trust: 1 },
 }));
 vi.mock('expo-router', () => ({ useRouter: () => ({ push }) }));
 vi.mock('react-native', async () => {
   const { createElement } = await import('react');
   return {
-    ScrollView: ({ children }: { readonly children?: ReactNode }) =>
-      createElement('main', null, children),
+    ScrollView: ({
+      children,
+      contentContainerStyle,
+    }: {
+      readonly children?: ReactNode;
+      readonly contentContainerStyle?: object;
+    }) => createElement('main', { 'data-style': JSON.stringify(contentContainerStyle) }, children),
     StyleSheet: { create: (styles: object) => styles },
     Text: ({ children }: { readonly children?: ReactNode }) =>
       createElement('span', null, children),
@@ -127,5 +140,25 @@ describe('the mobile home is the app half of My page', () => {
     const markup = renderHome();
 
     expect(markup).toContain('Pitch a friend');
+  });
+});
+
+// MUI-7 (T014). The container was `flexGrow: 1` + `justifyContent:
+// 'space-between'`, so the distance between the hero card and the "My page"
+// group was whatever the phone had left over: flush on a small screen, half a
+// screen apart on a large one, and different again at a larger text size. A
+// list of two things does not get to be a different screen per device.
+describe('the home layout is the same shape on every phone', () => {
+  it('stacks top-down on one spacing rule instead of spreading to fill', () => {
+    const markup = renderHome();
+
+    expect(markup).toContain('data-style=');
+    expect(markup).not.toContain('space-between');
+  });
+
+  it('still lets short content leave the bottom empty rather than clipping', () => {
+    // flexGrow keeps the scroll view filling the screen; only the distribution
+    // of the leftover space changed.
+    expect(renderHome()).toContain('&quot;flexGrow&quot;:1');
   });
 });

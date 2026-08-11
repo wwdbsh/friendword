@@ -26,7 +26,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   eyebrow: {
-    color: colors.pop,
+    color: colors.keyword,
     fontFamily: 'BricolageGrotesqueBold',
     fontSize: fontSizes.sm,
     letterSpacing: 1,

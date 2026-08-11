@@ -1,4 +1,11 @@
-import { colors, fontSizes, radii, spacing, strokes } from '@friendword/ui-tokens';
+import {
+  colors,
+  fontSizes,
+  maxControlFontScale,
+  radii,
+  spacing,
+  strokes,
+} from '@friendword/ui-tokens';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { useReducedMotion } from './useReducedMotion';
@@ -25,7 +32,10 @@ export function SafetyAction({ label, onPress, disabled = false }: SafetyActionP
         pressed && !disabled && !reducedMotion && styles.pressedMotion,
       ]}
     >
-      <Text style={styles.label}>{label}</Text>
+      {/* MUI-14: 48pt destructive control; cap the label, never disable scaling. */}
+      <Text maxFontSizeMultiplier={maxControlFontScale} style={styles.label}>
+        {label}
+      </Text>
     </Pressable>
   );
 }

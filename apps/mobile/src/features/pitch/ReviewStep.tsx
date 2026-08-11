@@ -184,7 +184,10 @@ const styles = StyleSheet.create({
     paddingLeft: spacing.md,
   },
   captionLabel: {
-    color: colors.flirt,
+    // MUI-6: hot pink is 3.12:1 on white — a waveform and border colour, not a
+    // label colour. The pink left rule (a 4pt decorative bar) stays; the words
+    // are ink.
+    color: colors.ink,
     fontFamily: 'BricolageGrotesqueBold',
     fontSize: fontSizes.sm,
   },
@@ -203,7 +206,17 @@ const styles = StyleSheet.create({
   // Mirror PhotosStep's proven frame pattern: a percentage-width Image with
   // aspectRatio can resolve to zero height on the new architecture, so size
   // the wrapping View and let the Image fill it.
-  photoFrame: { width: '47%', borderRadius: radii.sm, overflow: 'hidden' },
+  // MUI-10: PhotosStep and this screen showed the same four photos in two
+  // different frames — 48% wide with a 2px ink outline there, 47% and no
+  // outline here. One frame.
+  photoFrame: {
+    width: '48%',
+    overflow: 'hidden',
+    borderColor: colors.ink,
+    borderRadius: radii.sm,
+    borderWidth: strokes.sticker,
+    backgroundColor: colors.background,
+  },
   photo: { width: '100%', aspectRatio: 1, resizeMode: 'cover' },
   consentCopy: {
     color: colors.textSecondary,
@@ -212,5 +225,9 @@ const styles = StyleSheet.create({
     lineHeight: fontSizes.sm * 1.45,
   },
   error: { color: colors.danger, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.sm },
-  progress: { color: colors.fresh, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.md },
+  progress: {
+    color: colors.verified,
+    fontFamily: 'BricolageGrotesqueBold',
+    fontSize: fontSizes.md,
+  },
 });

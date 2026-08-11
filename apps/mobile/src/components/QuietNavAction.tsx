@@ -1,4 +1,4 @@
-import { colors, fontSizes, spacing, strokes } from '@friendword/ui-tokens';
+import { colors, fontSizes, maxControlFontScale, spacing, strokes } from '@friendword/ui-tokens';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { useReducedMotion } from './useReducedMotion';
@@ -25,8 +25,16 @@ export function QuietNavAction({ label, onPress, disabled = false }: QuietNavAct
         pressed && !disabled && !reducedMotion && styles.pressedMotion,
       ]}
     >
-      <Text style={styles.label}>{label}</Text>
-      <Text accessibilityElementsHidden importantForAccessibility="no" style={styles.arrow}>
+      {/* MUI-14: 44pt row, so the label is capped rather than clipped. */}
+      <Text maxFontSizeMultiplier={maxControlFontScale} style={styles.label}>
+        {label}
+      </Text>
+      <Text
+        accessibilityElementsHidden
+        importantForAccessibility="no"
+        maxFontSizeMultiplier={maxControlFontScale}
+        style={styles.arrow}
+      >
         →
       </Text>
     </Pressable>

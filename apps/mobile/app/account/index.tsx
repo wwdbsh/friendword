@@ -1,3 +1,8 @@
+import {
+  ACCOUNT_DELETION_CONFIRMATION_WORD,
+  ACCOUNT_DELETION_FACTS,
+  accountDeletionConfirmationMatches,
+} from '@friendword/contracts';
 import { getSession, SafetyRepo, UnauthenticatedError } from '@friendword/data';
 import { colors, fonts, fontSizes, radii, spacing, strokes } from '@friendword/ui-tokens';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -5,61 +10,31 @@ import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { HypeButton, SignInPromptCard, TrustCard } from '../../src/components';
+import {
+  HypeButton,
+  PendingCard,
+  ScreenHeading,
+  SignInPromptCard,
+  TrustCard,
+} from '../../src/components';
 import { SignInSheet } from '../../src/features/auth/SignInSheet';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 
-/** The word the second step requires, typed exactly. */
-export const DELETE_CONFIRMATION_WORD = 'DELETE';
-
 /**
- * The second gate. A checkbox is a mis-tap; typing the word is not. Surrounding
- * whitespace is forgiven because iOS keyboards add it, nothing else is —
- * lower-case "delete" does not arm the button.
- */
-export function isDeleteConfirmed(typed: string): boolean {
-  return typed.trim() === DELETE_CONFIRMATION_WORD;
-}
-
-/**
- * What deletion actually does, in the order a person cares about. Every line is
- * a claim the code keeps — see docs/PRIVACY_DATA_MAP.md for the table this is
- * the plain-language version of:
+ * The confirmation word and the deletion facts are the SAME copy the web
+ * prints, and they now live in one place — `@friendword/contracts`
+ * (`accountDeletionCopy.ts`). T013 left the two lists as deliberate twins and
+ * named this promotion as T014's job; two nine-line promises about somebody's
+ * data drift the first time one of them is edited alone.
  *
- * - "closed the moment you confirm": `request_account_deletion` (0037) flips
- *   `account_status` to 'deleted' in the same transaction, and every guarded
- *   RPC refuses a non-active account from then on.
- * - "erased later, on a schedule": the physical erasure is
- *   `scripts/process-deletions.mjs`, run by the daily scheduled-ops pass. No
- *   time is promised here because none is guaranteed — docs/OPS.md is explicit
- *   that daily is a floor, not an SLA.
- * - "interests are deleted, not anonymised": the job runs
- *   `DELETE FROM interests WHERE sender_user_id = …`, and the intro rooms the
- *   account is in go with it, taking both sides' messages.
- * - "a pitch you recorded for a friend stays with them": the draft is
- *   transferred to the campaign owner, but the voice — and the rendered video
- *   that copies the same audio — is erased, and 0037 archives the campaign
- *   that just lost it.
- * - "the words you wrote and the text transcript": `pitch_drafts.headline`,
- *   `.body` and `.transcript`, plus the `consent_revisions` snapshot, are kept
- *   deliberately (the approval record is an audit object, and 0032 froze the
- *   transcript into the revision the dater approved). Saying only that the
- *   voice goes would let someone believe their words go with it.
- * - "safety reports are kept": the job nulls the user references and marks the
- *   report anonymous rather than deleting it.
+ * Re-exported under this screen's original names because they are what the
+ * screen and its tests call the thing, and because the export identity — not a
+ * string comparison — is what `accountIndex.test.tsx` pins to the shared array.
  */
-export const ACCOUNT_DELETION_FACTS: readonly string[] = [
-  'Your account is closed the moment you confirm. It stops working right away.',
-  'Erasing the data itself happens afterwards, on a scheduled job. We will not promise you a time for it.',
-  'Erased: your profile and photos, your voice recordings, the pitches you made, the interests you sent, and your chats.',
-  'Interests you sent are deleted, not anonymised. They disappear from the inbox of the person you sent them to, and any chat you opened with them goes too — for both of you.',
-  'A pitch you recorded for a friend stays with them as their campaign, but your voice recording and any video made from it are erased, so that campaign is archived and stops being public.',
-  'What stays on that pitch is the written part your friend approved, including the words you wrote and the text transcript of what you said. It is their record of what they agreed to publish.',
-  'Safety reports about or from you are kept for our moderation record, with your account removed from them.',
-  'Anything already shared or downloaded by other people cannot be called back.',
-  'This cannot be undone.',
-];
+export const DELETE_CONFIRMATION_WORD = ACCOUNT_DELETION_CONFIRMATION_WORD;
+export const isDeleteConfirmed = accountDeletionConfirmationMatches;
+export { ACCOUNT_DELETION_FACTS };
 
 /**
  * What signing out does, and — the part people get wrong — what it does not.
@@ -201,7 +176,7 @@ export function AccountContent({
   }
 
   if (session === 'loading') {
-    return <Text style={styles.message}>Checking your account…</Text>;
+    return <PendingCard label="Checking your account…" />;
   }
 
   if (session === 'signed_out') {
@@ -428,10 +403,7 @@ export default function AccountScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.heading}>
-          <Text style={styles.eyebrow}>ACCOUNT</Text>
-          <Text style={styles.title}>Your account</Text>
-        </View>
+        <ScreenHeading eyebrow="ACCOUNT" title="Your account" />
         <AccountContent
           session={session}
           step={step}
@@ -472,14 +444,6 @@ export default function AccountScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   content: { gap: spacing.lg, padding: spacing.lg, paddingBottom: spacing.xxl },
-  heading: { gap: spacing.sm },
-  eyebrow: {
-    color: colors.pop,
-    fontFamily: 'BricolageGrotesqueBold',
-    fontSize: fontSizes.xs,
-    letterSpacing: 1,
-  },
-  title: { color: colors.ink, fontFamily: fonts.display, fontSize: fontSizes.xl, lineHeight: 32 },
   cardTitle: { color: colors.ink, fontFamily: 'BricolageGrotesqueBold', fontSize: fontSizes.lg },
   message: {
     color: colors.textSecondary,

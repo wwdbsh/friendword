@@ -1,4 +1,12 @@
-import { colors, fonts, fontSizes, radii, spacing, strokes } from '@friendword/ui-tokens';
+import {
+  colors,
+  fonts,
+  fontSizes,
+  maxControlFontScale,
+  radii,
+  spacing,
+  strokes,
+} from '@friendword/ui-tokens';
 import { Pressable, StyleSheet, Text, type ViewStyle } from 'react-native';
 
 import { useReducedMotion } from './useReducedMotion';
@@ -41,7 +49,15 @@ export function HypeButton({
         pressed && !disabled && !reducedMotion && styles.pressedScale,
       ]}
     >
-      <Text style={[styles.label, secondary && styles.secondaryLabel]}>{label}</Text>
+      {/* MUI-14: the button's height is fixed at 52pt, so its own label is
+          capped rather than allowed to scale out of the box. Nothing here sets
+          allowFontScaling={false} — see `maxControlFontScale`. */}
+      <Text
+        maxFontSizeMultiplier={maxControlFontScale}
+        style={[styles.label, secondary && styles.secondaryLabel]}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }

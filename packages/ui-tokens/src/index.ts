@@ -60,8 +60,16 @@ export const colors = {
   flirt: '#FF3D8A',
   /** Sunshine yellow — hype badges, vouch highlights. */
   hype: '#FFC63F',
-  /** Teal — verified, safety, success. */
+  /** Teal — verified, safety, success. Fill and icon only, never readable copy. */
   fresh: '#17B89B',
+  /**
+   * Readable teal — the verified/success accent when the token has to carry
+   * TEXT (T014, MUI-6). Same signal as `fresh`, darkened until it passes WCAG
+   * AA as normal text on both canvases (4.93:1 on cream, 5.27:1 on white);
+   * `fresh` itself measures 2.35:1 on cream. Fills and icons still use `fresh`,
+   * boundaries still use `borderSuccess`.
+   */
+  verified: '#0B7A64',
   /**
    * Danger/report. Dark enough that cream text passes 4.5:1 as a fill and
    * the color itself passes as text on cream (audit D-P0 correction).
@@ -165,6 +173,53 @@ export const shadows = {
    */
   trust: '0 4px 16px rgba(34, 27, 21, 0.08)',
 } as const;
+
+/**
+ * Which colour tokens may carry readable copy — the machine-readable form of
+ * the rules the doc comments above state in prose (T014, audit MUI-6).
+ *
+ * The prose was already correct and was already ignored: the mobile app used
+ * `pop` for every screen eyebrow, `fresh` for metadata lines and `textFaint`
+ * for a hint, all of them below WCAG AA as text. A comment cannot fail a build,
+ * so the ban lives here as data, `contrast.test.ts` proves each entry really is
+ * unreadable (the ban is measured, never an opinion), and
+ * `apps/mobile/src/components/tokenTextColors.test.ts` scans the app for the
+ * `color:` style key and fails on any of these names.
+ *
+ * Keys are token names in {@link colors}; values say what to use instead.
+ */
+export const nonTextColorTokens = {
+  pop: 'Tangerine fill (2.89:1 on cream). Readable tangerine copy uses `keyword`.',
+  popPressed: 'Pressed tangerine fill (3.24:1 on cream). Readable copy uses `keyword`.',
+  flirt: 'Hot-pink fill/waveform (3.12:1 on cream). Copy on cream uses `ink`.',
+  hype: 'Sunshine badge fill (1.46:1 on cream). Copy on a hype fill uses `onHype`.',
+  fresh: 'Teal fill/icon (2.35:1 on cream). Readable teal copy uses `verified`.',
+  textFaint: 'Placeholder/disabled fill only (2.72:1 on cream). Copy uses `textSecondary`.',
+} as const;
+
+/**
+ * Which colour tokens may never be a border/boundary — WCAG 1.4.11 needs 3:1
+ * against BOTH cream and white and these two miss it on both. Trust Layer
+ * hairlines use `borderMuted`, success boundaries use `borderSuccess`.
+ */
+export const nonBorderColorTokens = {
+  fresh: 'Teal is 2.35:1 as a boundary. Success borders use `borderSuccess`.',
+  textFaint: 'Faint grey is 2.72:1 as a boundary. Hairlines use `borderMuted`.',
+} as const;
+
+/**
+ * Largest Dynamic Type multiplier a control with a FIXED height may apply to
+ * its own label (T014, audit MUI-14).
+ *
+ * Font scaling is never switched off: `allowFontScaling={false}` would leave a
+ * person who needs large text with the same 12pt badge they could not read, and
+ * body copy on every screen scales without a cap. The cap exists only where the
+ * container cannot grow with the text — a 44/48/52pt minimum-height button, a
+ * pill badge — because there the honest failure mode is a clipped label. At
+ * 1.4× the largest standard iOS setting still fits inside those heights; the
+ * accessibility sizes above it are what the cap absorbs.
+ */
+export const maxControlFontScale = 1.4;
 
 /** Outline widths: 2px sticker for campaign, 1px hairline for the Trust Layer. */
 export const strokes = {

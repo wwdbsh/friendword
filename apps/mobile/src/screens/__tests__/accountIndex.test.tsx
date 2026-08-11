@@ -401,3 +401,35 @@ describe('account deletion copy', () => {
     expect(copy).toContain('cannot be called back');
   });
 });
+
+// T014 (T013 carry-over). The nine lines above and the nine lines the web
+// prints were two hand-maintained copies of the same promise. They are now one
+// array in `@friendword/contracts`, and this pins the screen to THAT array by
+// identity — a re-typed twin would pass a string comparison and fail this.
+describe('the deletion copy has exactly one source', () => {
+  it('renders the shared contracts array, not a local transcription of it', async () => {
+    const shared = await import('@friendword/contracts');
+
+    expect(ACCOUNT_DELETION_FACTS).toBe(shared.ACCOUNT_DELETION_FACTS);
+    expect(DELETE_CONFIRMATION_WORD).toBe(shared.ACCOUNT_DELETION_CONFIRMATION_WORD);
+    expect(isDeleteConfirmed).toBe(shared.accountDeletionConfirmationMatches);
+  });
+
+  it('still prints every one of those lines on the screen', () => {
+    const markup = render({ step: 'idle' });
+
+    for (const fact of ACCOUNT_DELETION_FACTS) {
+      expect(markup).toContain(fact.slice(0, 40));
+    }
+  });
+
+  // The mobile screen keeps saying what it clears locally; that claim is true
+  // of a phone and false of a browser, so it lives here and not in the shared
+  // list (which the contracts suite asserts is surface-neutral).
+  it('keeps the device-local claims in the screen, next to the shared list', () => {
+    const markup = render({ step: 'deleted', localClosure: 'done' });
+
+    expect(markup).toContain('the pitches saved here are gone');
+    expect(ACCOUNT_DELETION_FACTS.join(' ')).not.toContain('this phone');
+  });
+});

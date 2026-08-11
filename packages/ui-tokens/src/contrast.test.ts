@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { colors } from './index';
+import { colors, nonBorderColorTokens, nonTextColorTokens } from './index';
 
 function channel(value: number): number {
   const scaled = value / 255;
@@ -52,6 +52,9 @@ const READABLE_PAIRS: readonly (readonly [string, string, string])[] = [
   ['keyword text on cream', colors.keyword, colors.background],
   ['keyword text on surface', colors.keyword, colors.surface],
   ['ink on fresh fill', colors.ink, colors.fresh],
+  // T014 (MUI-6): the readable stand-in for `fresh` wherever teal carries copy.
+  ['verified text on cream', colors.verified, colors.background],
+  ['verified text on surface', colors.verified, colors.surface],
 ];
 
 /**
@@ -76,6 +79,40 @@ describe('token contrast (WCAG AA, normal text)', () => {
   });
 });
 
+/**
+ * T014 / audit MUI-6. `nonTextColorTokens` is the machine-readable ban the
+ * mobile source scan enforces. These tests keep it honest in both directions:
+ * every banned token really is unreadable, and the replacement each entry names
+ * really is readable (the readable ones are covered by READABLE_PAIRS above).
+ */
+describe('non-text colour policy (MUI-6)', () => {
+  it('names only tokens that exist', () => {
+    for (const token of Object.keys(nonTextColorTokens)) {
+      expect(colors).toHaveProperty(token);
+    }
+  });
+
+  it('bans every token that fails AA as text on cream AND on white', () => {
+    for (const token of Object.keys(nonTextColorTokens)) {
+      const value = colors[token as keyof typeof colors];
+      expect(contrastRatio(value, colors.background)).toBeLessThan(AA_NORMAL);
+      expect(contrastRatio(value, colors.surface)).toBeLessThan(AA_NORMAL);
+    }
+  });
+
+  it('offers a readable replacement for each banned accent', () => {
+    // keyword replaces pop/popPressed, verified replaces fresh, textSecondary
+    // replaces textFaint, ink replaces flirt, onHype replaces hype-on-hype.
+    expect(contrastRatio(colors.keyword, colors.background)).toBeGreaterThanOrEqual(AA_NORMAL);
+    expect(contrastRatio(colors.verified, colors.background)).toBeGreaterThanOrEqual(AA_NORMAL);
+    expect(contrastRatio(colors.textSecondary, colors.background)).toBeGreaterThanOrEqual(
+      AA_NORMAL,
+    );
+    expect(contrastRatio(colors.ink, colors.background)).toBeGreaterThanOrEqual(AA_NORMAL);
+    expect(contrastRatio(colors.onHype, colors.hype)).toBeGreaterThanOrEqual(AA_NORMAL);
+  });
+});
+
 describe('Trust Layer border contrast (WCAG 1.4.11 non-text)', () => {
   it.each(TRUST_BORDER_PAIRS)('%s is at least 3:1', (_label, foreground, background) => {
     expect(contrastRatio(foreground, background)).toBeGreaterThanOrEqual(NON_TEXT);
@@ -84,6 +121,16 @@ describe('Trust Layer border contrast (WCAG 1.4.11 non-text)', () => {
   it('textFaint stays below 3:1 as a border — it is fill-only, never a boundary', () => {
     expect(contrastRatio(colors.textFaint, colors.background)).toBeLessThan(NON_TEXT);
     expect(contrastRatio(colors.textFaint, colors.surface)).toBeLessThan(NON_TEXT);
+  });
+
+  it('bans exactly the boundary tokens that measure below 3:1 on both canvases', () => {
+    // The list is data the mobile guard reads; if a token were listed without
+    // failing, the ban would be an opinion rather than a measurement.
+    for (const token of Object.keys(nonBorderColorTokens)) {
+      const value = colors[token as keyof typeof colors];
+      expect(contrastRatio(value, colors.background)).toBeLessThan(NON_TEXT);
+      expect(contrastRatio(value, colors.surface)).toBeLessThan(NON_TEXT);
+    }
   });
 
   it('fresh stays below 3:1 as a border — success boundaries use borderSuccess', () => {

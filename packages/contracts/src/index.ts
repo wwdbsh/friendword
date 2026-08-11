@@ -1,3 +1,4 @@
+export * from './accountDeletionCopy';
 export * from './products';
 export * from './publicPitch';
 export * from './draftInputs';

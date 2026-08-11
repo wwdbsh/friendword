@@ -52,7 +52,7 @@ export function RoomsList() {
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
-        <FlowNav current="rooms" />
+        <FlowNav />
 
         {client === null && (
           <section className={styles.card}>

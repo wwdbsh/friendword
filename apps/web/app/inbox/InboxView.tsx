@@ -16,6 +16,7 @@ import {
 import { EmailSignIn } from '@/components/EmailSignIn';
 import { FlowNav } from '@/components/FlowNav';
 import { SignedOutNotice } from '@/components/SignedOutNotice';
+import { campaignStatusLabel, displayCampaignStatus } from '@/lib/campaignStatus';
 import { kickNotificationSender } from '@/lib/notifications/kick';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { useSession } from '@/lib/useSession';
@@ -34,25 +35,6 @@ type OwnedCampaign = {
   readonly endsAt: string | null;
   readonly pass: CampaignPassState;
 };
-
-/**
- * H-5 consistency: the public page 404s once ends_at passes even before
- * the expiration job runs, so the inbox must never offer Live/Resume for
- * a campaign whose window ended.
- */
-function displayStatus(campaign: Pick<OwnedCampaign, 'status' | 'endsAt'>): string {
-  if (campaign.status === 'expired') {
-    return 'expired';
-  }
-  if (
-    (campaign.status === 'published' || campaign.status === 'paused') &&
-    campaign.endsAt !== null &&
-    new Date(campaign.endsAt).getTime() <= Date.now()
-  ) {
-    return 'expired';
-  }
-  return campaign.status;
-}
 
 const FUNNEL_LABELS: Record<string, string> = {
   pitch_viewed_unique: 'Unique views',
@@ -301,7 +283,7 @@ export function InboxView() {
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
-        <FlowNav current="inbox" />
+        <FlowNav />
 
         {client === null && (
           <section className={styles.card}>
@@ -356,28 +338,27 @@ export function InboxView() {
             </section>
 
             {state.campaigns.map((campaign) => {
-              const shownStatus = displayStatus(campaign);
+              const shownStatus = displayCampaignStatus(campaign);
               return (
                 <section key={campaign.id} className={styles.card}>
                   <span className={shownStatus === 'published' ? styles.badgeFresh : styles.badge}>
-                    {shownStatus === 'published'
-                      ? 'Live'
-                      : shownStatus === 'paused'
-                        ? 'Paused'
-                        : shownStatus === 'expired'
-                          ? 'Ended'
-                          : 'Down'}
+                    {campaignStatusLabel(shownStatus)}
                   </span>
-                  <h2 className={styles.subTitle}>Your page</h2>
+                  <h2 className={styles.subTitle}>Your public page</h2>
                   <p className={styles.muted}>
                     {campaign.slug === null
                       ? 'No public link yet.'
                       : `friendword — /p/${campaign.slug}`}
                   </p>
                   <div className={styles.actionRow}>
+                    {/* T009: "public" is load-bearing now that the shell
+                        carries "My page" for the account hub. Two links a
+                        thumb-width apart may not both be called my page when
+                        one is the campaign strangers see and the other is the
+                        private summary of everything. */}
                     {campaign.slug !== null && shownStatus === 'published' && (
                       <Link className={styles.secondary} href={`/p/${campaign.slug}`}>
-                        View my page
+                        View my public page
                       </Link>
                     )}
                     {shownStatus === 'published' && (
@@ -478,7 +459,7 @@ export function InboxView() {
                 </p>
                 {/* T004: the empty inbox was the end of the road. Only the one
                     destination this card does not already offer is added — the
-                    campaign card above carries "View my page" for a live page,
+                    campaign card above carries "View my public page" for a live page,
                     and repeating it here made two links to one screen. */}
                 <div className={styles.actionRow}>
                   <Link className={styles.secondary} href="/rooms">
@@ -608,8 +589,17 @@ export function InboxView() {
                 )}
               </section>
             ))}
+          </>
+        )}
 
-            <section className={styles.card}>
+        {/* T009: the hub links straight here (`/inbox#account`), so the control
+            has to exist on this screen for a signed-in person whether or not
+            the interest rows behind it happened to load — a failed inbox read
+            says nothing about whether someone can delete their account. */}
+        {client !== null &&
+          session !== null &&
+          (state.step === 'ready' || state.step === 'error') && (
+            <section className={styles.card} id="account">
               <h2 className={styles.subTitle}>Your account</h2>
               <p className={styles.muted}>
                 Deleting your account removes your pages, interests, chats, and photos. This cannot
@@ -626,8 +616,7 @@ export function InboxView() {
                 {deletingAccount ? 'Deleting…' : 'Delete my account'}
               </button>
             </section>
-          </>
-        )}
+          )}
       </div>
     </main>
   );

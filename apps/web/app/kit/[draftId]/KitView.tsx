@@ -148,11 +148,13 @@ export function KitView({ draftId }: { readonly draftId: string }) {
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
-        {/* Tabs off: the kit is the introducer's surface, and Inbox / Intro
-            rooms are the dater's. Offering them here invites the person who
-            recorded the pitch into two screens that will always be empty for
-            them. The published pitch is their real destination, so it is an
-            explicit back link (the RoomView pattern) when we know the slug. */}
+        {/* Account link off: the kit is the introducer's surface, and the
+            account areas behind "My page" (interest received, interest sent,
+            intro rooms, pages about you) are the dater's — offering them here
+            invites the person who recorded the pitch into screens that are
+            empty for them by definition. The published pitch is their real
+            destination, so it is an explicit back link (the RoomView pattern)
+            when we know the slug. */}
         <FlowNav
           tabs={false}
           {...(campaign?.slug === undefined || campaign.slug === null

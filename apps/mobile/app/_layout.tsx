@@ -136,7 +136,7 @@ export default function RootLayout() {
       >
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="pitch/new" options={{ headerShown: false }} />
-        <Stack.Screen name="campaigns/index" options={{ title: 'My dating campaigns' }} />
+        <Stack.Screen name="campaigns/index" options={{ title: 'My campaigns' }} />
         <Stack.Screen name="interests/index" options={{ title: 'My interests' }} />
         <Stack.Screen name="account/index" options={{ title: 'Your account' }} />
         {/* review and share set their own dynamic titles inline; these register

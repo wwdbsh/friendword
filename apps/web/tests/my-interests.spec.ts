@@ -129,8 +129,12 @@ test('walks from a sent interest to the rooms list and to the pitch, by link', a
     await expect(page.getByRole('heading', { name: 'Your introductions.' })).toBeVisible();
   });
 
-  await test.step('and the tabs come back to this screen', async () => {
-    await page.getByRole('link', { name: 'My interests' }).click();
+  // T009: the shell's one account destination is the hub, and the hub is what
+  // carries this screen — the return trip is two clicks and no typed URL.
+  await test.step('and the hub comes back to this screen', async () => {
+    await page.getByRole('link', { name: 'My page', exact: true }).click();
+    await page.waitForURL('**/me');
+    await page.getByRole('link', { name: 'Open my interests' }).click();
     await page.waitForURL('**/interests');
     await expect(page.getByRole('heading', { name: 'Interest you sent.' })).toBeVisible();
   });

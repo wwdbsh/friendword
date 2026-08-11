@@ -214,8 +214,8 @@ test('pill CTAs render without an underline whether they are links or buttons', 
   expect(await decorationOf('Open the room')).toBe('none');
 
   await page.goto('/inbox');
-  await expect(page.getByRole('link', { name: 'View my page' })).toBeVisible();
-  expect(await decorationOf('View my page')).toBe('none');
+  await expect(page.getByRole('link', { name: 'View my public page' })).toBeVisible();
+  expect(await decorationOf('View my public page')).toBe('none');
 
   // At 390px the desktop pill is display:none, so the visible CTA is the fixed
   // mobile bar's — the same one a viewer arriving from a reel actually taps.

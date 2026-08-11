@@ -37,8 +37,8 @@
 /* Global navigation for the account surfaces (T004 / FUN-1 · ACC-1 · WUI-6).
    Every signed-in screen used to render the wordmark as plain text and carry no
    anchor at all, so /inbox, /rooms/[id] and /kit/[id] were reachable only by
-   typing the URL. The shell now always carries a home link and the two account
-   destinations; no new design system — the sticker vocabulary above is reused. */
+   typing the URL. The shell now always carries a home link and the account hub;
+   no new design system — the sticker vocabulary above is reused. */
 .nav {
   display: flex;
   flex-direction: column;
@@ -65,6 +65,11 @@
   text-decoration: underline;
 }
 
+/* T009: one pill, not three. Measured at 375px the shell is 327px wide and the
+   three sibling tabs alone came to 331.7px — they wrapped to a second line, and
+   a fourth area (pages about you) could never have joined them. The hub link
+   fits beside the wordmark and the sign-out on one line, and the areas are
+   listed on the hub itself where they have room for their counts. */
 .navTabs {
   display: flex;
   flex-wrap: wrap;
@@ -109,10 +114,11 @@
   flex-direction: column;
   align-items: flex-end;
   gap: var(--space-xs);
-  /* Real-device QA: the three tabs plus this wrap to a second line at 390px,
-     and `space-between` parks a lone item on a wrapped line at the START —
-     putting "Sign out" under the wordmark as if it were a heading. The auto
-     margin keeps it at the far edge on both one-line and wrapped layouts. */
+  /* Real-device QA: when the row does wrap (a narrow phone, a large text
+     setting), `space-between` parks a lone item on a wrapped line at the
+     START — putting "Sign out" under the wordmark as if it were a heading. The
+     auto margin keeps it at the far edge on both one-line and wrapped
+     layouts. */
   margin-left: auto;
 }
 

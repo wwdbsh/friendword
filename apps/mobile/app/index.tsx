@@ -24,9 +24,21 @@ export default function HomeScreen() {
           <HypeButton label="Pitch a friend" onPress={() => router.push('/pitch/new')} />
         </StickerCard>
 
+        {/* T009 (Issue #46): this group is the app's half of the same hub the
+            web serves at /me, so it carries the web's names for the same
+            areas — "My campaigns" is the campaigns screen's own title, and
+            "My interests" is the web tab's. Renaming "Your activity" to "My
+            page" is the point: a person looking for their own things looks for
+            themselves, not for a log of what they did.
+
+            Interest received and intro rooms are answered on the web (the app
+            has no decide or chat screen), and they keep their contextual links
+            from the campaign and interest cards that can say what is in them.
+            A bare row here would leave the app for a screen this list cannot
+            describe. */}
         <View style={styles.navigation}>
-          <Text style={styles.navigationLabel}>Your activity</Text>
-          <QuietNavAction label="My dating campaigns" onPress={() => router.push('/campaigns')} />
+          <Text style={styles.navigationLabel}>My page</Text>
+          <QuietNavAction label="My campaigns" onPress={() => router.push('/campaigns')} />
           <QuietNavAction label="My interests" onPress={() => router.push('/interests')} />
           {/* App Store guideline 5.1.1(v): account deletion has to be reachable
               from inside the app, not only from the web. This is the only

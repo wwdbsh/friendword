@@ -157,25 +157,28 @@ const DATER_SURFACES: readonly { readonly name: string; readonly mount: () => vo
 ];
 
 describe('every signed-in surface offers a way out', () => {
+  // T009: the three sibling tabs became one hub link — four areas could not
+  // share a 327px row, and the mobile app has a hub rather than a tab bar. What
+  // every signed-in surface must still carry is home plus the account door.
   for (const surface of DATER_SURFACES) {
-    it(`${surface.name} links home, to the inbox and to the rooms list`, () => {
+    it(`${surface.name} links home and to the account hub`, () => {
       surface.mount();
 
       const hrefs = anchorHrefs();
       expect(hrefs).toContain('/');
-      expect(hrefs).toContain('/inbox');
-      expect(hrefs).toContain('/rooms');
+      expect(hrefs).toContain('/me');
     });
   }
 
-  // The kit belongs to the introducer, who is not the dater: an inbox and an
-  // intro-room list are two screens that are empty for them by definition.
-  // The way out is the wordmark, and the pitch when the slug is known.
-  it('offers the kit a way home without the dater-only tabs', () => {
+  // The kit belongs to the introducer, who is not the dater: the areas behind
+  // the hub are screens that are empty for them by definition. The way out is
+  // the wordmark, and the pitch when the slug is known.
+  it('offers the kit a way home without the dater-only account door', () => {
     render(<KitView draftId="33333333-3333-4333-8333-333333333333" />);
 
     const hrefs = anchorHrefs();
     expect(hrefs).toContain('/');
+    expect(hrefs).not.toContain('/me');
     expect(hrefs).not.toContain('/inbox');
     expect(hrefs).not.toContain('/rooms');
   });
@@ -186,13 +189,14 @@ describe('every signed-in surface offers a way out', () => {
     expect(screen.getByLabelText('Friendword home').getAttribute('href')).toBe('/');
   });
 
-  it('marks the inbox tab as the current page on the inbox', () => {
+  // The hub pill is a destination on an area screen, not a claim about where
+  // the person is: only the hub itself is `aria-current`.
+  it('marks no shell link as the current page on an area screen', () => {
     render(<InboxView />);
 
-    const inboxTab = screen
-      .getAllByRole('link')
-      .find((link) => link.getAttribute('href') === '/inbox');
-    expect(inboxTab?.getAttribute('aria-current')).toBe('page');
+    expect(
+      screen.getAllByRole('link').find((link) => link.getAttribute('aria-current') === 'page'),
+    ).toBeUndefined();
   });
 
   it('gives a single room an explicit return to the room list', () => {

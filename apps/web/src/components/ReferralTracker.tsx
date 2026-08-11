@@ -62,8 +62,8 @@ export function ReferralTracker({ seedSlug, recordVisit = true }: ReferralTracke
     }
     // Funnel entry (reel_visit): once per campaign per tab, anonymous by
     // design — the whole point is counting visitors who never sign in. The
-    // fire-and-forget trackEvent drops it silently until the server-side
-    // allowlist accepts the event name from anonymous callers.
+    // server-side allowlist accepts this name from anonymous callers as of
+    // migration 0057; the dedupe below is a client courtesy, not a guarantee.
     try {
       const visitKey = `${FW_REEL_VISIT_KEY_PREFIX}${seedSlug}`;
       if (window.sessionStorage.getItem(visitKey) !== null) {

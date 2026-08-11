@@ -37,7 +37,7 @@
 |             |                                                                                                                                                                                                                                                          |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 코드        | `858ccbe` on `main` (자막 크롬 — Goal 마지막 코드 병합)                                                                                                                                                                                                  |
-| hosted DB   | **0056까지 적용·정합** (`supabase migration list` 로컬=원격). `0040`은 의도적 갭                                                                                                                                                                         |
+| hosted DB   | **0057까지 적용·정합** (`supabase migration list` 로컬=원격, 2026-08-11 push — 릴스 계측 allowlist. 실측: 익명 `reel_visit` 204·익명 `s1_intent_created` 401급 거부·미지 이벤트 거부). `0040`은 의도적 갭                                      |
 | 런치 게이트 | **`public_beta_enabled=on` (2026-08-11 사용자 전환 — 공개 베타 개방)** · `real_payments_enabled=off` · `identity_enforcement=off` · `media_validation_enforcement=off` · `media_render_concurrency_cap=1`                                                |
 | 전 게이트   | green (2026-08-11 통합 재실행): DB 하니스 29 exit 0 · 패키지 730(contracts 293·mobile 256·data 135·domain 13·adapters 11·ui-tokens 22) · audit3 182 · ui 35 · render 98(+e2e 106, 실 Chromium 자막 포함) · Playwright 75 · build·typecheck·lint·format ✓ |
 
@@ -142,7 +142,7 @@ DB push는 클린 트리에서만 · `:3000` dev 서버가 떠 있는 채로 `we
 
 ## 7. 인프라 (계정 소유는 사용자)
 
-- **DB**: Supabase hosted `oknolcxsvogrhnxnyosr`, **Free 플랜**(파일당 50MB 상한 — Pro 업그레이드 예정). 마이그레이션 `0001~0053` 배포, `0054` 로컬 보류. `0040`은 의도적 미사용 갭.
+- **DB**: Supabase hosted `oknolcxsvogrhnxnyosr`, **Free 플랜**(파일당 50MB 상한 — Pro 업그레이드 예정). 마이그레이션 `0001~0057` 배포·정합. `0040`은 의도적 미사용 갭.
 - **웹**: Vercel, GitHub `wwdbsh/friendword` **`main` push마다 자동 배포**(Root=`apps/web`).
 - **모바일**: EAS `@wwdbsh/friendword` → TestFlight 내부 배포 가동.
 - **RevenueCat**: 프로젝트 연동 완료, 상품 `creator_launch_credit_499` · `campaign_pass_30d_1999`(ASC 둘 다 **Consumable**), 웹훅 → `/api/revenuecat`.

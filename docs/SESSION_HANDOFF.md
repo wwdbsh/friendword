@@ -146,7 +146,8 @@ DB push는 클린 트리에서만 · `:3000` dev 서버가 떠 있는 채로 `we
 - **웹**: Vercel, GitHub `wwdbsh/friendword` **`main` push마다 자동 배포**(Root=`apps/web`).
 - **모바일**: EAS `@wwdbsh/friendword` → TestFlight 내부 배포 가동.
 - **RevenueCat**: 프로젝트 연동 완료, 상품 `creator_launch_credit_499` · `campaign_pass_30d_1999`(ASC 둘 다 **Consumable**), 웹훅 → `/api/revenuecat`.
-- **scheduled-ops cron**: GH Actions 시크릿(`SUPABASE_URL` · `SUPABASE_SERVICE_ROLE_KEY`) 등록 여부 미확인 — 미등록이면 매시간 fail-fast 메일(의도된 동작).
+- **정기 운영 실행**: (기존 기재 정정 — 2026-08-11) "시크릿 등록 여부 미확인"이 아니라 **워크플로 파일 자체가 없었습니다**. `scheduled-ops.yml`은 2026-07-25에 삭제됐고 그 뒤 리포에 schedule 트리거가 하나도 없어 `run-scheduled-ops.mjs`는 한 번도 실행되지 않았습니다. 시크릿 2종은 사용자가 2026-08-11 등록 완료(`gh api …/actions/secrets`로 존재 확인). 이제 `scheduled-ops.yml`(매일 03:10 UTC, Node·Storage 잡)과 `safety-escalation.yml`(매시간 :17, 신고 큐 감시)이 있습니다 — 상세·runbook은 `docs/OPS.md`.
+- **GH Actions 과금 미확인 리스크**: 2026-07-24~25 모든 run이 `The job was not started because recent account payments have failed or your spending limit needs to be increased`로 죽었고, 그 뒤 성공한 run이 없습니다(`ci.yml`은 `disabled_manually`). 두 워크플로가 실제로 기동하는지는 **머지 후 첫 `workflow_dispatch`로 확인해야** 합니다. 기동하지 않으면 신고 알림 채널도 함께 죽어 있는 것입니다.
 
 ---
 

@@ -187,14 +187,24 @@ SELECT date_trunc('month', now()) AS month,
 
 - 긴급 차단: `UPDATE app_config SET value = 'on' WHERE key = 'provider_kill_switch';`
 
-## 정기 운영 실행 (Supabase pg_cron — 2026-07-25 전환)
+## 정기 운영 실행 (pg_cron + GitHub Actions — 2026-08-11 현재)
 
-표준 실행 경로는 **hosted Supabase 안의 pg_cron**입니다(migration 0043). GitHub
-Actions는 사용하지 않습니다 — private 레포 무료 분량 소진과 과금 여력 부재로
-2026-07-25에 폐기했고, `.github/workflows/scheduled-ops.yml`은 삭제, CI 워크플로는
-비활성화 상태입니다(레포 공개 전환 등으로 여건이 바뀌면 재검토). push 전 로컬
+실행처는 잡의 성격으로 갈립니다.
+
+| 실행처                                     | 담당                                                   | 주기           |
+| ------------------------------------------ | ------------------------------------------------------ | -------------- |
+| hosted Supabase **pg_cron**(0043)          | 순수 SQL pass                                          | 15분 / 매일    |
+| **GitHub Actions** `scheduled-ops.yml`     | Node·Storage API가 필요한 pass(계정 삭제, orphan 스윕) | 매일 03:10 UTC |
+| **GitHub Actions** `safety-escalation.yml` | 신고·ops alert 큐 감시(아래 섹션)                      | 매시간 :17     |
+
+GitHub Actions는 2026-07-25에 **분량 소진·과금 실패로 폐기**했다가 2026-08-11에
+용도를 좁혀 재도입했습니다(DECISIONS 당일 항목). 재도입 조건은 분(minute) 예산입니다 —
+`scheduled-ops`는 워크스페이스 install이 필요해 실행당 ~3분이므로 **매일 1회**(≈90분/월),
+`safety-escalation`은 install 없이 무의존 스크립트만 돌려 1분 최소 과금으로 **매시간**
+(≈730분/월). 과거 실패의 원인이던 "무거운 잡을 매시간"(≈1,460분/월) 조합은 금지입니다.
+CI 워크플로(`ci.yml`)는 여전히 **disabled** 상태이며, push 전 로컬
 게이트(`pnpm lint && pnpm typecheck && pnpm test && pnpm format:check` + DB 하니스)가
-CI를 대신하는 유일한 회귀 검증입니다.
+회귀 검증의 본체입니다.
 
 pg_cron이 실행하는 순수 SQL pass 2종:
 
@@ -211,11 +221,13 @@ SELECT jobname, status, return_message, start_time
   FROM cron.job_run_details ORDER BY start_time DESC LIMIT 20;
 ```
 
-**Storage API가 필요한 pass는 아직 수동입니다** — 계정 삭제 처리와 orphan 미디어
-스윕은 Storage 목록/삭제 호출이 필요해 pg_cron으로 옮길 수 없고, 실사용자 유입
-전까지 Advisor가 필요 시 수동 실행합니다. 출시 하드닝(4차 감사 Slice 9)에서
-Storage 접근 가능한 스케줄 런타임(예: Supabase scheduled Edge Function)으로
-승격합니다. "account deletion automated"는 그 승격 뒤에만 주장합니다.
+**Storage API가 필요한 pass**(계정 삭제 처리, orphan 미디어 스윕)는 pg_cron으로 옮길 수
+없어 `.github/workflows/scheduled-ops.yml`이 **매일 03:10 UTC(12:10 KST)**에
+`node scripts/run-scheduled-ops.mjs`를 실행합니다. orphan 스윕은 워크플로에서 항상
+**dry-run**이며 `--apply`는 사람이 검토한 뒤 수동으로만 돌립니다. 매일 주기는 이 문서가
+orphan 스윕에 이미 전제한 "초기에는 매일 1회"와 삭제 요청의 lease 안전성(1시간 재claim)에
+맞춘 것이고, 동시에 Actions 분 예산(위 표) 때문이기도 합니다. 계정 삭제가 **매일** 자동
+처리된다는 것 이상으로("즉시 처리") 주장하지 않습니다.
 
 수동/로컬 실행:
 
@@ -226,7 +238,58 @@ node scripts/expire-campaigns.mjs           # 만료만 단독 실행
 ```
 
 - 캠페인 만료(Slice 9, 0033): `expire_due_campaigns()`는 service role 전용이며 `ends_at`이 지난 published/paused 캠페인을 `expired`로 전환한다. 공개 페이지는 `ends_at` 기준으로 이미 404이므로 잡이 늦어도 노출 사고는 없지만, inbox 상태·`campaign_expired` 이벤트·재개 차단의 일관성이 필요하고, 만료 지연은 다음 캠페인 발행을 막는다(4차 감사 H-17) — 15분 주기는 그 창을 좁힌다. 만료된 캠페인은 재개 불가, 아카이브만 가능하다.
-- **실패 시 확인 순서:** ① `cron.job`에 잡 2종이 active인지 → ② `cron.job_run_details`의 `return_message` → ③ 해당 RPC를 SQL Editor에서 단독 실행해 재현. 계정 삭제는 `process-deletions.mjs`가 `processing` 1시간 lease로 자동 재claim하므로 재실행이 안전. orphan `--apply`는 dry-run의 `unknown_age=0`과 후보 수를 검토한 뒤에만.
+- **실패 시 확인 순서:** ① `cron.job`에 잡 2종이 active인지 → ② `cron.job_run_details`의 `return_message` → ③ 해당 RPC를 SQL Editor에서 단독 실행해 재현. GH Actions 쪽이면 Actions 탭의 실패 step 로그 → 같은 커맨드를 로컬에서 재현. 계정 삭제는 `process-deletions.mjs`가 `processing` 1시간 lease로 자동 재claim하므로 재실행이 안전. orphan `--apply`는 dry-run의 `unknown_age=0`과 후보 수를 검토한 뒤에만.
+
+수동 실행(GitHub): Actions 탭 → **Scheduled ops** → Run workflow(`workflow_dispatch`).
+`Safety escalation`도 같은 방법으로 즉시 돌릴 수 있습니다. 두 워크플로 모두 레포 시크릿
+`SUPABASE_URL`·`SUPABASE_SERVICE_ROLE_KEY`를 씁니다(2026-08-11 사용자 등록 완료 —
+`gh api /repos/wwdbsh/friendword/actions/secrets`로 이름만 확인). `scheduled-ops`는
+시크릿이 비면 preflight에서 즉시 실패해 DB 없이 도는 일이 없습니다.
+
+## 신고 자동 에스컬레이션 (2026-08-11 신설 — fcp Issue #39)
+
+공개 베타에서 `reports`·`ops_alerts`에는 **자동 소비자가 없었습니다**. 신고가 들어와도
+운영자가 위 SQL을 기억해 돌릴 때까지 아무도 모릅니다. 이제
+`.github/workflows/safety-escalation.yml`이 **매시간 :17**에
+`node scripts/check-safety-escalations.mjs`를 돌려 두 큐를 service role로 조회합니다.
+
+- 미처리 건이 하나라도 있으면 **잡을 고의로 실패**시킵니다(exit 2). 실패한 run에 대해
+  GitHub가 레포 소유자(wwdbsh@gmail.com)에게 보내는 알림 메일이 **v1 통지 채널**입니다 —
+  이 저장소에 이미 존재하는 유일한 push 채널이라 실패 자체를 알림으로 씁니다.
+- 따라서 **빨간 run = "운영자 손이 필요하다"**이지 "인프라가 깨졌다"가 아닙니다. 구분은
+  exit code로 합니다: `2` = 큐에 미처리 건 존재, `1` = 검사 자체 실패(시크릿 누락·HTTP 오류), `0` = 클린.
+- 소유자 계정에서 GitHub → Settings → Notifications → Actions → _failed workflows only_
+  알림이 켜져 있어야 채널이 살아 있습니다. 꺼져 있으면 조용히 실패만 쌓입니다.
+- 로그 위생: 스크립트는 **건수·row id·경과 시간·allowlist된 유형 라벨**만 출력합니다.
+  신고 본문(`detail`), reporter/reported user id, 이메일, 캠페인 slug, alert payload는
+  절대 출력하지 않습니다. `reason`은 DB에서 자유 TEXT이므로 allowlist 밖 값은 `unlisted`로
+  뭉갭니다. 이 로그는 메일로 나가므로 출력 항목을 늘릴 때 이 경계를 다시 확인하십시오.
+
+수동 실행:
+
+```bash
+node scripts/check-safety-escalations.mjs   # 0=클린 / 2=미처리 존재 / 1=검사 실패
+```
+
+### 대응 runbook (알림 메일을 받았을 때)
+
+1. run 로그의 요약 줄에서 건수와 id를 확인합니다(본문은 로그에 없습니다 — 의도된 것).
+2. 신고 본문·대상은 이 문서 맨 위 **신고 큐** 쿼리로 SQL Editor에서 확인합니다.
+   ops alert는 `SELECT * FROM ops_alerts WHERE resolved_at IS NULL;`.
+3. 조치는 **조치 도구** 섹션(캠페인 강제 중단 / 차단 / 계정 정지 / 미디어 제거)으로 합니다.
+4. 종결: 신고는 `UPDATE reports SET status='resolved'`(또는 `dismissed`),
+   alert는 `UPDATE ops_alerts SET resolved_at = now() WHERE id = '<id>';`.
+   **이 종결을 해야 다음 정시 run이 초록으로 돌아옵니다.**
+
+### 알려진 트레이드오프
+
+- **"이미 알린 건 다시 알리지 않기"가 없습니다.** ack 컬럼을 새로 만들지 않고
+  `reports.status='open'`·`ops_alerts.resolved_at IS NULL`이라는 기존 상태만 씁니다. 즉
+  미처리 건이 남아 있는 한 매시간 실패 메일이 반복됩니다(의도된 nag). 부작용은 알림 피로와
+  "빨간 run이 일상"이 되는 둔감화이며, 방치가 길어지면 신규 마이그레이션으로 ack 상태를
+  도입하거나 주기를 늦추는 쪽을 재검토합니다.
+- 채널이 GitHub 메일이라 **지연·스팸함·Actions 분량 소진**에 취약합니다. 실제 알림
+  파이프라인(예: Slack/webhook)은 후속 과제입니다.
 
 ### Interest 사진 저장소 정리 (3차 감사 H-5)
 

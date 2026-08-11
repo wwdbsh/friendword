@@ -28,6 +28,11 @@ export default function HomeScreen() {
           <Text style={styles.navigationLabel}>Your activity</Text>
           <QuietNavAction label="My dating campaigns" onPress={() => router.push('/campaigns')} />
           <QuietNavAction label="My interests" onPress={() => router.push('/interests')} />
+          {/* App Store guideline 5.1.1(v): account deletion has to be reachable
+              from inside the app, not only from the web. This is the only
+              account surface the app has today — sign-out and the rest of "my
+              profile" are separate tasks. */}
+          <QuietNavAction label="Account" onPress={() => router.push('/account')} />
         </View>
       </ScrollView>
     </SafeAreaView>

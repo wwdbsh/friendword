@@ -5,6 +5,8 @@ import { DataLayerError, UnauthenticatedError } from './errors';
 
 export type ReportTargetType = 'campaign' | 'interest' | 'intro_room' | 'message';
 
+export type AccountStatus = 'active' | 'suspended' | 'deleted';
+
 const reportIdSchema = z.string().uuid();
 
 /**
@@ -45,5 +47,28 @@ export class SafetyRepo {
       }
       throw new DataLayerError('safety.requestAccountDeletion', error);
     }
+  }
+
+  /**
+   * The caller's own account state, read through the `users_select_own` policy
+   * (0002). This is how a surface tells "the deletion never happened" from "the
+   * deletion happened and the answer was lost on the way back" — a dropped
+   * response to `request_account_deletion` leaves the account already closed
+   * (`deleted`) even though the client saw a failure, so re-entry has to ask the
+   * server rather than assume.
+   *
+   * `null` means there is no readable row: an account whose auth user has since
+   * been erased, or a session that no longer resolves.
+   */
+  async readAccountStatus(userId: string): Promise<AccountStatus | null> {
+    const { data, error } = await this.client
+      .from('users')
+      .select('account_status')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error !== null) {
+      throw new DataLayerError('safety.readAccountStatus', error);
+    }
+    return data === null ? null : data.account_status;
   }
 }

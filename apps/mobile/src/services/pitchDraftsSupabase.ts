@@ -37,6 +37,7 @@ import {
   MockPitchDraftService,
   PitchDraftSubmissionError,
   settleWithin,
+  type LocalDraftErasure,
   type PitchDraftListing,
   type PitchDraftService,
   type PurgeScope,
@@ -395,6 +396,10 @@ export class HybridPitchDraftService implements PitchDraftService {
 
   purgeAllConsentTokens(): Promise<number> {
     return this.local.purgeAllConsentTokens();
+  }
+
+  eraseAllLocalDrafts(): Promise<LocalDraftErasure> {
+    return this.local.eraseAllLocalDrafts();
   }
 
   /**

@@ -18,6 +18,7 @@ import {
   purgeUploadedMedia,
   purgeableMediaUris,
   purgeInvitationContact,
+  localMediaUris,
 } from './draftStorage';
 import { createMediaAssetKey, deleteLocalMediaFile } from './mediaFiles';
 
@@ -49,6 +50,19 @@ export type PitchDraftListing = {
   readonly sync: DraftSyncState;
 };
 
+/** What {@link PitchDraftService.eraseAllLocalDrafts} managed to destroy. */
+export type LocalDraftErasure = {
+  /** Drafts that were readable, and whose media files were therefore named. */
+  readonly erasedDrafts: number;
+  /**
+   * True only when the stored drafts were readable AND every media file they
+   * named was deleted. False means the storage blob is gone but at least one
+   * recording or photo is still on this device, which a deletion screen has to
+   * say out loud rather than claiming the phone is clean.
+   */
+  readonly complete: boolean;
+};
+
 export interface PitchDraftService {
   createDraft(): Promise<PitchDraft>;
   saveRelationship(id: PitchDraftId, relationship: PitchRelationship): Promise<PitchDraft>;
@@ -71,6 +85,19 @@ export interface PitchDraftService {
   purgeInvitationContact(id: PitchDraftId): Promise<PitchDraft>;
   purgeSensitiveDraftData(id: PitchDraftId, scope: PurgeScope): Promise<PitchDraft>;
   purgeAllConsentTokens(): Promise<number>;
+  /**
+   * Removes every draft this device holds and deletes their media files.
+   *
+   * Account deletion only — sign-out deliberately keeps drafts (the same person
+   * signs back in), but a deleted account has no server draft left to sync
+   * against, so leaving the voice recordings and photos on the phone would
+   * leave the one copy nobody can erase later.
+   *
+   * Rejects only when the stored blob itself could not be cleared. Everything
+   * short of that is reported in {@link LocalDraftErasure.complete} so the
+   * screen can say what actually happened.
+   */
+  eraseAllLocalDrafts(): Promise<LocalDraftErasure>;
   /**
    * The screen-facing draft read. It carries its own {@link DraftSyncState}
    * rather than a bare array so no caller can present a list this device could
@@ -583,6 +610,46 @@ export class MockPitchDraftService implements PitchDraftService {
       }
       return removed;
     });
+  }
+
+  /**
+   * The local half of account deletion. Every draft goes, and so does every
+   * media file they reference — uploaded or not, because the server copy is
+   * being erased in the same breath.
+   *
+   * The stored blob is cleared unconditionally, including when it cannot be
+   * parsed. That case is the one where clearing matters most: an unreadable
+   * value is still a value, and this one holds raw consent bearer tokens and the
+   * invited friend's email address. Refusing to write because the read failed
+   * would leave exactly those bytes on a phone whose account no longer exists.
+   * What is lost with the parse is the list of media files, so the erasure is
+   * reported as incomplete rather than as a success.
+   */
+  async eraseAllLocalDrafts(): Promise<LocalDraftErasure> {
+    const orphanedUris: string[] = [];
+    let readable = true;
+    const erasedDrafts = await this.runExclusive(async () => {
+      let drafts: readonly PitchDraft[] = [];
+      try {
+        drafts = await this.readDrafts();
+      } catch {
+        readable = false;
+      }
+      for (const draft of drafts) {
+        orphanedUris.push(...localMediaUris(draft));
+      }
+      await this.writeDrafts([]);
+      return drafts.length;
+    });
+    let deletedEveryFile = true;
+    for (const uri of orphanedUris) {
+      try {
+        await this.deleteMediaFile(uri);
+      } catch {
+        deletedEveryFile = false;
+      }
+    }
+    return { erasedDrafts, complete: readable && deletedEveryFile };
   }
 
   private async deleteMediaFiles(uris: readonly string[]): Promise<void> {

@@ -34,14 +34,35 @@
 > - **QA 데이터(hosted, 무해·보존)**: 캠페인 `sumin-n2g2ma`(allowlist 격리, 2026-08-18 자연 만료), QA 계정 wwdbsh+dater/+sim, 죽은 드래프트 3건(자기초대 등 — B1 백로그의 실증 사례). 삭제하지 않음 — 목록이 곧 기록.
 > - **백로그**: `docs/TASKS.md` 2026-08-11 절 — B1(초대 이메일 복구 경로), B2(scene v-next — 새 schemaVersion 필수), B3(계측 잔손질), B4('rest' 크래시 감시).
 
-|             |                                                                                                                                                                                                                                                          |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 코드        | `858ccbe` on `main` (자막 크롬 — Goal 마지막 코드 병합)                                                                                                                                                                                                  |
-| hosted DB   | **0057까지 적용·정합** (`supabase migration list` 로컬=원격, 2026-08-11 push — 릴스 계측 allowlist. 실측: 익명 `reel_visit` 204·익명 `s1_intent_created` 401급 거부·미지 이벤트 거부). `0040`은 의도적 갭                                                |
-| 런치 게이트 | **`public_beta_enabled=on` (2026-08-11 사용자 전환 — 공개 베타 개방)** · `real_payments_enabled=off` · `identity_enforcement=off` · `media_validation_enforcement=off` · `media_render_concurrency_cap=1`                                                |
-| 전 게이트   | green (2026-08-11 통합 재실행): DB 하니스 29 exit 0 · 패키지 730(contracts 293·mobile 256·data 135·domain 13·adapters 11·ui-tokens 22) · audit3 182 · ui 35 · render 98(+e2e 106, 실 Chromium 자막 포함) · Playwright 75 · build·typecheck·lint·format ✓ |
+|             |                                                                                                                                                                                                                                                                                              |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 코드        | `858ccbe` on `main` (자막 크롬 — Goal 마지막 코드 병합)                                                                                                                                                                                                                                      |
+| hosted DB   | **0057까지 적용·정합** (`supabase migration list` 로컬=원격, 2026-08-11 push — 릴스 계측 allowlist. 실측: 익명 `reel_visit` 204·익명 `s1_intent_created` 401급 거부·미지 이벤트 거부). `0040`은 의도적 갭. **`0058`(이벤트 알림 outbox)은 브랜치에만 있고 hosted 미적용 — 사용자 push 대기** |
+| 런치 게이트 | **`public_beta_enabled=on` (2026-08-11 사용자 전환 — 공개 베타 개방)** · `real_payments_enabled=off` · `identity_enforcement=off` · `media_validation_enforcement=off` · `media_render_concurrency_cap=1`                                                                                    |
+| 전 게이트   | green (2026-08-12 T003 리뷰 반영 후 재실행, 브랜치 `fcp/40-event-email-v1`): DB 하니스 31파일 exit 0 · 패키지 743(contracts 293·mobile 268·data 136·domain 13·adapters 11·ui-tokens 22) · audit3 228 · ui 42 · render 98(+14 skip) · Playwright 80 · build·typecheck·lint·format ✓           |
 
 **green test ≠ 완료 증거입니다.** 이 리포에서 전 게이트 green인 채로 프로덕션이 깨져 있던 사고가 이 Goal에서만 3건 더 나왔습니다(폰트 local() 게이트, EAS env 미베이크 2회) — 전부 "하니스가 프로덕션보다 약함" 계열. 산출물(IPA·MP4·실응답)을 직접 검증하는 것이 규칙입니다.
+
+> **진행 중 (2026-08-11 착수 / 2026-08-12 독립 리뷰 반영, fcp Goal `#40` 계열):** T003 —
+> **이벤트 이메일 알림 v1**이 브랜치 `fcp/40-event-email-v1`에 있습니다. 관심 도착→Dater,
+> 수락·거절→발신자, 렌더 완료→요청자 **4종**이 `notification_outbox`(migration **0058**,
+> service-role 전용)에 적재되고 Next.js 발송 라우트가 Resend로 보냅니다.
+>
+> 리뷰 반영으로 바뀐 운영 사실 5가지: ① `notification_email_enabled`는 **`off`로 시드**되며
+> 켜는 것이 OPS.md 활성화 체크리스트의 마지막 단계입니다(첫 발송 = 의도적 행위). ② 한 pass는
+> **4건/300초 lease**이고 pass가 자기 데드라인을 넘기면 남은 항목을 leased인 채로 두고 멈춥니다
+> (같은 사람에게 두 번 보내지 않기 위해 — 관계는 `timeBudget.ts` + 관계 테스트가 고정).
+> ③ 자기 kick 조건은 "배치 가득"이 아니라 **`sent > 0`**. ④ 실패 항목은 **`attempts × 5분`**
+> 백오프 뒤에만 재claim되고, 만료는 `expired_before_send`(무시도, 무알림)와
+> `expired_after_attempts`(시도 있었음, **알림**)로 갈립니다. ⑤ 인박스 거절 문구는
+> "Declined. Your reason and details are never shared with them." — 배달 여부를 단정하지
+> 않으므로 배포 전후 어느 날에도 참입니다.
+>
+> **아직 hosted에 push되지 않았고, 시크릿이 없어 실발송은 한 번도 검증되지 않았습니다** —
+> 게이트는 전부 green이지만 이것은 "제어 흐름이 맞다"는 뜻이지 "메일이 도착한다"는 뜻이
+> 아닙니다(§6의 반복된 교훈). 켜는 절차와 시크릿 목록은 `docs/OPS.md` →
+> **이벤트 이메일 알림 → 활성화 체크리스트**, 설계 근거는 DECISIONS 2026-08-11 T003 항목과
+> 그 아래 2026-08-12 리뷰 반영 항목.
 
 ## 2. 사용자 결정 대기 (Advisor가 임의로 정하지 않음)
 
@@ -53,7 +74,7 @@
 
 ## 3. 다음에 할 일 (권장 순서)
 
-1. **[사용자] 베타 스위치** — `public_beta_enabled=on` (app_config UPDATE, OPS.md 절차). 이전에 유입된 S1 의사는 전달되지 않았음을 인지.
+1. **[사용자] 0058 push + 알림 시크릿 설정 + 스위치 켜기 + 실발송 왕복 1회** — `docs/OPS.md` → 이벤트 이메일 알림 → **활성화 체크리스트**의 7단계를 순서대로. 핵심은 순서입니다: push → 시크릿 등록·재배포 → 스위치 **off인 채로** 라우트 200 확인 → 큐 내용 확인 → 메일함 열어 둔 채 `notification_email_enabled='on'` → 실계정 관심 표현 1건으로 메일 도착 육안 확인. 이 확인 전까지 "알림 완료"라고 주장하지 않습니다.
 2. **첫 실사용자 캠페인 1건을 밀착 관찰** — 창작→승인→publish→렌더(자막 포함 첫 실파일)→릴스 업로드까지. B1(초대 이메일 오입력)이 실사용자에게 터지면 백로그 우선순위 상향.
 3. **릴스 배포 개시** + `real_payments_enabled` 판단(sandbox 드릴 선행).
 4. 9/30 스토어 출시 마감 역산 유지(`HACKATHON_RULES.md`), App Store 제출물 준비 트랙 별도 기립.

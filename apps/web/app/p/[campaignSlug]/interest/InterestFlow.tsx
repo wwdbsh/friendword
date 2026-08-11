@@ -25,6 +25,7 @@ import {
 import { EmailSignIn } from '@/components/EmailSignIn';
 import { FlowNav } from '@/components/FlowNav';
 import { requestTextModeration } from '@/lib/moderateText';
+import { kickNotificationSender } from '@/lib/notifications/kick';
 import { removeOwnProfilePhotos } from '@/lib/profileMedia';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { useSession } from '@/lib/useSession';
@@ -451,6 +452,10 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
         campaignId,
         trimmedNote === '' ? null : trimmedNote,
       );
+      // Delivery just queued a notification to the dater (0058). Push the
+      // sender's queue while this request path is still open — fire-and-forget
+      // so it can never delay or fail an interest that already landed.
+      void kickNotificationSender(client);
       setSubmitted(true);
     } catch (submitError: unknown) {
       // The private-beta gate is a scheduled state, not a failure: the intent

@@ -246,6 +246,135 @@ node scripts/expire-campaigns.mjs           # 만료만 단독 실행
 `gh api /repos/wwdbsh/friendword/actions/secrets`로 이름만 확인). `scheduled-ops`는
 시크릿이 비면 preflight에서 즉시 실패해 DB 없이 도는 일이 없습니다.
 
+## 이벤트 이메일 알림 (0058 — fcp Issue #40, T003)
+
+제품 이벤트 **4종**이 이제 이메일로 나갑니다(관심 도착·수락·**거절**·렌더 완료). 구조는
+**outbox**입니다 — 이벤트를 만든 트랜잭션은 행 하나만 쓰고(발송 안 함), 별도 발송기가
+나중에 비웁니다. Resend 장애가 관심 표현을 거부하는 일이 없습니다.
+
+| 이벤트                   | 수신자                 | 착지             |
+| ------------------------ | ---------------------- | ---------------- |
+| `interest_received`      | 캠페인 소유자(Dater)   | `/inbox`         |
+| `interest_accepted`      | 관심 발신자            | `/rooms`         |
+| `interest_declined`      | 관심 발신자            | `/rooms`         |
+| `pitch_render_completed` | 내보내기를 요청한 사람 | `/kit/<draftId>` |
+
+**메일에 들어가는 개인정보는 수신자 본인의 display name 하나뿐입니다.** 상대 이름·프로필·
+사진·관심 노트·메시지 본문·campaign slug는 들어가지 않습니다. 이메일 주소는 `auth.users`에만
+있고 발송 순간에만 해석되며 `notification_outbox`에는 **저장되지 않습니다**(`last_error`
+컬럼은 `'@'`를 포함하면 CHECK가 거부합니다).
+
+### 켜는 데 필요한 설정 (사용자 — 값은 Claude에게 주지 않습니다)
+
+| 이름                                                 | 위치                   | 내용                                                                         |
+| ---------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------- |
+| `FRIENDWORD_NOTIFY_SECRET`                           | Vercel env (Sensitive) | 발송 라우트 게이트. 16자 이상 랜덤 문자열. 없으면 라우트가 501               |
+| `FRIENDWORD_NOTIFY_FROM`                             | Vercel env             | 발신 신원 (예: `Friendword <notify@friendword.com>`). 인증된 도메인이어야 함 |
+| `RESEND_API_KEY`                                     | Vercel env (Sensitive) | 이미 등록됨(2026-08-11)                                                      |
+| `FRIENDWORD_SHARE_ORIGIN`                            | Vercel env             | 이미 사용 중(렌더 엔드카드). 메일 링크의 호스트                              |
+| `FRIENDWORD_NOTIFY_SECRET` · `FRIENDWORD_WEB_ORIGIN` | GitHub Actions secrets | 일일 백스톱(`scheduled-ops.yml`)이 발송 라우트를 두드릴 때 사용              |
+
+셋 중 하나라도 없으면 발송 라우트는 **아무것도 claim하지 않고 501**을 답합니다(미설정
+상태에서 claim하면 큐에 쌓인 모든 항목의 재시도 예산만 태우기 때문입니다). 그동안 outbox는
+계속 쌓이고, 72시간이 지난 항목은 발송되지 않고 `expired_before_send`로 종결됩니다 — 스위치를
+켠 날 일주일 치 묵은 메일이 한꺼번에 나가는 사고를 막기 위한 의도된 동작입니다(0058 결정 5).
+
+### 활성화 체크리스트 (순서를 지킵니다 — 마지막 항목이 첫 발송입니다)
+
+`0058`은 `notification_email_enabled`를 **`off`로 시드합니다.** 마이그레이션은 시크릿보다
+먼저 도착하므로, 기본값이 `on`이면 "마지막 환경변수를 저장하는 순간, 아무도 안 보는 사이에
+이 제품의 첫 메일이 나간다"가 됩니다. 그래서 켜는 것은 **의도적인 마지막 한 줄**입니다.
+
+1. `supabase db push --linked` 로 `0058`을 hosted에 적용하고 `supabase migration list`로 정합 확인.
+2. 위 표의 Vercel env 3종(`FRIENDWORD_NOTIFY_SECRET`·`FRIENDWORD_NOTIFY_FROM` + 기존
+   `RESEND_API_KEY`·`FRIENDWORD_SHARE_ORIGIN`)과 GitHub Actions 시크릿 2종을 등록하고 재배포.
+3. **아직 켜지 마십시오.** 배포된 라우트를 먼저 두드려 501/401이 아닌 200과
+   `{"claimed":0,...}`가 오는지 확인합니다(스위치가 off라 claim은 0입니다 — 이 단계에서
+   확인하는 것은 "게이트를 통과했다"이지 "메일이 나갔다"가 아닙니다):
+   ```bash
+   curl -sS -X POST "$ORIGIN/api/notifications/send" \
+     -H "authorization: Bearer $FRIENDWORD_NOTIFY_SECRET"
+   ```
+4. 큐에 뭐가 들어 있는지 먼저 봅니다. 오래된 항목은 켜자마자 종결되고, 신선한 항목은
+   켜자마자 나갑니다 — 나가도 되는 것들인지 눈으로 확인합니다:
+   ```sql
+   SELECT status, event_type, count(*), min(created_at) AS oldest
+     FROM notification_outbox GROUP BY 1, 2 ORDER BY 1, 2;
+   ```
+5. **메일함을 열어 둔 채로** 스위치를 켭니다. 이것이 첫 발송입니다:
+   ```sql
+   UPDATE app_config SET value = 'on' WHERE key = 'notification_email_enabled';
+   ```
+6. 본인 계정으로 관심 표현 1건을 실제로 발생시키고 **메일 도착을 눈으로 확인**합니다.
+   이 확인 전까지 "알림 완료"라고 주장하지 않습니다 — 게이트 green은 "제어 흐름이 맞다"는
+   뜻이지 "메일이 도착한다"는 뜻이 아닙니다.
+7. 이상하면 되돌리는 것도 한 줄입니다: `value = 'off'`. claim이 즉시 0건을 반환합니다.
+
+### 언제 나가는가 (cron 없음)
+
+렌더 kick 체인과 같은 방식입니다. **이벤트를 만든 웹 요청 경로가 한 번 밀어줍니다**:
+관심 제출(`InterestFlow`), 인박스 결정(`InboxView`), 렌더 워커 pass 종료(`render-run`).
+브라우저는 시크릿을 들지 않으므로 `/api/notifications/kick`(세션 게이트 릴레이)을 거칩니다.
+**한 pass는 4건**을 claim하고(300초 lease), **1건이라도 실제로 발송됐으면** 스스로 다시 kick해
+큐를 마저 비웁니다. 조건이 "배치가 가득 찼으면"이 아니라 "**보낸 게 있으면**"인 이유: 4건 전부
+실패한 배치가 자기를 다시 부르면, 공급자 장애 하나에 큐 전체의 재시도 예산을 몇 초 만에 태우고
+운영자가 손쓸 새도 없이 알림만 쌓입니다. 배치 크기·lease·pass 데드라인의 관계는
+`apps/web/src/lib/notifications/timeBudget.ts`가 정의하고 관계 테스트가 고정합니다
+(`batch × 엔트리당 상한 + 시계 오차 여유 < lease` — 이것이 깨지면 같은 사람에게 같은 메일이
+두 번 갑니다).
+
+**재시도는 즉시 하지 않습니다.** 실패한 항목은 `attempts × 5분`이 지나야 다시 claim됩니다
+(0058 결정 5b). 그래서 3회 예산은 몇 초가 아니라 최소 15분에 걸쳐 소진되고, kick을 아무리
+많이 눌러도(=kick 라우트에 rate limit이 없어도) 예산을 태울 수 없습니다.
+
+**백스톱은 하루 1회**입니다(`scheduled-ops.yml` → `scripts/drain-notifications.mjs`).
+즉 kick이 전부 실패한 경우의 최악 지연은 **최대 하루**이며, 이것은 바닥값이지 약속이 아닙니다 —
+제품 UI나 메일 어디에도 배달 시각을 약속하지 마십시오. 백스톱은 응답을 240초까지 기다리고,
+그 안에 답이 없으면 **실패가 아니라 "전달됐고 서버에서 계속 돌고 있다"로 기록하고 exit 0**
+합니다(pass는 자기 lease와 데드라인 안에서 계속 돕니다). 수동 push:
+
+```bash
+curl -X POST "$ORIGIN/api/notifications/send" \
+  -H "authorization: Bearer $FRIENDWORD_NOTIFY_SECRET"
+node scripts/drain-notifications.mjs   # 같은 일을 .env로 하는 래퍼
+```
+
+### 정지 스위치와 큐 조회
+
+```sql
+-- 즉시 전면 정지(claim이 0건을 반환합니다 — 배포된 라우트가 계속 호출해도 안 나갑니다)
+UPDATE app_config SET value = 'off' WHERE key = 'notification_email_enabled';
+-- 만료 기준(기본 72시간). 정수가 아닌 값을 넣으면 큐가 멈추는 대신 72로 degrade합니다 —
+-- 오타가 전면 통지 장애가 되지 않게 한 것이지, 아무 값이나 써도 된다는 뜻은 아닙니다.
+UPDATE app_config SET value = '72' WHERE key = 'notification_max_age_hours';
+
+-- 큐 상태 (본문·주소가 없는 테이블이라 그대로 조회해도 안전합니다)
+SELECT status, event_type, count(*), min(created_at) AS oldest
+  FROM notification_outbox GROUP BY 1, 2 ORDER BY 1, 2;
+```
+
+### 장애 대응
+
+- 3회 실패하면 항목이 `failed`로 종결되고 `ops_alerts`에 **`notification_send_failed`**가
+  남습니다 — 위 신고 에스컬레이션 워크플로가 매시간 이 큐를 읽으므로 통지 채널은 이미 있습니다.
+  발송기가 **답을 못 하고 죽는** 경우(lease만 만료되고 complete 호출이 없음)에도 claim이
+  직접 종결·알림합니다(`retry_budget_spent`) — 조용히 썩지 않습니다.
+- `detail.reason`이 진단입니다: `resend_http_4xx`(발신 도메인·수신 주소 거부),
+  `resend_http_429`(레이트 리밋), `resend_request_TimeoutError`, `no_mailbox`(해당 계정에
+  이메일 없음), `unroutable_event`(착지 파라미터 결손 — 코드 버그),
+  `retry_budget_spent`(발송기가 3회 모두 답 없이 죽음),
+  `expired_after_attempts`(시도는 있었는데 72시간 동안 끝내 못 보냄 — 아래 참조).
+- **만료는 두 종류이고, 하나만 알림입니다.** `expired_before_send`는 `attempts = 0` —
+  아무도 시도한 적 없는 항목이 72시간을 넘긴 것이고(스위치 off·시크릿 미설정 기간의 설계된
+  결과), **알림하지 않습니다.** `expired_after_attempts`는 `attempts > 0` — 뭔가 계속
+  시도하다 실패했는데 아무도 못 들은 것이고, **`ops_alerts`에 1건 남깁니다.** 큐를 볼 때
+  둘을 섞지 마십시오: 앞엣것은 정상, 뒤엣것은 사고입니다.
+- 재발송은 되살리기가 아니라 **새 이벤트**로 합니다. 종결된 행을 되돌리는 전이는 트리거가
+  거부합니다(`a sent notification is final`). 알림 종결은
+  `UPDATE ops_alerts SET resolved_at = now() WHERE id = '<id>';`.
+- 수신 거부 링크는 없습니다 — 전부 거래성(transactional) 메일이고, 계정 자체를 끊는 경로는
+  계정 삭제입니다(`docs/DECISIONS.md` 2026-08-11 T003 항목).
+
 ## 신고 자동 에스컬레이션 (2026-08-11 신설 — fcp Issue #39)
 
 공개 베타에서 `reports`·`ops_alerts`에는 **자동 소비자가 없었습니다**. 신고가 들어와도

@@ -49,12 +49,14 @@ const KNOWN_REPORT_REASONS = new Set([
 ]);
 const KNOWN_REPORT_SEVERITIES = new Set(['low', 'high']);
 // Every alert_type literal inserted by a migration today (0016/0024, 0050,
-// 0051, 0054). A type added later shows up as `unlisted` — a count, never text.
+// 0051, 0054, 0058). A type added later shows up as `unlisted` — a count,
+// never text.
 const KNOWN_ALERT_TYPES = new Set([
   'campaign_auto_paused',
   'video_frame_moderation_flagged',
   'video_moderation_review_deleted',
   'pitch_render_failed',
+  'notification_send_failed',
 ]);
 
 function readEnvFile() {

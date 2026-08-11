@@ -15,6 +15,7 @@ import {
 
 import { EmailSignIn } from '@/components/EmailSignIn';
 import { FlowNav } from '@/components/FlowNav';
+import { kickNotificationSender } from '@/lib/notifications/kick';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { useSession } from '@/lib/useSession';
 
@@ -189,8 +190,20 @@ export function InboxView() {
           ? introRoomId === null
             ? 'Accepted!'
             : 'Accepted — a private intro room is open for the two of you.'
-          : 'Declined. They will not be notified with details.',
+          : // §12: this sentence must be true the day 0058 deploys, the day
+            // before, and on any day the ops kill switch is off — so it says
+            // nothing about whether a notice goes out. "They get a short
+            // notice" would be a claim about delivery, and delivery is exactly
+            // what this code does not know: the mail is queued by a trigger,
+            // gated by app_config, and may expire unsent. What IS invariant
+            // is the CONTENT boundary, and it is also the only part the person
+            // declining actually cares about.
+            'Declined. Your reason and details are never shared with them.',
       );
+      // The decision just queued a notification to the sender; push the
+      // sender's queue while a request path is still open. Fire-and-forget:
+      // it must never delay or fail the decision the dater just made.
+      void kickNotificationSender(client);
       await loadInbox();
     } catch {
       setDecisionNote('That decision did not go through. Refresh and try again.');

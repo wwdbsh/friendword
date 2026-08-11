@@ -38,7 +38,7 @@
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 코드        | `858ccbe` on `main` (자막 크롬 — Goal 마지막 코드 병합)                                                                                                                                                                                                  |
 | hosted DB   | **0056까지 적용·정합** (`supabase migration list` 로컬=원격). `0040`은 의도적 갭                                                                                                                                                                         |
-| 런치 게이트 | `public_beta_enabled=off` · `real_payments_enabled=off` · `identity_enforcement=off` · `media_validation_enforcement=off` — **전부 사용자 결정 대기** · `media_render_concurrency_cap=1`                                                                 |
+| 런치 게이트 | **`public_beta_enabled=on` (2026-08-11 사용자 전환 — 공개 베타 개방)** · `real_payments_enabled=off` · `identity_enforcement=off` · `media_validation_enforcement=off` · `media_render_concurrency_cap=1`                                                |
 | 전 게이트   | green (2026-08-11 통합 재실행): DB 하니스 29 exit 0 · 패키지 730(contracts 293·mobile 256·data 135·domain 13·adapters 11·ui-tokens 22) · audit3 182 · ui 35 · render 98(+e2e 106, 실 Chromium 자막 포함) · Playwright 75 · build·typecheck·lint·format ✓ |
 
 **green test ≠ 완료 증거입니다.** 이 리포에서 전 게이트 green인 채로 프로덕션이 깨져 있던 사고가 이 Goal에서만 3건 더 나왔습니다(폰트 local() 게이트, EAS env 미베이크 2회) — 전부 "하니스가 프로덕션보다 약함" 계열. 산출물(IPA·MP4·실응답)을 직접 검증하는 것이 규칙입니다.
@@ -152,4 +152,4 @@ DB push는 클린 트리에서만 · `:3000` dev 서버가 떠 있는 채로 `we
 
 ## 8. 판정
 
-**베타 개방 직전.** 렌더 워커는 실캠페인으로 프로덕션 실증됐고(T009), 자막·퍼널·모바일 창작 플로우까지 검증 완료. 외부 노출을 막는 것은 런치 게이트뿐이며 그 스위치는 사용자 결정입니다. 릴스 배포는 베타 스위치 이후입니다.
+**공개 베타.** 2026-08-11 사용자가 베타 스위치를 켰습니다 — 외부 관심 전달·publish가 열린 상태. 렌더·자막·퍼널은 실증 완료. 릴스 배포와 `real_payments`는 사용자 판단 항목입니다.

@@ -335,17 +335,18 @@ describe('/interests is the sender-side screen the web was missing (FUN-4)', () 
     expect(harness.listCalls).toBe(0);
   });
 
-  it('carries the account tabs, including its own', async () => {
+  // T009: the shell carries one account destination, the hub, and the hub is
+  // what carries the other three areas. What must hold here is that this
+  // screen is not a dead end and does not claim to be the hub itself.
+  it('carries the shell out: home and the account hub', async () => {
     await mountMyInterests();
 
     const hrefs = anchorHrefs();
     expect(hrefs).toContain('/');
-    expect(hrefs).toContain('/inbox');
-    expect(hrefs).toContain('/rooms');
-    const own = screen
-      .getAllByRole('link')
-      .find((link) => link.getAttribute('href') === '/interests');
-    expect(own?.getAttribute('aria-current')).toBe('page');
+    expect(hrefs).toContain('/me');
+    expect(
+      screen.getAllByRole('link').find((link) => link.getAttribute('aria-current') === 'page'),
+    ).toBeUndefined();
   });
 });
 

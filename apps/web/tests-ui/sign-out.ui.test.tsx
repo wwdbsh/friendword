@@ -281,15 +281,19 @@ describe('signing out ends the session and closes the surface', () => {
         <InboxView />
       </>,
     );
+    // Scoped by the landing's own class: since T009 the account shell carries a
+    // "My page" pill too, and this test is about the LANDING door — the one
+    // that must not exist for a visitor with no session (§12).
+    const landingDoor = (): Element | null => document.querySelector('a.account-link');
     await waitFor(() => {
-      expect(screen.queryByRole('link', { name: 'My inbox' })).toBeTruthy();
+      expect(landingDoor()).toBeTruthy();
     });
 
     await act(async () => {
       fireEvent.click(signOutControl());
     });
 
-    expect(screen.queryByRole('link', { name: 'My inbox' })).toBeNull();
+    expect(landingDoor()).toBeNull();
   });
 
   // An expired or already-revoked refresh token answers the global sign-out

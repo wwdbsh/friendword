@@ -335,7 +335,7 @@ export default function CampaignsScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.heading}>
           <Text style={styles.eyebrow}>CAMPAIGN HOME</Text>
-          <Text style={styles.title}>My dating campaigns</Text>
+          <Text style={styles.title}>My campaigns</Text>
           <Text style={styles.subtitle}>
             Manage campaigns where you are the dater, then revisit pitches you are making for
             friends.

@@ -76,7 +76,7 @@ export function MyInterestsView() {
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
-        <FlowNav current="interests" />
+        <FlowNav />
 
         {client === null && (
           <section className={styles.card}>

@@ -4,7 +4,7 @@ import { SignOutButton } from '@/components/SignOutButton';
 
 import styles from '@/styles/flowCard.module.css';
 
-export type FlowNavTab = 'inbox' | 'interests' | 'rooms';
+export type FlowNavTab = 'me';
 
 type FlowNavBack = {
   readonly href: string;
@@ -17,7 +17,7 @@ type FlowNavProps = {
   /** Extra return link, e.g. a single intro room back to the room list. */
   readonly back?: FlowNavBack;
   /**
-   * Account tabs are hidden on the pre-decision surfaces (consent, interest,
+   * The account link is hidden on the pre-decision surfaces (consent, interest,
    * sign-in confirmation) where clicking away loses the step in progress. The
    * wordmark still goes home so no screen is a dead end.
    */
@@ -40,6 +40,16 @@ type FlowNavProps = {
  * zero anchors once signed in: the funnel from a reel to a chat could only be
  * completed by typing URLs. Anything added here must stay inside the existing
  * flowCard (Hype Mixtape) vocabulary.
+ *
+ * T009 (Issue #46) turned the three sibling tabs into one hub link. Two facts
+ * drove it. The product now has FOUR account areas (inbox, interests sent,
+ * rooms, campaigns about me) and measurement says four pills cannot share a
+ * row: at 375px the shell is 327px wide and the three tabs alone already
+ * measured 331.7px, which is the second-line wrap left over from T006. And the
+ * mobile app has no tab bar at all — its home screen is a hub — so a single
+ * "My page" door is what makes the two surfaces one information structure
+ * instead of two. Every area is one tap from the hub, and the hub is on every
+ * signed-in screen.
  */
 export function FlowNav({ current, back, tabs = true, signOut = true }: FlowNavProps) {
   return (
@@ -55,32 +65,11 @@ export function FlowNav({ current, back, tabs = true, signOut = true }: FlowNavP
         {tabs && (
           <div className={styles.navTabs}>
             <Link
-              className={`${styles.navTab} ${current === 'inbox' ? styles.navTabActive : ''}`}
-              href="/inbox"
-              {...(current === 'inbox' ? { 'aria-current': 'page' as const } : {})}
+              className={`${styles.navTab} ${current === 'me' ? styles.navTabActive : ''}`}
+              href="/me"
+              {...(current === 'me' ? { 'aria-current': 'page' as const } : {})}
             >
-              Inbox
-            </Link>
-            {/* T006: the account tabs were both dater-side reads (interest
-                received, rooms). "My interests" is the sender's side and is
-                named so it cannot be read as a second inbox — the two are the
-                opposite ends of the same funnel and one person can be at both
-                ends on different campaigns. It stays empty-but-honest for
-                someone who has never sent interest, exactly as the inbox is
-                for someone who has never published a page. */}
-            <Link
-              className={`${styles.navTab} ${current === 'interests' ? styles.navTabActive : ''}`}
-              href="/interests"
-              {...(current === 'interests' ? { 'aria-current': 'page' as const } : {})}
-            >
-              My interests
-            </Link>
-            <Link
-              className={`${styles.navTab} ${current === 'rooms' ? styles.navTabActive : ''}`}
-              href="/rooms"
-              {...(current === 'rooms' ? { 'aria-current': 'page' as const } : {})}
-            >
-              Intro rooms
+              My page
             </Link>
           </div>
         )}

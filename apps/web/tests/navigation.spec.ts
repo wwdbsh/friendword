@@ -110,19 +110,23 @@ test('walks landing → inbox → accept → chat → back, without ever typing 
   // the front door, not the inbox: /inbox used to be linked from nowhere.
   await page.goto('/');
 
-  await test.step('The landing offers a signed-in visitor their own inbox', async () => {
-    await page.getByRole('link', { name: 'My inbox' }).click();
+  // T009: the landing door is the account hub, and the inbox is one click on
+  // from it — the funnel is still walked without typing a URL, it now passes
+  // through the screen that says what this person has.
+  await test.step('The landing offers a signed-in visitor their own page', async () => {
+    await page.getByRole('link', { name: 'My page', exact: true }).click();
+    await page.waitForURL('**/me');
+    await page.getByRole('link', { name: 'Open my inbox' }).click();
     await page.waitForURL('**/inbox');
     await expect(page.getByRole('heading', { name: 'People who want to meet you.' })).toBeVisible();
   });
 
   await test.step('The inbox says where else the account lives', async () => {
     await expect(page.getByRole('link', { name: 'Friendword home' })).toHaveAttribute('href', '/');
-    await expect(page.getByRole('link', { name: 'Inbox', exact: true })).toHaveAttribute(
-      'aria-current',
-      'page',
+    await expect(page.getByRole('link', { name: 'My page', exact: true })).toHaveAttribute(
+      'href',
+      '/me',
     );
-    await expect(page.getByRole('link', { name: 'Intro rooms' })).toBeVisible();
   });
 
   await test.step('Accepting offers the room as a link, not an instruction', async () => {
@@ -138,14 +142,16 @@ test('walks landing → inbox → accept → chat → back, without ever typing 
     await expect(page.getByRole('heading', { name: 'Your introductions.' })).toBeVisible();
   });
 
-  await test.step('And the room list returns to the inbox by link', async () => {
-    await page.getByRole('link', { name: 'Inbox', exact: true }).click();
+  await test.step('And the room list returns to the inbox through the hub', async () => {
+    await page.getByRole('link', { name: 'My page', exact: true }).click();
+    await page.waitForURL('**/me');
+    await page.getByRole('link', { name: 'Open my inbox' }).click();
     await page.waitForURL('**/inbox');
     await expect(page.getByRole('heading', { name: 'People who want to meet you.' })).toBeVisible();
   });
 });
 
-// One destination, one link: the campaign card already carries "View my page",
+// One destination, one link: the campaign card already carries "View my public page",
 // so the empty-inbox card must not offer a second anchor to the same screen.
 test('an empty inbox offers each destination exactly once', async ({ page }) => {
   await seedSignedInSession(page);
@@ -157,7 +163,7 @@ test('an empty inbox offers each destination exactly once', async ({ page }) => 
   await page.goto('/inbox');
 
   await expect(page.getByRole('heading', { name: 'No interest yet.' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'View my page' })).toHaveCount(1);
+  await expect(page.getByRole('link', { name: 'View my public page' })).toHaveCount(1);
   await expect(page.getByRole('link', { name: 'My intro rooms' })).toHaveCount(1);
 });
 
@@ -167,7 +173,7 @@ test('the landing shows no account link to a signed-out visitor', async ({ page 
   await page.goto('/');
 
   await expect(page.getByRole('link', { name: 'See the demo' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'My inbox' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'My page', exact: true })).toHaveCount(0);
 });
 
 test('an empty room list points at the two screens that can change that', async ({ page }) => {

@@ -2,7 +2,7 @@ import Link from 'next/link';
 
 import styles from '@/styles/flowCard.module.css';
 
-export type FlowNavTab = 'inbox' | 'rooms';
+export type FlowNavTab = 'inbox' | 'interests' | 'rooms';
 
 type FlowNavBack = {
   readonly href: string;
@@ -48,6 +48,20 @@ export function FlowNav({ current, back, tabs = true }: FlowNavProps) {
               {...(current === 'inbox' ? { 'aria-current': 'page' as const } : {})}
             >
               Inbox
+            </Link>
+            {/* T006: the account tabs were both dater-side reads (interest
+                received, rooms). "My interests" is the sender's side and is
+                named so it cannot be read as a second inbox — the two are the
+                opposite ends of the same funnel and one person can be at both
+                ends on different campaigns. It stays empty-but-honest for
+                someone who has never sent interest, exactly as the inbox is
+                for someone who has never published a page. */}
+            <Link
+              className={`${styles.navTab} ${current === 'interests' ? styles.navTabActive : ''}`}
+              href="/interests"
+              {...(current === 'interests' ? { 'aria-current': 'page' as const } : {})}
+            >
+              My interests
             </Link>
             <Link
               className={`${styles.navTab} ${current === 'rooms' ? styles.navTabActive : ''}`}

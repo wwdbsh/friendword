@@ -74,10 +74,18 @@
   align-items: stretch;
 }
 
+/* A flex item's automatic minimum size is its min-content width, and a text
+   input's min-content width comes from its default `size` attribute — so
+   `flex: 1` alone let the field refuse to shrink and pushed Send off the card
+   and past the viewport at 390px (right = 392, T005 / WUI-2). min-width: 0
+   lets the field absorb the narrow width; the button keeps its intrinsic
+   width so the label is never squeezed instead. */
 .composer input {
   flex: 1;
+  min-width: 0;
 }
 
 .composer button {
+  flex: none;
   margin-top: 0;
 }

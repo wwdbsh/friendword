@@ -1,5 +1,6 @@
 import { after, NextResponse } from 'next/server';
 
+import { triggerNotificationSend } from '@/lib/notifications/trigger';
 import { resolveShareOrigin } from '@/lib/pitchRender/endCard';
 import { runRenderPass } from '@/lib/pitchRender/jobRunner';
 import { renderRunSecret, renderSecretMatches } from '@/lib/pitchRender/secret';
@@ -60,6 +61,16 @@ export async function POST(request: Request): Promise<NextResponse> {
       after(() => triggerRenderRun(requestOrigin));
     } catch {
       // Not in a request scope (unit tests); a kick or operator pushes instead.
+    }
+    // A finished render queues a "your video is ready" notification (0058),
+    // and the person who requested the export is by then usually nowhere near
+    // a browser — the pass that COMPLETED the job is the only reliable kick
+    // for it. Separate try/catch so a failed render kick cannot swallow this
+    // one; both are best-effort and neither affects the response.
+    try {
+      after(() => triggerNotificationSend(requestOrigin));
+    } catch {
+      // Not in a request scope; the daily backstop drains the outbox.
     }
   }
 

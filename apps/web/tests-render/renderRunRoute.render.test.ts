@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getSupabaseServiceClient: vi.fn<() => unknown>(() => ({})),
   runRenderPass: vi.fn(async () => ({ processed: 0, jobs: [] })),
   triggerRenderRun: vi.fn(async () => undefined),
+  triggerNotificationSend: vi.fn(async () => undefined),
 }));
 
 vi.mock('@/lib/supabaseServer', () => ({
@@ -24,6 +25,12 @@ vi.mock('@/lib/pitchRender/jobRunner', () => ({
 // renderRunSelfKick.render.test.ts.
 vi.mock('@/lib/pitchRender/trigger', () => ({
   triggerRenderRun: mocks.triggerRenderRun,
+}));
+
+// 0058: a finished render also kicks the notification sender, whose trigger
+// imports 'server-only' for the same reason. Stubbed on the same grounds.
+vi.mock('@/lib/notifications/trigger', () => ({
+  triggerNotificationSend: mocks.triggerNotificationSend,
 }));
 
 import { POST } from '../app/api/media/render-run/route';

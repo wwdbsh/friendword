@@ -16,6 +16,9 @@
 // the segment config being read. Same stubs renderRunRoute.render.test.ts uses.
 vi.mock('@/lib/supabaseServer', () => ({ getSupabaseServiceClient: () => ({}) }));
 vi.mock('@/lib/pitchRender/trigger', () => ({ triggerRenderRun: async () => undefined }));
+vi.mock('@/lib/notifications/trigger', () => ({
+  triggerNotificationSend: async () => undefined,
+}));
 
 import { readFileSync } from 'node:fs';
 

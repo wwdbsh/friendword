@@ -14,6 +14,10 @@ const passes = [
   { label: 'campaign expiration', args: ['scripts/expire-campaigns.mjs'] },
   { label: 'account deletions', args: ['scripts/process-deletions.mjs'] },
   { label: 'review payload scrub', args: ['scripts/scrub-review-payloads.mjs'] },
+  // Backstop only (0058): the outbox is normally drained by the opportunistic
+  // kick from the request that caused the event. Once a day is the floor, not
+  // the promise — see docs/OPS.md before quoting a delivery latency.
+  { label: 'notification outbox drain', args: ['scripts/drain-notifications.mjs'] },
   {
     label: 'orphan media sweep',
     args: apply

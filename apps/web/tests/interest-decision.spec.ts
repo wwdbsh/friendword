@@ -161,7 +161,15 @@ test('declining an interest opens no room', async ({ page }) => {
   await page.goto('/inbox');
   await page.getByRole('button', { name: 'Decline' }).click();
 
-  await expect(page.getByText('Declined. They will not be notified with details.')).toBeVisible();
+  // 0058 changed this line with the product. The old copy ("they will not be
+  // notified with details") became half false once a decline queues a mail;
+  // the replacement claims nothing about delivery — which is right, because
+  // the trigger only queues and app_config decides whether anything is sent —
+  // and pins the CONTENT boundary, which is true either way. It must stay 1:1
+  // with the declined mail's own body ("No reason was shared with you").
+  await expect(
+    page.getByText('Declined. Your reason and details are never shared with them.'),
+  ).toBeVisible();
   await expect(page.getByRole('link', { name: 'Open the intro room' })).toHaveCount(0);
   expect(decidePayload).toMatchObject({
     target_interest_id: INTEREST_ID,

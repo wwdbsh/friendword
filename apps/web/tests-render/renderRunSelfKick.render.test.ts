@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
     async () => ({ processed: 0, jobs: [] }),
   ),
   triggerRenderRun: vi.fn(async () => undefined),
+  triggerNotificationSend: vi.fn(async () => undefined),
   after: vi.fn((callback: () => unknown) => {
     callback();
   }),
@@ -37,6 +38,10 @@ vi.mock('@/lib/pitchRender/trigger', () => ({
   triggerRenderRun: mocks.triggerRenderRun,
 }));
 
+vi.mock('@/lib/notifications/trigger', () => ({
+  triggerNotificationSend: mocks.triggerNotificationSend,
+}));
+
 import { POST } from '../app/api/media/render-run/route';
 
 const SECRET = 'unit-render-secret-0123456789';
@@ -54,6 +59,7 @@ describe('render-run route — pass-end self-kick', () => {
     mocks.getSupabaseServiceClient.mockReturnValue({});
     mocks.runRenderPass.mockClear();
     mocks.triggerRenderRun.mockClear();
+    mocks.triggerNotificationSend.mockClear();
     mocks.after.mockClear();
     mocks.after.mockImplementation((callback: () => unknown) => {
       callback();
@@ -73,9 +79,15 @@ describe('render-run route — pass-end self-kick', () => {
     const response = await POST(renderRunRequest());
 
     expect(response.status).toBe(200);
-    expect(mocks.after).toHaveBeenCalledTimes(1);
+    // Two schedulings, two different queues: the render self-kick and the
+    // 0058 notification kick (a completed render queued "your video is
+    // ready"). They are separately scheduled on purpose — one failing must
+    // not swallow the other.
+    expect(mocks.after).toHaveBeenCalledTimes(2);
     expect(mocks.triggerRenderRun).toHaveBeenCalledTimes(1);
     expect(mocks.triggerRenderRun).toHaveBeenCalledWith('http://127.0.0.1:3120');
+    expect(mocks.triggerNotificationSend).toHaveBeenCalledTimes(1);
+    expect(mocks.triggerNotificationSend).toHaveBeenCalledWith('http://127.0.0.1:3120');
   });
 
   it('does NOT kick after an idle pass — the chain terminates', async () => {
@@ -86,6 +98,8 @@ describe('render-run route — pass-end self-kick', () => {
     expect(response.status).toBe(200);
     expect(mocks.after).not.toHaveBeenCalled();
     expect(mocks.triggerRenderRun).not.toHaveBeenCalled();
+    // An idle pass completed no render, so there is no notification either.
+    expect(mocks.triggerNotificationSend).not.toHaveBeenCalled();
   });
 
   it('still answers with the summary when after() throws outside a request scope', async () => {
@@ -102,5 +116,6 @@ describe('render-run route — pass-end self-kick', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ processed: 2, jobs: [] });
     expect(mocks.triggerRenderRun).not.toHaveBeenCalled();
+    expect(mocks.triggerNotificationSend).not.toHaveBeenCalled();
   });
 });

@@ -10,6 +10,9 @@
     },
     "app/api/media/render-bench/route.ts": {
       "maxDuration": 800
+    },
+    "app/api/notifications/send/route.ts": {
+      "maxDuration": 300
     }
   }
 }

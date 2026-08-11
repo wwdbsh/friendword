@@ -7,6 +7,7 @@ export * from './errors';
 export * from './interestIntentRepo';
 export * from './interestRepo';
 export * from './introRoomRepo';
+export * from './notificationOutboxRepo';
 export * from './pitchDraftRepo';
 export * from './publishedPitchRepo';
 export * from './renderJobRepo';

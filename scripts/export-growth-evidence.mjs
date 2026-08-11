@@ -16,6 +16,10 @@
  *    separately and flagged as client-reported.
  *  - Revenue is net paid transactions (purchase-family events minus refunds),
  *    not a raw row count of every lifecycle event.
+ *  - Sandbox drill rows (0060) are excluded from every revenue metric. A
+ *    sandbox purchase moves no money, so counting one would inflate conversion
+ *    while contributing zero revenue. Requires 0060 to be applied: the ledger
+ *    filter reads a column that migration adds.
  *  - Every metric carries its source_of_truth and limitations inline.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -51,6 +55,24 @@ const admin = createClient(url, serviceKey, { auth: { persistSession: false } })
 
 // Purchase-family event types that represent money actually received.
 const PAID_EVENT_TYPES = ['INITIAL_PURCHASE', 'NON_RENEWING_PURCHASE', 'RENEWAL'];
+
+// 0060 sandbox exclusion. The two contracts differ and the filters must too:
+//
+//  - `purchase_credit_ledger.environment` and `campaign_entitlements.environment`
+//    are server judgements: NOT NULL, CHECK-ed to exactly SANDBOX|PRODUCTION.
+//    A plain inequality is exact there.
+//  - `purchase_events.environment` (0014) stores RevenueCat's raw string: it is
+//    nullable and not case-normalized, so `.neq('environment', 'SANDBOX')` would
+//    silently drop every NULL-environment row — real purchases — out of revenue.
+//    The rule is `upper(coalesce(environment, '')) <> 'SANDBOX'`, the same shape
+//    0023's production gate uses. PostgREST cannot take that expression, so it is
+//    spelled server-side as "NULL, or not case-insensitively equal to SANDBOX":
+//    unknown or oddly-cased environments count as real money, which is the safe
+//    direction for a revenue figure.
+//
+// Both filters run in Postgres, not in JS, so `head: true` exact counts stay exact.
+const excludeSandboxEvents = (q) => q.or('environment.is.null,environment.not.ilike.SANDBOX');
+const excludeSandboxLabelled = (q) => q.neq('environment', 'SANDBOX');
 
 async function countRows(table, modify) {
   let query = admin.from(table).select('*', { count: 'exact', head: true });
@@ -101,9 +123,11 @@ const [
   countEvents('interest_submitted', { recordedBy: 'server' }),
   countEvents('interest_accepted', { recordedBy: 'server' }),
   countRows('intro_rooms'),
-  countRows('purchase_events', (q) => q.in('event_type', PAID_EVENT_TYPES)),
-  countRows('purchase_events', (q) => q.eq('event_type', 'REFUND')),
-  countRows('purchase_credit_ledger', (q) => q.eq('credit_state', 'consumed')),
+  countRows('purchase_events', (q) => excludeSandboxEvents(q.in('event_type', PAID_EVENT_TYPES))),
+  countRows('purchase_events', (q) => excludeSandboxEvents(q.eq('event_type', 'REFUND'))),
+  countRows('purchase_credit_ledger', (q) =>
+    excludeSandboxLabelled(q.eq('credit_state', 'consumed')),
+  ),
   countRows('reports', (q) => q.eq('status', 'open')),
 ]);
 
@@ -228,13 +252,15 @@ const evidence = {
         'Counts prior campaigns that produced a new published campaign. NOT a K-factor: no cohort or time window is defined, and each claim is first-source only.',
     },
     net_paid_transactions: {
-      source_of_truth: `purchase_events event_type IN (${PAID_EVENT_TYPES.join(', ')}) minus event_type = 'REFUND'`,
+      source_of_truth: `purchase_events event_type IN (${PAID_EVENT_TYPES.join(', ')}) minus event_type = 'REFUND', both restricted to upper(coalesce(environment, '')) <> 'SANDBOX'`,
       limitations:
-        'Net = gross paid events minus refund events over all time; refunds are subtracted in aggregate, not matched per original_transaction_id. Excludes CANCELLATION/EXPIRATION (no money movement).',
+        'Net = gross paid events minus refund events over all time; refunds are subtracted in aggregate, not matched per original_transaction_id. Excludes CANCELLATION/EXPIRATION (no money movement). Excludes sandbox drill events (0060), which move no money; rows with an absent or unrecognized environment are counted as real.',
     },
     creator_credits_consumed: {
-      source_of_truth: "purchase_credit_ledger.credit_state = 'consumed'",
-      limitations: 'Consumed launch credits only; available/revoked credits are excluded.',
+      source_of_truth:
+        "purchase_credit_ledger.credit_state = 'consumed' AND environment <> 'SANDBOX'",
+      limitations:
+        'Consumed launch credits only; available/revoked credits are excluded. Excludes sandbox drill credits (0060).',
     },
     open_reports: {
       source_of_truth: "reports.status = 'open'",

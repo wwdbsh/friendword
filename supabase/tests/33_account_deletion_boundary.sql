@@ -278,6 +278,9 @@ INSERT INTO erasure_contract (tbl, col, strategy) VALUES
   ('public.referral_claims', 'claimed_by_user_id', 'fk_cascade'),
   ('public.reports', 'reported_user_id', 'job_anonymize'),
   ('public.reports', 'reporter_user_id', 'job_anonymize'),
+  -- 0060: enrolment is an ops-held test marker, not user content. It carries
+  -- nothing but the id, so the FK cascade is the whole cleanup.
+  ('public.sandbox_test_accounts', 'user_id', 'fk_cascade'),
   ('public.share_kits', 'unlocked_by_user_id', 'job_delete'),
   ('public.text_moderations', 'subject_user_id', 'fk_set_null'),
   ('public.verification_checks', 'user_id', 'job_delete'),

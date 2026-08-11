@@ -61,7 +61,10 @@ let failures = 0;
 // Third audit P0-NEW-4: public visibility is NO LONGER opened globally here.
 // Instead the created draft is added to qa_preview_allowlist below, so the
 // public-read gate stays 'off' for the rest of the internet during the run.
-const LAUNCH_GATE_KEYS = ['real_payments_enabled'];
+// 0060: the replayed webhook events below are SANDBOX events, and a sandbox
+// event only creates a benefit while the sandbox window is open — so this run
+// opens that switch too and restores it with the rest.
+const LAUNCH_GATE_KEYS = ['real_payments_enabled', 'sandbox_payments_enabled'];
 let previousGateValues = null;
 
 async function openLaunchGates() {
@@ -89,6 +92,28 @@ async function restoreLaunchGates() {
       admin.from('app_config').update({ value: previous }).eq('key', key),
     );
   }
+}
+
+// 0060: the switch decides *when* a sandbox benefit may exist, the register
+// decides *whose*. Both the intent RPC and the webhook check enrolment, so the
+// throwaway QA identities this run creates must be enrolled for the run window
+// — and un-enrolled in the finally block, exactly like the gates. Enrolment is
+// scoped to the ids this run created, so a real drill's enrolment is untouched.
+const sandboxEnrolments = [];
+
+async function enrolSandboxTesters(userIds) {
+  const rows = userIds.map((userId) => ({ user_id: userId, note: `e2e-production ${stamp}` }));
+  const { error } = await admin.from('sandbox_test_accounts').insert(rows);
+  if (error) throw new Error(`sandbox enrolment: ${error.message}`);
+  sandboxEnrolments.push(...userIds);
+}
+
+async function unenrolSandboxTesters() {
+  if (sandboxEnrolments.length === 0) return;
+  await cleanup(
+    'sandbox enrolment',
+    admin.from('sandbox_test_accounts').delete().in('user_id', sandboxEnrolments),
+  );
 }
 
 const initialHeadline = 'E2E Blair makes ordinary plans memorable.';
@@ -184,6 +209,10 @@ try {
   const dater = await makeUser(daterEmail, 'E2E Blair');
   const stranger = await makeUser(strangerEmail, 'E2E Stranger');
   check('1. created introducer/dater/stranger with profiles', true);
+
+  // The purchases below are replayed as SANDBOX events, which only pay out to
+  // an enrolled account while the sandbox window is open (0060).
+  await enrolSandboxTesters([introducer.id, dater.id, stranger.id]);
 
   // 2. Introducer: draft + voice upload + submit (Flow A, mobile path)
   const { data: draft, error: draftError } = await introducer.client
@@ -1364,6 +1393,7 @@ try {
   console.error('FATAL', error.message);
 } finally {
   await restoreLaunchGates();
+  await unenrolSandboxTesters();
   if (process.env.KEEP_CAMPAIGN === '1' && failures === 0) {
     console.log('KEEP_CAMPAIGN=1: leaving data in place for manual QA');
     console.log(JSON.stringify(created));

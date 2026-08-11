@@ -2,12 +2,13 @@ import { InterestRepo, UnauthenticatedError, type MyInterest } from '@friendword
 import { colors, fonts, fontSizes, spacing } from '@friendword/ui-tokens';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { SignInPromptCard, TrustCard } from '../../src/components';
+import { QuietNavAction, SignInPromptCard, TrustCard } from '../../src/components';
 import { SignInSheet } from '../../src/features/auth/SignInSheet';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
+import { buildRoomsUrl } from '../../src/services/webOrigin';
 
 export type InterestsLoadState = 'loading' | 'ready' | 'signed_out' | 'error';
 
@@ -15,6 +16,8 @@ type InterestsContentProps = {
   readonly state: InterestsLoadState;
   readonly interests: readonly MyInterest[];
   readonly onSignIn?: () => void;
+  /** Injected in tests; defaults to opening the web intro rooms. */
+  readonly onOpenRooms?: () => void;
 };
 
 export function getInterestTitle(interest: MyInterest): string {
@@ -51,7 +54,43 @@ export function getInterestStatusLabel(interest: MyInterest): string {
   }
 }
 
-export function InterestsContent({ state, interests, onSignIn }: InterestsContentProps) {
+/**
+ * FUN-6: an accepted interest used to say "open intro rooms on the web" and
+ * stop there — no URL, no handler, nothing to press. The web origin comes from
+ * the same Expo config the consent and share links use; never hard-coded.
+ *
+ * Resolves to the message to show, or null when the browser opened: a swallowed
+ * failure would leave a pressed button looking like it worked.
+ */
+export async function openIntroRoomsOnWeb(): Promise<string | null> {
+  try {
+    await Linking.openURL(buildRoomsUrl());
+    return null;
+  } catch {
+    return 'Your intro rooms could not open. Please try again.';
+  }
+}
+
+export function InterestsContent({
+  state,
+  interests,
+  onSignIn,
+  onOpenRooms,
+}: InterestsContentProps) {
+  // Keyed by interest so one failed open does not caption every accepted card.
+  const [roomsErrorInterestId, setRoomsErrorInterestId] = useState<string | null>(null);
+
+  const openRooms = (interestId: string): void => {
+    setRoomsErrorInterestId(null);
+    if (onOpenRooms !== undefined) {
+      onOpenRooms();
+      return;
+    }
+    void openIntroRoomsOnWeb().then((message) => {
+      setRoomsErrorInterestId(message === null ? null : interestId);
+    });
+  };
+
   if (state === 'loading') {
     return <Text style={styles.message}>Loading your interests…</Text>;
   }
@@ -97,9 +136,20 @@ export function InterestsContent({ state, interests, onSignIn }: InterestsConten
       <Text style={styles.meta}>{formatSubmittedAt(interest.submittedAt)}</Text>
       <Text style={styles.message}>{getInterestDecisionCopy(interest.interestStatus)}</Text>
       {interest.interestStatus === 'accepted' ? (
-        <Text style={styles.roomNote}>
-          Open intro rooms on the Friendword web app to continue the introduction.
-        </Text>
+        <>
+          <Text style={styles.roomNote}>
+            Your intro room is on the Friendword web app — messages are answered there.
+          </Text>
+          <QuietNavAction
+            label="Open my intro rooms on the web"
+            onPress={() => openRooms(interest.interestId)}
+          />
+          {roomsErrorInterestId === interest.interestId ? (
+            <Text style={styles.roomsError}>
+              Your intro rooms could not open. Please try again.
+            </Text>
+          ) : null}
+        </>
       ) : null}
       {interest.campaignStatus === 'expired' || interest.campaignStatus === 'archived' ? (
         <Text style={styles.message}>
@@ -275,5 +325,10 @@ const styles = StyleSheet.create({
     fontFamily: 'BricolageGrotesqueSemiBold',
     fontSize: fontSizes.md,
     lineHeight: 24,
+  },
+  roomsError: {
+    color: colors.danger,
+    fontFamily: 'BricolageGrotesqueBold',
+    fontSize: fontSizes.md,
   },
 });

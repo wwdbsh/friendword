@@ -17,3 +17,17 @@ export function getWebOrigin(): string {
 export function buildConsentUrl(consentToken: string): string {
   return `${getWebOrigin()}/consent/${consentToken}`;
 }
+
+/**
+ * The dater's own interest inbox. Accepting, declining, pausing and taking a
+ * page down all live on the web surface, so mobile links out instead of
+ * describing a screen the app does not have (T004 / FUN-2).
+ */
+export function buildInboxUrl(): string {
+  return `${getWebOrigin()}/inbox`;
+}
+
+/** Intro rooms — the only place an accepted introduction can be answered. */
+export function buildRoomsUrl(): string {
+  return `${getWebOrigin()}/rooms`;
+}

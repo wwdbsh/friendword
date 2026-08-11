@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@friendword/data', () => ({
   BenefitsRepo: class {},
+  InterestRepo: class {},
   trackEvent: vi.fn(),
   UnauthenticatedError: class extends Error {},
 }));
@@ -38,6 +39,7 @@ vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn() }));
 vi.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'section' }));
 vi.mock('../../components', () => ({
   HypeButton: 'button',
+  QuietNavAction: 'button',
   SignInPromptCard: 'article',
   StickerCard: 'article',
   TrustCard: 'article',
@@ -53,6 +55,11 @@ vi.mock('../../services/pitchDraftsSupabase', () => ({
   }) => draft.server !== null && draft.id === draft.server.draftId,
 }));
 vi.mock('../../services/supabaseClient', () => ({ getSupabaseClient: () => null }));
+// expo-constants cannot load outside a native runtime; the origin itself is
+// proven by src/services/webOrigin.test.ts.
+vi.mock('../../services/webOrigin', () => ({
+  buildInboxUrl: () => 'https://friendword.example/inbox',
+}));
 vi.mock('../../services/introducedCampaigns', () => ({
   buildIntroducerShareUrl: (slug: string) =>
     `https://friendword.example/p/${slug}?src=introducer-share&ref=${slug}`,
@@ -66,6 +73,8 @@ vi.mock('../../services/introducedCampaigns', () => ({
 import { PitchDraftSchema } from '../../services/types';
 import {
   canGetCampaignPass,
+  countWaitingInterests,
+  formatWaitingInterests,
   getCampaignName,
   getIntroducerDraftName,
   getIntroducedShareActions,
@@ -170,5 +179,55 @@ describe('Introducer live-campaign share surface', () => {
       canShare: false,
       shareUrl: null,
     });
+  });
+});
+
+// FUN-2: the "Campaigns about me" card said nothing about people waiting, so a
+// dater had no signal that anyone had reached out and no route to the web Inbox
+// where accepting happens. The count is aggregated client-side from the
+// owner-gated list_campaign_interests RPC — no new migration, no new RPC.
+describe('Waiting-interest signal on an owned campaign', () => {
+  it('counts only the interests still awaiting a decision', () => {
+    expect(
+      countWaitingInterests([
+        { interestStatus: 'submitted' },
+        { interestStatus: 'accepted' },
+        { interestStatus: 'submitted' },
+        { interestStatus: 'declined' },
+      ]),
+    ).toBe(2);
+    expect(countWaitingInterests([])).toBe(0);
+  });
+
+  it('never renders an unreadable count as "nobody waiting"', () => {
+    // undefined means the read failed for that campaign; zero is a fact.
+    expect(formatWaitingInterests(undefined, 'published')).toBe(
+      'Interest in this campaign is answered in your Inbox on the web.',
+    );
+    expect(formatWaitingInterests(0, 'published')).toBe(
+      'Nobody is waiting on your answer right now.',
+    );
+    expect(formatWaitingInterests(1, 'published')).toBe('1 person is waiting for your answer.');
+    expect(formatWaitingInterests(3, 'published')).toBe('3 people are waiting for your answer.');
+  });
+
+  // decide_interest (0044) refuses an accept unless the campaign is published
+  // and inside its window, so "waiting for your answer" on a paused or ended
+  // campaign promised an action the server would reject.
+  it('does not promise an answer on a campaign that cannot accept one', () => {
+    expect(formatWaitingInterests(2, 'paused')).toBe(
+      '2 people are waiting — resume your page in your Inbox on the web to answer them.',
+    );
+    expect(formatWaitingInterests(1, 'expired')).toBe(
+      '1 person is waiting, but this campaign has ended — reviving it is what reopens your answer.',
+    );
+    for (const status of ['paused', 'expired'] as const) {
+      expect(formatWaitingInterests(2, status)).not.toContain('waiting for your answer');
+      // Zero and unreadable stay status-independent: neither claims an action.
+      expect(formatWaitingInterests(0, status)).toBe('Nobody is waiting on your answer right now.');
+      expect(formatWaitingInterests(undefined, status)).toBe(
+        'Interest in this campaign is answered in your Inbox on the web.',
+      );
+    }
   });
 });

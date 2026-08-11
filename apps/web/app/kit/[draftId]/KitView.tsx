@@ -12,6 +12,7 @@ import {
 } from '@friendword/data';
 
 import { EmailSignIn } from '@/components/EmailSignIn';
+import { FlowNav } from '@/components/FlowNav';
 import { getSupabaseBrowserClient } from '@/lib/supabaseClient';
 import { useSession } from '@/lib/useSession';
 
@@ -140,7 +141,17 @@ export function KitView({ draftId }: { readonly draftId: string }) {
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
-        <p className={styles.wordmark}>Friendword</p>
+        {/* Tabs off: the kit is the introducer's surface, and Inbox / Intro
+            rooms are the dater's. Offering them here invites the person who
+            recorded the pitch into two screens that will always be empty for
+            them. The published pitch is their real destination, so it is an
+            explicit back link (the RoomView pattern) when we know the slug. */}
+        <FlowNav
+          tabs={false}
+          {...(campaign?.slug === undefined || campaign.slug === null
+            ? {}
+            : { back: { href: `/p/${campaign.slug}`, label: 'The published pitch' } })}
+        />
 
         {client === null && (
           <section className={styles.card}>

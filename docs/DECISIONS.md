@@ -453,3 +453,10 @@
 - **키워드 규칙**: 큐레이션 데이터가 없으므로 발명하지 않고 규칙을 명시 — 세그먼트의 워드 타이밍 기록 중 4자 이상이면서 자막 문장에 실제 등장하는 첫 단어. 데이터 없으면 강조 없음.
 - **재렌더 충돌 없음(확인)**: `media_render_jobs.revision_id UNIQUE` + `ON CONFLICT DO NOTHING` + done 잡 재클레임 불가 — 기존 산출물은 불변이고 자막은 미래 렌더에만 적용.
 - **잔여**: 60s 워스트케이스의 자막 합성 비용은 미실측 — 프로덕션 벤치 1회 재실행으로 T002 여유(480s 기준) 재확인 필요(T010 통합 검증 항목).
+
+## 2026-08-11: public_beta_enabled = on — 공개 베타 개방 (사용자 실행)
+
+- **결정**: 상헌이 Supabase SQL Editor에서 `public_beta_enabled`를 `on`으로 전환(OPS.md 절차, 실행·권한 모두 사용자). service role 조회로 실측 확인. `real_payments_enabled`·`identity_enforcement`·`media_validation_enforcement`는 off 유지.
+- **이유**: fcp Goal `render-launch-path` 완료(2026-08-11, Issue #1) — 렌더 파이프라인 실캠페인 실증, 자막 크롬, 전 게이트 12/12 green, hosted 0056 정합으로 베타 전제 충족. CLAUDE.md §16(릴스 배포는 베타 스위치 이후)의 관문 해소.
+- **영향**: 외부 사용자의 관심 표현(S2)이 Dater에게 전달되기 시작, 캠페인 publish가 allowlist 없이 개방, 릴스 배포 가능 상태. 스위치 이전 유입 S1 의사는 전달되지 않음(설계 — 실손실 없음, QA뿐이었음).
+- **다음**: 첫 실사용자 캠페인 1건 밀착 관찰(SESSION_HANDOFF §3) → 릴스 배포 개시 → real_payments 판단(9/30 해커톤 축, sandbox 드릴 선행).

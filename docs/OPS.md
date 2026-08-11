@@ -91,6 +91,8 @@ SELECT key, value, updated_at FROM app_config
 
 - 게이트 상태 변경은 service role SQL로만 하며, 변경 시 이 문서와 `docs/DECISIONS.md`에 날짜·이유를 남깁니다:
 
+- **변경 이력**: 2026-08-11 `public_beta_enabled` off→**on** (사용자 실행 — Goal `render-launch-path` 완료로 베타 개방, DECISIONS 당일 항목). `real_payments_enabled`는 off 유지.
+
 ```sql
 UPDATE app_config SET value = 'on'  -- 또는 'off'
  WHERE key = 'real_payments_enabled';

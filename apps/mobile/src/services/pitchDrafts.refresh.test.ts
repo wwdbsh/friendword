@@ -124,6 +124,7 @@ describe('draft list resilience to a slow or failing server refresh', () => {
       local,
       {
         createDraft: unexpected,
+        deleteDraft: unexpected,
         getDraft: unexpected,
         listAssets: unexpected,
         removeAsset: unexpected,
@@ -150,6 +151,7 @@ describe('draft list resilience to a slow or failing server refresh', () => {
     const id = await createSubmittedDraft(local);
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
+      deleteDraft: unexpected,
       getDraft: unexpected,
       listAssets: unexpected,
       removeAsset: unexpected,
@@ -175,6 +177,7 @@ describe('draft list resilience to a slow or failing server refresh', () => {
     const id = await createSubmittedDraft(local);
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
+      deleteDraft: unexpected,
       getDraft: unexpected,
       listAssets: unexpected,
       removeAsset: unexpected,
@@ -199,6 +202,7 @@ describe('draft list resilience to a slow or failing server refresh', () => {
     const id = await createSubmittedDraft(local);
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
+      deleteDraft: unexpected,
       getDraft: unexpected,
       listAssets: unexpected,
       removeAsset: unexpected,
@@ -232,6 +236,7 @@ describe('draft list resilience to a slow or failing server refresh', () => {
       local,
       {
         createDraft: unexpected,
+        deleteDraft: unexpected,
         getDraft: unexpected,
         listAssets: unexpected,
         removeAsset: unexpected,
@@ -267,6 +272,7 @@ describe('draft list resilience to a slow or failing server refresh', () => {
     const local = createLocalService();
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
+      deleteDraft: unexpected,
       getDraft: unexpected,
       listAssets: unexpected,
       removeAsset: unexpected,

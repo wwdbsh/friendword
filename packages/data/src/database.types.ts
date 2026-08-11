@@ -769,6 +769,13 @@ export type Database = {
         };
         Returns: undefined;
       };
+      /** 0059: introducer cleanup of an unpublished pitch draft they created. */
+      delete_my_pitch_draft: {
+        Args: {
+          readonly target_draft_id: string;
+        };
+        Returns: undefined;
+      };
       submit_pitch_for_consent: {
         Args: {
           readonly draft_id: string;

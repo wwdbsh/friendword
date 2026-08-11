@@ -99,6 +99,23 @@ export interface PitchDraftService {
    */
   eraseAllLocalDrafts(): Promise<LocalDraftErasure>;
   /**
+   * Removes ONE pitch the introducer started — this device's copy and, when the
+   * draft reached the server, the server's rows too (T010, Issue #47).
+   *
+   * Distinct from {@link eraseAllLocalDrafts} in both scope and authority: that
+   * one is the local half of account deletion and never talks to the server;
+   * this one is a person tidying a list, and the server is the authority on
+   * whether the pitch may go at all. A server-backed draft is therefore deleted
+   * server-first and only removed from this device once the server has said yes
+   * — a local-only removal would hide a pitch the server still holds and that
+   * the next sync would bring straight back, minus the media files this device
+   * had already thrown away.
+   *
+   * Rejects with {@link PitchDraftDeletionError} carrying a sentence the screen
+   * can show, and leaves everything in place when it does.
+   */
+  deleteDraft(id: PitchDraftId): Promise<void>;
+  /**
    * The screen-facing draft read. It carries its own {@link DraftSyncState}
    * rather than a bare array so no caller can present a list this device could
    * not confirm as the current one — that is the whole failure mode the
@@ -183,6 +200,36 @@ export class PitchDraftSubmissionError extends Error {
     this.name = 'PitchDraftSubmissionError';
   }
 }
+
+/**
+ * Raised when deleting a pitch did not happen, carrying the sentence the screen
+ * shows. Nothing was destroyed on either side when this is thrown — the local
+ * removal is the last step and only runs after the server has agreed.
+ *
+ * `partial` is the one case where that is not the whole truth: the server
+ * accepted the deletion and this device could not finish clearing its own
+ * copies. The pitch really is gone from Friendword; the screen has to say the
+ * files may still be on the phone rather than claiming a clean removal.
+ */
+export class PitchDraftDeletionError extends Error {
+  constructor(
+    readonly reason: string,
+    readonly partial: boolean = false,
+  ) {
+    super(reason);
+    this.name = 'PitchDraftDeletionError';
+  }
+}
+
+/**
+ * §12: the deletion went through on Friendword and this phone did not finish
+ * clearing itself, so the copy claim has to be withdrawn rather than softened.
+ * "Delete the app" is the only remaining lever a person has over files this
+ * code could not remove.
+ */
+export const LOCAL_MEDIA_LEFTOVER_MESSAGE =
+  'This pitch is deleted from Friendword, but we could not finish clearing this phone. The ' +
+  'recording or photos may still be in the app on this device — deleting the app removes them.';
 
 export const STORED_VOICE_REPLACEMENT_MESSAGE =
   'The recording for this pitch has already been sent to Friendword and cannot be replaced ' +
@@ -650,6 +697,42 @@ export class MockPitchDraftService implements PitchDraftService {
       }
     }
     return { erasedDrafts, complete: readable && deletedEveryFile };
+  }
+
+  /**
+   * Removes one draft from this device and deletes the media files it named.
+   *
+   * The local store has no server behind it, so this IS the whole deletion
+   * here; {@link HybridPitchDraftService.deleteDraft} is what puts the server
+   * in front of it. A draft that is not on this device is not an error — the
+   * caller asked for it to be gone and it is, and a device that never held it
+   * (a draft recovered from the account on another phone) must not dead-end.
+   *
+   * Media deletion failures are reported as a partial deletion rather than
+   * swallowed: the recording is the one thing on the phone this call promised
+   * to remove.
+   */
+  async deleteDraft(id: PitchDraftId): Promise<void> {
+    const orphanedUris = await this.runExclusive(async () => {
+      const drafts = await this.readDrafts();
+      const target = drafts.find((draft) => draft.id === id);
+      if (target === undefined) {
+        return [] as readonly string[];
+      }
+      await this.writeDrafts(drafts.filter((draft) => draft.id !== id));
+      return localMediaUris(target);
+    });
+    let deletedEveryFile = true;
+    for (const uri of orphanedUris) {
+      try {
+        await this.deleteMediaFile(uri);
+      } catch {
+        deletedEveryFile = false;
+      }
+    }
+    if (!deletedEveryFile) {
+      throw new PitchDraftDeletionError(LOCAL_MEDIA_LEFTOVER_MESSAGE, true);
+    }
   }
 
   private async deleteMediaFiles(uris: readonly string[]): Promise<void> {

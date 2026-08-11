@@ -215,6 +215,97 @@ node scripts/cleanup-orphan-media.mjs --apply
 실패하면 삭제 단계에 진입하지 않습니다. 초기에는 매일 1회 실행하고, 후보 수와 실패율이
 안정된 뒤 주기를 조정합니다.
 
+## 피치 정리 삭제 (0059 이후 — T010, Issue #47)
+
+Introducer가 **캠페인이 되지 못한 자기 pitch draft**를 앱에서 직접 지웁니다(모바일
+`My campaigns` → "Pitches I'm making" 카드 → `Delete this pitch` → 사실 목록 + 명시
+확인). 서버 RPC는 `public.delete_my_pitch_draft(target_draft_id)`이고 `authenticated`
+전용입니다. **운영자가 대신 눌러 줄 수단은 없습니다** — RPC가 `auth.uid()`의 소유
+draft만 지우며, 대리 삭제 경로는 의도적으로 두지 않았습니다(계정 삭제와 같은 규율).
+
+**이것은 소거(erasure)가 아니라 정리(cleanup)입니다.** 차이는 한 곳에서 관찰됩니다:
+`erase_pitch_draft`(0018)는 `friendword.erasure`를 켜서 0051의 flagged-clip 삭제
+추적(`ops_alerts` `video_moderation_review_deleted`)을 **의도적으로 침묵**시키지만,
+0059는 별도 플래그 `friendword.cleanup`을 쓰므로 그 추적이 **정상적으로 남습니다**.
+사용자가 draft를 지워도 안전 기록은 사라지지 않습니다.
+
+### 서버가 거부하는 세 가지와 문의 대응
+
+| 서버 메시지                                                     | 뜻                                                       | 대응                                                                                                                                                                                           |
+| --------------------------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `a published pitch is taken down by the person it is about`     | 이미 캠페인이 있는 pitch. 공개 페이지는 Dater 것         | Dater의 웹 `/inbox` → "Take it down for good"(archived)을 안내합니다. Introducer에게 대신 지워 주지 않습니다                                                                                   |
+| `this pitch is still being processed and cannot be deleted yet` | 그 draft의 clip ingest 또는 렌더 잡이 `queued`/`leased`  | 일시적입니다. 잡이 종결되면 지워집니다. 잡이 오래 `queued`에 머물면 워커 상태를 먼저 봅니다(§정기 운영 실행)                                                                                   |
+| `this pitch has a purchase attached and cannot be deleted here` | `purchase_credit_ledger`에 그 draft를 가리키는 행이 있음 | **운영 판단 사항입니다.** 결제 기록은 사용자의 정리 제스처로 지우지 않습니다. 환불·크레딧 이전 여부를 먼저 정하고, 정해진 뒤에만 service-role로 원장을 조정한 다음 사용자가 다시 지우게 합니다 |
+
+확인 쿼리(service role):
+
+```sql
+SELECT d.id, d.status,
+       (SELECT count(*) FROM campaigns c WHERE c.pitch_draft_id = d.id) AS campaigns,
+       (SELECT count(*) FROM media_ingest_jobs j
+          JOIN pitch_assets a ON a.id = j.asset_id
+         WHERE a.pitch_draft_id = d.id AND j.status IN ('queued','leased')) AS live_jobs,
+       (SELECT count(*) FROM purchase_credit_ledger l WHERE l.pitch_draft_id = d.id) AS credits
+  FROM pitch_drafts d WHERE d.id = '<draft-id>';
+```
+
+### 바이트는 orphan sweep이 회수합니다
+
+RPC는 **DB 행만** 지웁니다(0046 선례: SQL에서 `storage.objects`를 지우면 Storage의
+메타데이터만 사라지고 바이트는 남아 아무도 회수할 수 없는 객체가 생깁니다). draft가
+사라지면 그 prefix를 붙잡고 있던 참조가 전부 함께 사라지므로 — `pitch_assets`는
+CASCADE, `consent_revisions`도 CASCADE(= 위 "consent revision이 있는 prefix는 보호"
+규칙이 풀립니다), campaign은 애초에 거부됨 — 다음 sweep이 48시간 뒤 회수합니다.
+따라서 **"몇 시간 안에 지워집니다"라고 답하지 않습니다.** 제품 문구도 시각을
+약속하지 않습니다. `media_validations` 행은 cascade가 없어 RPC가 prefix로 직접
+지웁니다.
+
+문의가 "지웠는데 파일이 남아 있는 것 같다"이면: 앱 목록과 서버에서는 이미 사라졌고
+저장소 정리는 정기 잡이 한다고 안내합니다(계정 삭제와 같은 설명). 확인:
+
+```sh
+node scripts/cleanup-orphan-media.mjs   # dry-run, 집계만 출력
+```
+
+### hosted 왕복 증명 (0059 push 직후 1회, 그리고 이 경로를 손댈 때마다)
+
+```sh
+node scripts/qa/hosted-pitch-draft-cleanup-proof.mjs
+```
+
+`scripts/qa/hosted-pitch-draft-cleanup-proof.mjs`는 **연결된 실프로젝트에 쓰는**
+스크립트입니다. `.env`의 `SUPABASE_URL`·`NEXT_PUBLIC_SUPABASE_ANON_KEY`·
+`SUPABASE_SERVICE_ROLE_KEY`를 읽고, 합성 계정으로 로그인해 PostgREST를 통해 실제로
+RPC를 호출합니다(service_role은 `auth.uid()`가 NULL이라 0059가 거부하므로 증명이
+되지 않습니다).
+
+**로컬 하니스(`bash scripts/test-db.sh`)로는 증명할 수 없는 것만** 여기서 봅니다:
+① hosted 기본 권한이 새 public 함수마다 anon에게 EXECUTE를 주므로, `REVOKE … FROM
+PUBLIC, anon`이 실제로 걷어냈는지는 hosted에서만 관찰됩니다(P0 — anon 키 호출이
+함수 본문에 닿기 전에 권한 거부여야 하며, `authentication required`가 돌아오면 그건
+anon이 EXECUTE를 들고 있다는 뜻이라 **실패로 처리**합니다). ② 실제 JWT·PostgREST
+경계에서 거부 문장이 그대로 도착하는지(P1~P4, P6).
+
+건드리는 범위는 스크립트 상단 상수가 전부입니다:
+
+| 상수                               | 값                                    | 뜻                                   |
+| ---------------------------------- | ------------------------------------- | ------------------------------------ |
+| `SYNTHETIC_ID_PREFIX`              | `59010000-0000-4000-8000-0000000000…` | 만드는 모든 행의 id 접두             |
+| `SYNTHETIC_EMAIL_LOCALPART_PREFIX` | `t010-cleanup`                        | 합성 계정 local part                 |
+| `SYNTHETIC_EMAIL_DOMAIN`           | `friendword.invalid`                  | RFC 2606 예약 도메인(발송 불가)      |
+| `UNTOUCHABLE_CAMPAIGN_SLUGS`       | `sumin-n2g2ma`, `jordan-ba9m1u`       | 이름으로 생존을 대조하는 불가침 대상 |
+
+픽스처 생성 시점부터 `try/finally`이므로 어느 단계에서 던져도 합성 행·저장소 객체·
+계정을 정리합니다. **정리 실패는 삼키지 않습니다** — 지우지 못한 항목을 이름으로
+나열하고 종료 코드를 non-zero로 만듭니다. 그 출력이 보이면 남은 항목을 손으로 지운 뒤
+다시 실행합니다.
+
+마지막 P5는 **전체 테이블 총계를 비교하지 않습니다.** 라이브 프로젝트에서는 실사용자
+가입 한 건이 무관한 실패를 만들고, 반대로 같은 크기의 맞교환은 총계로 잡히지 않기
+때문입니다. 대신 (a) 합성 네임스페이스 잔존 0(저장소는 합성 prefix만 조회 — 버킷
+루트를 훑지 않습니다), (b) 실행 전 존재하던 모든 id가 여전히 존재하는지 **id 단위**로
+확인합니다.
+
 ## RevenueCat review resolve (0038 이후)
 
 TRANSFER 등 자동 귀속 불가 이벤트는 `purchase_event_reviews`에 open으로 남습니다. 운영 종결은 service-role 전용 RPC로만 합니다:

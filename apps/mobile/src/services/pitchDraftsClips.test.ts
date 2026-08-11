@@ -166,6 +166,7 @@ async function createHarness(options: {
   };
   const repository: PitchDraftRepository = {
     createDraft: unexpected,
+    deleteDraft: unexpected,
     getDraft: unexpected,
     listAssets: async (): Promise<readonly PitchAssetRow[]> => [...assetRows],
     removeAsset: async (assetId): Promise<void> => {

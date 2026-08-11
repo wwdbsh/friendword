@@ -201,6 +201,7 @@ describe('pitch draft AI review flow', () => {
     };
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unused,
+      deleteDraft: unused,
       getDraft: unused,
       listAssets: unused,
       removeAsset: unused,
@@ -233,6 +234,7 @@ describe('pitch draft AI review flow', () => {
     };
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
+      deleteDraft: unexpected,
       getDraft: unexpected,
       listAssets: unexpected,
       removeAsset: unexpected,
@@ -286,6 +288,7 @@ describe('pitch draft AI review flow', () => {
     };
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
+      deleteDraft: unexpected,
       getDraft: unexpected,
       listAssets: unexpected,
       removeAsset: unexpected,
@@ -325,6 +328,7 @@ describe('pitch draft AI review flow', () => {
       };
       const service = new HybridPitchDraftService(null, local, {
         createDraft: async () => SERVER_ROW,
+        deleteDraft: unexpected,
         getDraft: unexpected,
         listAssets: unexpected,
         removeAsset: unexpected,
@@ -398,6 +402,7 @@ describe('pitch draft AI review flow', () => {
     };
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
+      deleteDraft: unexpected,
       getDraft: unexpected,
       listAssets: unexpected,
       removeAsset: unexpected,
@@ -434,6 +439,7 @@ describe('pitch draft AI review flow', () => {
     });
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
+      deleteDraft: unexpected,
       getDraft: unexpected,
       listAssets: unexpected,
       removeAsset: unexpected,
@@ -465,6 +471,7 @@ describe('pitch draft AI review flow', () => {
     });
     const service = new HybridPitchDraftService(null, local, {
       createDraft: unexpected,
+      deleteDraft: unexpected,
       getDraft: unexpected,
       listAssets: unexpected,
       removeAsset: unexpected,

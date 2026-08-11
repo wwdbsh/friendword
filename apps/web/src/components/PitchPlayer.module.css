@@ -247,6 +247,10 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Both are <Link>s, so the pill needs the anchor underline reset explicitly —
+   without it the funnel's one CTA rendered "I'm interested" underlined
+   (T005 / WUI-4). Box model is unchanged; .desktopInterest and the mobile
+   .interestButton already declare their own display below. */
 .desktopInterest,
 .interestButton {
   min-height: 3.5rem;
@@ -256,6 +260,7 @@
   box-shadow: var(--shadow-sticker);
   color: var(--color-ink);
   font-weight: 850;
+  text-decoration: none;
   cursor: pointer;
   transition:
     transform var(--motion-fast) var(--motion-bounce),

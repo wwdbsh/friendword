@@ -53,12 +53,13 @@
   gap: var(--space-sm);
 }
 
+/* T004 fixed the anchor box only for the pills inside this row; T005 moved the
+   display and underline reset onto the .primary/.secondary rule below, so a
+   pill is one box wherever it is used and whichever element it is. What stays
+   here is what is genuinely row-specific: the link colours. */
 .actionRow .primary,
 .actionRow .secondary {
-  display: inline-flex;
-  align-items: center;
   color: var(--color-ink);
-  text-decoration: none;
 }
 
 .actionRow .primary {
@@ -147,14 +148,22 @@
   line-height: 1.2;
 }
 
+/* Same box for a <button> and a <Link> — see flowCard.module.css .primary
+   (T005 / WUI-1 · WUI-4): an anchor is inline by default, so its vertical
+   padding would paint over the line above instead of occupying space, and it
+   would carry an underline the identical button does not. */
 .primary,
 .secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 44px;
   margin-top: var(--space-sm);
   padding: var(--space-md) var(--space-lg);
   border: var(--stroke-trust) solid var(--color-border-muted);
   border-radius: var(--radius-pill);
   font-weight: 800;
+  text-decoration: none;
   cursor: pointer;
   transition: transform var(--motion-fast) var(--motion-ease-out);
 }

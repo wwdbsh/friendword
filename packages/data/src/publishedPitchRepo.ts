@@ -58,6 +58,74 @@ export async function isCampaignPubliclyVisible(
   return allowlisted !== null;
 }
 
+/**
+ * Why a public pitch URL has nothing to play (GAP-7 / T013).
+ *
+ * `getPublishedPitchBySlug` returns null for a mistyped slug, a gated campaign
+ * and an expired one alike, so every one of them used to land on the same
+ * unbranded 404. Expiry is not an error though — it is the confirmed terminal
+ * state of every campaign, and the person holding the link deserves to be told
+ * that rather than left wondering whether they typed it wrong.
+ *
+ * `missing` is the fail-closed answer: it is returned for an unknown slug, for
+ * an archived or paused campaign (the owner took it down, and confirming the
+ * slug exists would leak that), and — importantly — for a campaign the public
+ * gate does not currently expose, so a closed beta never reveals its roster.
+ */
+export type PublicPitchAbsence = 'ended' | 'missing';
+
+/**
+ * The reason a public pitch page has nothing to show. ONLY meaningful after
+ * {@link getPublishedPitchBySlug} has already returned null for the same slug.
+ *
+ * The expiry test is the same one `displayCampaignStatus` applies on the owner's
+ * own screens: status 'expired', or a published/paused campaign whose `ends_at`
+ * has passed (the public read 404s on the timestamp before the expiration job
+ * gets around to flipping the row, so the timestamp — not the row's word — is
+ * what the reader is told about).
+ */
+export async function getPublicPitchAbsence(
+  client: ServiceSupabaseClient,
+  slug: string,
+  now: Date = new Date(),
+): Promise<PublicPitchAbsence> {
+  const parsedSlug = slugSchema.safeParse(slug);
+  if (!parsedSlug.success) {
+    return 'missing';
+  }
+
+  const { data: campaign, error } = await client
+    .from('campaigns')
+    .select('status, ends_at, pitch_draft_id')
+    .eq('slug', parsedSlug.data)
+    .maybeSingle();
+  if (error !== null) {
+    throw new DataLayerError('publishedPitch.absence', error);
+  }
+  if (campaign === null) {
+    return 'missing';
+  }
+
+  // Same gate as the read itself, for the same reason: while the public beta is
+  // closed, an off-allowlist slug must be indistinguishable from a typo.
+  if (!(await isCampaignPubliclyVisible(client, campaign.pitch_draft_id))) {
+    return 'missing';
+  }
+
+  if (campaign.status === 'expired') {
+    return 'ended';
+  }
+  const endsAt = campaign.ends_at;
+  if (
+    (campaign.status === 'published' || campaign.status === 'paused') &&
+    endsAt !== null &&
+    new Date(endsAt).getTime() <= now.getTime()
+  ) {
+    return 'ended';
+  }
+  return 'missing';
+}
+
 export type PublishedPitchPhoto = {
   /**
    * The asset id the approved scene refers to. Published so the player can bind

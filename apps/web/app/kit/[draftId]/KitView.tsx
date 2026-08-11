@@ -272,7 +272,7 @@ export function KitView({ draftId }: { readonly draftId: string }) {
             <section className={styles.card}>
               <h2 className={styles.subTitle}>Caption pack</h2>
               {captions(state.headline, state.slug).map((caption, index) => (
-                <div key={caption} className={styles.actionRow}>
+                <div key={caption} className={styles.captionRow}>
                   <p className={styles.muted} style={{ flex: 1 }}>
                     {caption}
                   </p>

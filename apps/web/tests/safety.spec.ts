@@ -89,7 +89,11 @@ test('reports an interest profile from the inbox', async ({ page }) => {
   });
 });
 
-test('deletes the account after an explicit confirmation', async ({ page }) => {
+// T013 (T007 carry-over): the web gate is now the app's gate — the facts are
+// on the page and the word has to be typed. These two tests are the before/after
+// of that change: one proves the deletion still completes, the other proves the
+// single click that used to be enough no longer is.
+test('deletes the account after the confirmation word is typed', async ({ page }) => {
   await seedSignedInSession(page);
   await mockInbox(page);
   let deletionCalls = 0;
@@ -102,16 +106,15 @@ test('deletes the account after an explicit confirmation', async ({ page }) => {
   await page.goto('/inbox');
   await expect(page.getByRole('heading', { name: 'Your account' })).toBeVisible();
 
-  page.once('dialog', (dialog) => {
-    void dialog.accept();
-  });
   await page.getByRole('button', { name: 'Delete my account' }).click();
+  await page.getByLabel('Type DELETE to confirm.').fill('DELETE');
+  await page.getByRole('button', { name: 'Permanently delete my account' }).click();
 
   await expect(page.getByRole('heading', { name: 'Your account is being deleted.' })).toBeVisible();
   expect(deletionCalls).toBe(1);
 });
 
-test('keeps the account when the deletion dialog is dismissed', async ({ page }) => {
+test('one click cannot delete the account, and the wrong word cannot either', async ({ page }) => {
   await seedSignedInSession(page);
   await mockInbox(page);
   let deletionCalls = 0;
@@ -121,12 +124,18 @@ test('keeps the account when the deletion dialog is dismissed', async ({ page })
   });
 
   await page.goto('/inbox');
-  page.once('dialog', (dialog) => {
-    void dialog.dismiss();
-  });
-  await page.getByRole('button', { name: 'Delete my account' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Your account' })).toBeVisible();
+  // Opening the confirmation is not confirming it.
+  await page.getByRole('button', { name: 'Delete my account' }).click();
+  const confirm = page.getByRole('button', { name: 'Permanently delete my account' });
+  await expect(confirm).toBeDisabled();
+
+  // Lower case is not the word.
+  await page.getByLabel('Type DELETE to confirm.').fill('delete');
+  await expect(confirm).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Keep my account' }).click();
+  await expect(page.getByRole('button', { name: 'Delete my account' })).toBeVisible();
   expect(deletionCalls).toBe(0);
 });
 

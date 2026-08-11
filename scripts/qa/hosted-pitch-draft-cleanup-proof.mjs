@@ -324,14 +324,19 @@ async function main() {
       'insert drafts',
     );
 
+    // NOTE: no synthetic campaigns row. campaigns_validate_owner (0001) is a
+    // DEFERRABLE constraint trigger that demands the DATER_OWNER membership in
+    // the same transaction, and PostgREST gives each insert its own transaction
+    // — a bare campaign insert can never commit here. Rule (1) is a disjunction
+    // (status='published' OR a campaign exists); hosted proves the first branch
+    // via a published-status draft, and the campaign-exists branch is pinned by
+    // supabase/tests/34_pitch_draft_cleanup.sql in a single SQL transaction.
     await expectResult(
-      admin.from('campaigns').insert({
-        id: CAMPAIGN,
-        pitch_draft_id: DRAFT_WITH_CAMPAIGN,
-        owner_user_id: dater.id,
-        status: 'archived',
-      }),
-      'insert campaign',
+      admin
+        .from('pitch_drafts')
+        .update({ status: 'published' })
+        .eq('id', DRAFT_WITH_CAMPAIGN),
+      'mark draft published',
     );
 
     // Storage objects first: pitch_assets.storage_path must name real bytes for
@@ -447,9 +452,13 @@ async function main() {
       String(p1),
     );
     check(
-      'the campaign row survived',
-      (await expectResult(admin.from('campaigns').select('id').eq('id', CAMPAIGN), 'p1 campaign'))
-        .length === 1,
+      'the published draft survived',
+      (
+        await expectResult(
+          admin.from('pitch_drafts').select('id,status').eq('id', DRAFT_WITH_CAMPAIGN),
+          'p1 draft',
+        )
+      ).length === 1,
     );
 
     console.log('\n-- P2: rule (2), a queued media job --');

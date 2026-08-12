@@ -40,18 +40,27 @@ test('renders the acquisition journey and preserves landing attribution', async 
     .toBe('launch-partner');
 });
 
-// Slice 5 (GP-P0-2 / H-8): the landing carries an honest waitlist — the app is
-// not on any store, so the only real acquisition surface is an email invite.
+// Slice 5 (GP-P0-2 / H-8), retold 2026-08-12 (Issue #52, GAP-10): the landing
+// carries an honest email capture. What makes it honest changed when the beta
+// opened — "we'll invite you when we launch" named a day that had already
+// passed, and nothing could send the mail. The section now separates the two
+// states that actually differ (web open, iOS app not) and promises exactly
+// what scripts/send-waitlist-invites.mjs delivers: one mail, then deletion.
 // Referral attribution from a public pitch (?ref) is preserved first-touch.
 test('renders the honest waitlist and preserves referral attribution', async ({ page }) => {
   await page.goto('/?src=public-pitch&ref=demo-blair');
 
   const waitlist = page.locator('#start');
   await expect(waitlist).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Get an invite when we launch' })).toBeVisible();
-  await expect(waitlist.getByText('Friendword isn’t on the App Store yet.')).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'The beta is open. The app isn’t.' }),
+  ).toBeVisible();
+  await expect(waitlist.getByText('that isn’t on the App Store')).toBeVisible();
+  await expect(waitlist.getByText('We delete your address as that email goes out.')).toBeVisible();
+  // No future-tense launch promise survives anywhere in the section.
+  await expect(waitlist.getByText(/when we launch|the moment it opens/)).toHaveCount(0);
   await expect(page.getByRole('textbox', { name: 'Email' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Join the waitlist' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Email me once' })).toBeVisible();
 
   // ?ref is preserved as the first-touch referral for a later claim. It lives in
   // localStorage, not sessionStorage: a reel viewer closes the tab between
@@ -71,7 +80,7 @@ test('renders the honest waitlist and preserves referral attribution', async ({ 
 
   // The waitlist CTA meets the 44px touch target minimum.
   const height = await page
-    .getByRole('button', { name: 'Join the waitlist' })
+    .getByRole('button', { name: 'Email me once' })
     .evaluate((element) => element.getBoundingClientRect().height);
   expect(height).toBeGreaterThanOrEqual(44);
 });

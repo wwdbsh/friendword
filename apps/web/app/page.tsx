@@ -206,13 +206,26 @@ export default function HomePage() {
           </div>
         </section>
 
+        {/* Copy audit (§12), 2026-08-12: this section used to promise "an
+            invite the moment it opens". Two things made that wrong. The beta
+            OPENED on 2026-08-11 (public_beta_enabled=on), so "when we launch"
+            named a day that had already passed; and nothing in the codebase
+            could send the promised mail — the addresses were simply
+            accumulating. Both are fixed here and in scripts/
+            send-waitlist-invites.mjs, and the section now says the one thing
+            that is still true: the web side is open, the iOS app is not.
+            The form stays rather than becoming a "start now" button because a
+            cold visitor has nothing to start — creating a pitch is the app,
+            and being introduced starts with a friend's link, not with us. */}
         <section className={styles.waitlistSection} id="start" aria-labelledby="waitlist-heading">
           <div className={styles.sectionHeading}>
-            <p className={styles.kicker}>JOIN THE WAITLIST</p>
-            <h2 id="waitlist-heading">Get an invite when we launch</h2>
+            <p className={styles.kicker}>THE PART THAT ISN’T OPEN YET</p>
+            <h2 id="waitlist-heading">The beta is open. The app isn’t.</h2>
             <p>
-              Friendword isn’t on the App Store yet. Leave your email and we’ll send you an invite
-              the moment it opens — no spam, just the launch.
+              If a friend sends you a Friendword, the whole thing already works — read the pitch,
+              hear their voice, say you’re interested. Recording one of your own still needs the iOS
+              app, and that isn’t on the App Store. Leave your email and we’ll write once, the day
+              it is. We delete your address as that email goes out.
             </p>
           </div>
           <WaitlistForm />

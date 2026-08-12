@@ -122,6 +122,71 @@ function makeClient(): BrowserSupabaseClient {
   } as unknown as BrowserSupabaseClient;
 }
 
+/** Stands in for an MP4 body; only its length is load-bearing here. */
+const MP4_BODY = 'ftypisom'.repeat(8);
+
+/** Puts the card in the one state that offers a download. */
+function doneState(): boolean {
+  harness.approvedRevisionId = REVISION_A;
+  harness.states = [
+    renderState({
+      jobId: 'job-1',
+      jobStatus: 'done',
+      revisionId: REVISION_A,
+      outputStoragePath: `pitch-media/${DRAFT_ID}/renders/${REVISION_A}.mp4`,
+      freeRenderUsed: true,
+    }),
+  ];
+  return true;
+}
+
+/** Records every anchor the card actually clicks, without letting jsdom try to
+ *  navigate. */
+function captureAnchorClicks(): { download: string; href: string }[] {
+  const clicked: { download: string; href: string }[] = [];
+  const create = document.createElement.bind(document);
+  vi.spyOn(document, 'createElement').mockImplementation((tag: string, options?: unknown) => {
+    const element = create(tag as 'a', options as ElementCreationOptions | undefined);
+    if (tag === 'a') {
+      element.addEventListener('click', (event) => {
+        event.preventDefault();
+        const anchor = element as HTMLAnchorElement;
+        clicked.push({ download: anchor.download, href: anchor.getAttribute('href') ?? '' });
+      });
+    }
+    return element;
+  });
+  return clicked;
+}
+
+/** jsdom has no object-URL implementation; hand out predictable handles and
+ *  keep the blobs so their size can be asserted. */
+function stubObjectUrl(): Blob[] {
+  const blobs: Blob[] = [];
+  vi.stubGlobal('URL', {
+    ...URL,
+    createObjectURL: (blob: Blob) => {
+      blobs.push(blob);
+      return `blob:friendword/${blobs.length - 1}`;
+    },
+    revokeObjectURL: () => undefined,
+  });
+  return blobs;
+}
+
+function stubDownloadFetch(body: string, declaredLength: string) {
+  const fetchMock = vi.fn(() =>
+    Promise.resolve(
+      new Response(body, {
+        status: 200,
+        headers: { 'content-length': declaredLength, 'content-type': 'video/mp4' },
+      }),
+    ),
+  );
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
 function mountCard() {
   return render(
     <PitchExportCard
@@ -147,6 +212,9 @@ describe('kit MP4 export card lifecycle', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    // The download tests spy on document.createElement; leaving it installed
+    // would silently follow the next test into a different file.
+    vi.restoreAllMocks();
   });
 
   it('applies the polled "done" state after a queued mount (effect-cancellation red)', async () => {
@@ -259,37 +327,73 @@ describe('kit MP4 export card lifecycle', () => {
     });
   });
 
-  it('downloads through the signed-URL route with the caller token and reports the channel', async () => {
-    harness.approvedRevisionId = REVISION_A;
-    harness.states = [
-      renderState({
-        jobId: 'job-1',
-        jobStatus: 'done',
-        revisionId: REVISION_A,
-        outputStoragePath: `pitch-media/${DRAFT_ID}/renders/${REVISION_A}.mp4`,
-        freeRenderUsed: true,
-      }),
-    ];
-    const fetchMock = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ url: 'https://signed.example/render.mp4' }),
-      }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
+  it('saves the streamed bytes as a named same-origin file and reports the channel', async () => {
+    // GAP-9: the card used to read a signed Supabase URL out of the response
+    // and click an anchor at it. Cross-origin, `download` is inert — the save
+    // and the filename both depended on a header from another origin, and a
+    // browser that plays video/mp4 inline navigated this page away instead.
+    // What is pinned here is the repaired shape: bytes → same-origin blob →
+    // anchor that actually carries our filename.
+    const finished = doneState();
+    const anchors = captureAnchorClicks();
+    const created = stubObjectUrl();
+    const fetchMock = stubDownloadFetch(MP4_BODY, String(MP4_BODY.length));
 
     mountCard();
     await act(async () => {});
     fireEvent.click(screen.getByRole('button', { name: 'Download the MP4' }));
     await act(async () => {});
 
+    expect(finished).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
       `/kit/${DRAFT_ID}/render-download?revisionId=${REVISION_A}`,
       { headers: { authorization: 'Bearer token-1' } },
     );
+    expect(anchors).toHaveLength(1);
+    expect(anchors[0]?.download).toBe('friendword-pitch.mp4');
+    expect(anchors[0]?.href).toBe('blob:friendword/0');
+    expect(created.map((blob) => blob.size)).toEqual([MP4_BODY.length]);
+    expect(screen.queryByText('The download didn’t complete. Please try again.')).toBeNull();
     expect(harness.tracked).toContainEqual({
       name: 'campaign_shared',
       props: { campaign_slug: 'demo-real', channel: 'kit_mp4_download' },
     });
+  });
+
+  it('refuses a truncated file instead of saving a video that stops early', async () => {
+    doneState();
+    const anchors = captureAnchorClicks();
+    stubObjectUrl();
+    // Declares more than it delivers — the shape a dropped stream takes.
+    stubDownloadFetch(MP4_BODY, String(MP4_BODY.length + 4_096));
+
+    mountCard();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: 'Download the MP4' }));
+    await act(async () => {});
+
+    expect(anchors).toHaveLength(0);
+    expect(screen.getByText('The download didn’t complete. Please try again.')).toBeTruthy();
+    expect(harness.tracked.map((event) => event.props.channel)).not.toContain('kit_mp4_download');
+  });
+
+  it('reports a failed download in place instead of leaving the page', async () => {
+    doneState();
+    const anchors = captureAnchorClicks();
+    stubObjectUrl();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response('nope', { status: 502 }))),
+    );
+
+    mountCard();
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: 'Download the MP4' }));
+    await act(async () => {});
+
+    expect(anchors).toHaveLength(0);
+    expect(screen.getByText('The download didn’t complete. Please try again.')).toBeTruthy();
+    // The card is still here, with its button, because nothing navigated.
+    expect(screen.getByRole('button', { name: 'Download the MP4' })).toBeTruthy();
   });
 });

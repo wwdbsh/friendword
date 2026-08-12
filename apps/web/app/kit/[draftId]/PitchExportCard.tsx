@@ -10,6 +10,8 @@ import {
   type PitchRenderState,
 } from '@friendword/data';
 
+import { RENDER_DOWNLOAD_FILENAME } from '@/lib/renderDownload';
+
 import styles from '@/styles/flowCard.module.css';
 
 // Poll only while a render is queued or leased, with backoff and unmount
@@ -50,7 +52,10 @@ const CAMPAIGN_CLOSED_COPY =
   'Exports are available while the page is published and open. This page isn’t open right now.';
 const NOTHING_TO_EXPORT_COPY = 'There’s no approved motion pitch to export yet.';
 const REQUEST_ERROR_COPY = 'We couldn’t start the export. Please try again.';
-const DOWNLOAD_ERROR_COPY = 'The download couldn’t start. Please try again.';
+// Covers both halves of the repaired path (GAP-9): the request never
+// answered, or it answered with fewer bytes than it promised. "Didn't
+// complete" is true of both and never claims a file was saved.
+const DOWNLOAD_ERROR_COPY = 'The download didn’t complete. Please try again.';
 const STATE_ERROR_COPY = 'The export status could not load. Refresh to try again.';
 
 type ExportView = {
@@ -254,6 +259,7 @@ export function PitchExportCard({
   async function handleDownload(revisionId: string) {
     setDownloading(true);
     setActionError(null);
+    let objectUrl: string | null = null;
     try {
       const { data, error } = await client.auth.getSession();
       const accessToken = data.session?.access_token;
@@ -261,28 +267,41 @@ export function PitchExportCard({
         throw new Error('download requires a session');
       }
       // The MP4 lives under pitch-media/<draft>/renders/, a nested prefix the
-      // member storage policy cannot see (deliberately, 0054), so the signed
-      // URL comes from the draft-scoped route beside this page (E5).
+      // member storage policy cannot see (deliberately, 0054), so the bytes
+      // come from the draft-scoped route beside this page (E5). That route
+      // STREAMS them from our own origin rather than handing back a signed
+      // Supabase URL, and the difference is the whole reason this function
+      // reads the way it does (GAP-9):
+      //
+      //   - `download` on an anchor is inert cross-origin. Pointed at a
+      //     foreign URL it could neither guarantee a save nor name the file;
+      //     pointed at a same-origin blob, both are ours.
+      //   - a browser that renders video/mp4 inline used to NAVIGATE THIS PAGE
+      //     AWAY into a player — the person lost the kit and got no file.
+      //   - a failure arrived as a storage error document replacing the app.
+      //     Now it is a status code, and the card says so in place.
       const response = await fetch(
         `/kit/${draftId}/render-download?revisionId=${encodeURIComponent(revisionId)}`,
         { headers: { authorization: `Bearer ${accessToken}` } },
       );
-      const payload: unknown = await response.json().catch(() => null);
-      const url =
-        response.ok &&
-        typeof payload === 'object' &&
-        payload !== null &&
-        'url' in payload &&
-        typeof payload.url === 'string'
-          ? payload.url
-          : null;
-      if (url === null) {
+      if (!response.ok) {
         throw new Error('download unavailable');
       }
+      const declaredLength = Number.parseInt(response.headers.get('content-length') ?? '', 10);
+      const blob = await response.blob();
+      // A truncated video is worse than a failed download: it saves, it plays
+      // for a few seconds, and the person posts it. Refuse it instead.
+      if (Number.isFinite(declaredLength) && declaredLength > 0 && blob.size !== declaredLength) {
+        throw new Error('download incomplete');
+      }
+      if (blob.size === 0) {
+        throw new Error('download empty');
+      }
+      objectUrl = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
-      anchor.href = url;
+      anchor.href = objectUrl;
       anchor.rel = 'noopener';
-      anchor.download = '';
+      anchor.download = RENDER_DOWNLOAD_FILENAME;
       document.body.append(anchor);
       anchor.click();
       anchor.remove();
@@ -293,6 +312,13 @@ export function PitchExportCard({
     } catch {
       setActionError(DOWNLOAD_ERROR_COPY);
     } finally {
+      if (objectUrl !== null) {
+        // The click has already handed the blob to the download manager; the
+        // handle is only revoked on the next tick so the navigation it starts
+        // is not cancelled underneath it.
+        const revoked = objectUrl;
+        window.setTimeout(() => URL.revokeObjectURL(revoked), 0);
+      }
       setDownloading(false);
     }
   }

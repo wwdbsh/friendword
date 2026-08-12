@@ -65,9 +65,9 @@ UPDATE reports SET status = 'resolved' WHERE id = '<report-id>';
    **중복 삭제를 만들지 않고 남은 일을 마저 합니다**. 다만 원자적이지 않으므로
    재시도 사이의 계정은 반쯤 지워진 상태로 존재합니다.
 4. **"계정을 지웠는데 초대 메일이 온다"** → `waitlist_signups`는 users와 연결이 없어
-   계정 삭제 경로가 닿지 않습니다. 해당 이메일 행을 service role로 직접 지웁니다
-   (`DELETE FROM waitlist_signups WHERE email = '<address>';`) — 이 예외는
-   `docs/PRIVACY_DATA_MAP.md`의 삭제 후 표에도 적혀 있습니다.
+   계정 삭제 경로가 닿지 않습니다. 아래 **waitlist 초대와 삭제**의 `--forget`으로
+   해당 주소를 지웁니다(주소를 argv·셸 히스토리에 남기지 않는 경로입니다). 이
+   예외는 `docs/PRIVACY_DATA_MAP.md`의 삭제 후 표에도 적혀 있습니다.
 5. **"친구가 계정을 지웠는데 내 캠페인이 archived가 됐다"** → 설계된 동작입니다.
    목소리가 사라진 피치를 계속 공개하지 않습니다(0037). 캠페인 행·사진·관심·룸은
    남아 있고, 되살리려면 새 피치가 필요합니다.
@@ -766,12 +766,13 @@ SELECT status, event_type, count(*), min(created_at) AS oldest
 - 수신 거부 링크는 없습니다 — 전부 거래성(transactional) 메일이고, 계정 자체를 끊는 경로는
   계정 삭제입니다(`docs/DECISIONS.md` 2026-08-11 T003 항목).
 
-## 신고 자동 에스컬레이션 (2026-08-11 신설 — fcp Issue #39)
+## 신고 자동 에스컬레이션 (2026-08-11 신설 — fcp Issue #39; 2026-08-12 렌더 큐 편입 — Issue #52)
 
 공개 베타에서 `reports`·`ops_alerts`에는 **자동 소비자가 없었습니다**. 신고가 들어와도
 운영자가 위 SQL을 기억해 돌릴 때까지 아무도 모릅니다. 이제
 `.github/workflows/safety-escalation.yml`이 **매시간 :17**에
-`node scripts/check-safety-escalations.mjs`를 돌려 두 큐를 service role로 조회합니다.
+`node scripts/check-safety-escalations.mjs`를 돌려 **세 큐**를 service role로 조회합니다
+(신고·ops alert·**렌더 큐 정체**).
 
 - 미처리 건이 하나라도 있으면 **잡을 고의로 실패**시킵니다(exit 2). 실패한 run에 대해
   GitHub가 레포 소유자(wwdbsh@gmail.com)에게 보내는 알림 메일이 **v1 통지 채널**입니다 —
@@ -791,11 +792,42 @@ SELECT status, event_type, count(*), min(created_at) AS oldest
 node scripts/check-safety-escalations.mjs   # 0=클린 / 2=미처리 존재 / 1=검사 실패
 ```
 
+### 렌더 큐 정체 (2026-08-12 편입 — Issue #52, GAP-8)
+
+세 번째 줄 `render queue: N stalled (> 30m)`가 이 검사입니다. **렌더 큐에는 cron이
+없습니다** — 무언가가 워커를 부를 때만 전진합니다(kit 페이지 폴링의
+`/api/media/render-kick`, 워커 pass 종료 시 자기 kick, 운영자 curl). 그 전부가
+멈추면 잡은 `queued`/`leased`인 채 남고 **아무도 모릅니다**: `ops_alerts`의
+`pitch_render_failed`는 claim이 재시도 예산을 소진해야 생기는데, 지금 안 일어나는
+것이 바로 그 claim입니다. 사용자 화면은 "Rendering your MP4…"에 머뭅니다.
+
+- **임계 30분의 근거**: claim 지연 실측 1.2초(T009), 자막 포함 최악 렌더 실측
+  364초 ≈ 6.1분(SESSION_HANDOFF §1), 기본 lease 900초 = 15분(죽은 워커의 잡은 lease가
+  끝나야 재claim 가능), `media_render_concurrency_cap=1`이라 뒤 잡은 앞 잡을 기다림.
+  즉 **정상적인 최악의 수명이 15 + 6.1 ≈ 21분**이고 30분은 그 위 40% 여유입니다.
+  25분 아래로 내리면 건강한 재시도가 알림이 되고, 한 시간 이상으로 올리면 요청한
+  사람의 주의를 넘겨 버립니다. 조정은 env `FRIENDWORD_RENDER_STALL_MINUTES`(5~1440,
+  범위 밖·오타는 30으로 degrade — `notification_max_age_hours`와 같은 태도).
+- **세는 대상**: `campaigns.status = 'published'`인 캠페인의 잡만 셉니다.
+  `claim_media_render_job`은 **paused 캠페인의 잡을 의도적으로 두므로**(resume을
+  기다림) 그것까지 세면 운영자가 종결할 수 없는 빨간 run이 매시간 반복됩니다.
+- **로그에 나오는 것**: 잡 id·상태(`queued`/`leased`)·경과뿐입니다. `last_error`(워커가
+  쓰는 자유 TEXT), campaign id·slug, 요청자, output 경로는 **조회하지도 출력하지도**
+  않습니다.
+- **대응**: 먼저 워커를 밀어 봅니다 — 백스톱 curl 절차는 이 문서의
+  **정기 운영 실행**과 **이벤트 이메일 알림 → 언제 나가는가**에 이미 있는
+  `render-kick`/`render-run` 경로입니다. 그래도 안 움직이면 Vercel 함수 로그와
+  `media_render_concurrency_cap`을 봅니다. 캠페인이 이미 만료·아카이브됐다면 다음
+  claim이 `campaign is no longer renderable`로 종결시키므로 kick 한 번이 정리입니다.
+- **초록으로 되돌리는 법은 "잡을 끝내는 것"뿐입니다.** 상태를 손으로 바꾸는 SQL은
+  0054의 전이 트리거가 거부하며, 우회할 이유도 없습니다.
+
 ### 대응 runbook (알림 메일을 받았을 때)
 
 1. run 로그의 요약 줄에서 건수와 id를 확인합니다(본문은 로그에 없습니다 — 의도된 것).
 2. 신고 본문·대상은 이 문서 맨 위 **신고 큐** 쿼리로 SQL Editor에서 확인합니다.
    ops alert는 `SELECT * FROM ops_alerts WHERE resolved_at IS NULL;`.
+   렌더 정체는 위 절을 따릅니다.
 3. 조치는 **조치 도구** 섹션(캠페인 강제 중단 / 차단 / 계정 정지 / 미디어 제거)으로 합니다.
 4. 종결: 신고는 `UPDATE reports SET status='resolved'`(또는 `dismissed`),
    alert는 `UPDATE ops_alerts SET resolved_at = now() WHERE id = '<id>';`.
@@ -810,6 +842,45 @@ node scripts/check-safety-escalations.mjs   # 0=클린 / 2=미처리 존재 / 1=
   도입하거나 주기를 늦추는 쪽을 재검토합니다.
 - 채널이 GitHub 메일이라 **지연·스팸함·Actions 분량 소진**에 취약합니다. 실제 알림
   파이프라인(예: Slack/webhook)은 후속 과제입니다.
+
+## waitlist 초대와 삭제 (2026-08-12 신설 — fcp Issue #52, GAP-10)
+
+`waitlist_signups`(migration 0039)는 **평문 이메일**을 모읍니다. 목적은 하나 —
+초대할 것이 생겼을 때 그 사람들에게 **한 번** 쓰는 것입니다. 2026-08-12까지 이
+저장소에는 그 메일을 보낼 코드도, 주소를 지울 경로도 없었습니다(계정 삭제 잡은 이
+테이블에 닿지 않습니다 — users FK가 없습니다). 이제 `scripts/send-waitlist-invites.mjs`가
+둘 다 합니다.
+
+```bash
+node scripts/send-waitlist-invites.mjs                                # dry-run(기본): 집계만
+node scripts/send-waitlist-invites.mjs --send --invite-url=https://…  # 발송 + 성공한 행 삭제
+node scripts/send-waitlist-invites.mjs --forget < addresses.txt       # 삭제 요청 처리(stdin)
+```
+
+- **기본이 dry-run입니다.** 건수·최고령·source 라벨만 출력하고 아무것도 보내거나
+  지우지 않습니다.
+- **`--send`에는 `--invite-url=`이 필수이고 기본값이 없습니다.** 지금은 초대할 대상
+  자체가 없기 때문입니다(앱이 어느 스토어에도 없습니다). 스토어 URL이 생긴 뒤에만
+  이 플래그가 의미를 갖고, 그래서 실수로 밟을 수 없습니다.
+- **발송 성공 = 그 행 삭제.** 목적이 한 번으로 끝나므로 주소를 계속 들고 있을 근거가
+  사라집니다. 그래서 별도 `invited_at` 컬럼(=migration)이 없습니다 — **"아직 남아 있음"이
+  곧 "아직 안 보냄"**이고, 실패한 발송은 행을 남겨 다음 실행이 재시도합니다. 삭제는
+  provider가 수락한 **뒤에** 합니다(반대 순서면 provider 장애 한 번에 주소가 사라지고
+  그 사람은 영영 못 받습니다). 실행 영수증은 `scripts/.out/waitlist-invites.log`에
+  **행 id와 결과만** 남습니다(gitignore `*.log`).
+- **로그 위생**: 주소는 쿼리에서 Resend 요청 본문으로만 갑니다. 콘솔·영수증·에러 어디에도
+  들어가지 않으며, 출력 직전 `containsAddress`가 `@`가 든 줄을 발견하면 **출력 대신
+  종료**합니다. provider 실패는 상태 코드로만 기록합니다(Resend 에러 본문은 거절한
+  주소를 그대로 인용합니다).
+- **`--forget`은 stdin으로만 받습니다** — 주소가 argv·셸 히스토리·`ps`에 남지 않게.
+  대소문자는 접어서 찾고(`lower(email)` unique index와 같은 기준), `ilike`의 `%`·`_`가
+  삭제를 넓히지 못하도록 **정확히 일치하는 행만** id로 지웁니다. 출력은
+  `requested/forgotten/absent` 카운트뿐입니다.
+- 삭제 요청이 올 수 있는 두 경로: 탈퇴 문의(위 **데이터 삭제 요청** 4번)와 초대 메일을
+  받은 사람의 회신. 메일 본문이 "이 주소는 발송과 함께 삭제된다"고 말하므로 정상
+  경로에서는 요청 자체가 거의 생기지 않아야 정상입니다.
+- **실발송은 사용자 결정입니다.** 실인원 대상 커뮤니케이션이므로 Claude는 dry-run까지만
+  수행합니다.
 
 ### Interest 사진 저장소 정리 (3차 감사 H-5)
 

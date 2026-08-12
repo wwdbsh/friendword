@@ -11,8 +11,13 @@ import styles from './WaitlistForm.module.css';
 
 type FormStatus = 'idle' | 'submitting' | WaitlistResult['status'];
 
+// The success line states the exact scope of what was collected and what
+// happens to it (2026-08-12, Issue #52): one mail, on one occasion, and the
+// row is deleted as that mail goes out — which is what
+// scripts/send-waitlist-invites.mjs actually does. The previous line promised
+// "an invite when Friendword opens", a day that had already come and gone.
 const MESSAGES: Record<Exclude<FormStatus, 'idle' | 'submitting'>, string> = {
-  joined: 'You’re on the list. We’ll email you an invite when Friendword opens.',
+  joined: 'On the list. One email, the day the app is out — then your address is deleted.',
   invalid_email: 'That doesn’t look like an email address — check it and try again.',
   rate_limited: 'That’s a lot of tries in a short window. Give it a minute and try again.',
   error: 'Something went wrong on our side. Try again in a moment.',
@@ -74,7 +79,7 @@ export function WaitlistForm() {
             aria-describedby="waitlist-status"
           />
           <button className={styles.submit} type="submit" disabled={submitting || done}>
-            {done ? 'Joined' : submitting ? 'Joining…' : 'Join the waitlist'}
+            {done ? 'On the list' : submitting ? 'Adding…' : 'Email me once'}
           </button>
         </div>
       </div>

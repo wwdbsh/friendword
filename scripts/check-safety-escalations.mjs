@@ -1,16 +1,25 @@
 #!/usr/bin/env node
-// Safety queue escalation check (fcp Issue #39, GAP-2).
+// Safety queue escalation check (fcp Issue #39, GAP-2; render queue added by
+// Issue #52, GAP-8).
 //
 // `reports` and `ops_alerts` had no automatic consumer: during public beta a
 // UGC report only reached the operator if someone remembered to run the SQL in
-// docs/OPS.md. This pass reads both queues with the service role and exits
+// docs/OPS.md. This pass reads those queues with the service role and exits
 // non-zero while anything is still unhandled, so the scheduled workflow that
 // runs it turns an unread queue into a GitHub run failure — and GitHub's
 // failed-run notification mail to the repo owner is the v1 alert channel
 // (docs/OPS.md, "신고 자동 에스컬레이션").
 //
+// A THIRD queue rides here for the same reason: the MP4 render queue has no
+// cron and only moves when something kicks it, so a job can sit unfinished
+// with no consumer and nothing else will ever say so (see scripts/lib/
+// renderStall.mjs for the threshold and its derivation). It is on this pass
+// rather than its own workflow because the GitHub Actions minute budget is
+// what killed the previous scheduled setup (docs/OPS.md, 정기 운영 실행):
+// this run already exists, already talks to PostgREST, and adds one request.
+//
 // Exit codes are distinct on purpose:
-//   0  both queues are clear
+//   0  every queue is clear
 //   2  unhandled rows exist (escalation — the expected "alert" state)
 //   1  the check itself could not run (missing env, HTTP/query failure)
 //
@@ -29,6 +38,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+
+import {
+  renderStallLines,
+  renderStallQuery,
+  resolveStallMinutes,
+  stallCutoffIso,
+} from './lib/renderStall.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -104,10 +120,8 @@ function totalFromContentRange(header, fallback) {
   return Number.isFinite(total) ? total : fallback;
 }
 
-async function fetchQueue({ url, serviceKey, table, filter, select }) {
-  const endpoint =
-    `${url.replace(/\/$/, '')}/rest/v1/${table}` +
-    `?${filter}&select=${select}&order=created_at.asc&limit=${ROW_LIMIT}`;
+async function fetchQueue({ url, serviceKey, table, query }) {
+  const endpoint = `${url.replace(/\/$/, '')}/rest/v1/${table}?${query}`;
 
   let response;
   try {
@@ -178,23 +192,38 @@ if (!url || !serviceKey) {
   process.exit(1);
 }
 
+const nowMs = Date.now();
+const stallMinutes = resolveStallMinutes(env.FRIENDWORD_RENDER_STALL_MINUTES);
+
 let reports;
 let alerts;
+let renders;
 try {
-  [reports, alerts] = await Promise.all([
+  [reports, alerts, renders] = await Promise.all([
     fetchQueue({
       url,
       serviceKey,
       table: 'reports',
-      filter: 'status=eq.open',
-      select: 'id,severity,reason,created_at',
+      query:
+        'status=eq.open&select=id,severity,reason,created_at' +
+        `&order=created_at.asc&limit=${ROW_LIMIT}`,
     }),
     fetchQueue({
       url,
       serviceKey,
       table: 'ops_alerts',
-      filter: 'resolved_at=is.null',
-      select: 'id,alert_type,created_at',
+      query:
+        'resolved_at=is.null&select=id,alert_type,created_at' +
+        `&order=created_at.asc&limit=${ROW_LIMIT}`,
+    }),
+    fetchQueue({
+      url,
+      serviceKey,
+      table: 'media_render_jobs',
+      query: renderStallQuery({
+        cutoffIso: stallCutoffIso(nowMs, stallMinutes),
+        limit: ROW_LIMIT,
+      }),
     }),
   ]);
 } catch (error) {
@@ -202,17 +231,25 @@ try {
   process.exit(1);
 }
 
-for (const line of [...reportLines(reports), ...alertLines(alerts)]) console.log(line);
+for (const line of [
+  ...reportLines(reports),
+  ...alertLines(alerts),
+  ...renderStallLines({ rows: renders.rows, total: renders.total, minutes: stallMinutes, nowMs }),
+]) {
+  console.log(line);
+}
 
-const pending = reports.total + alerts.total;
+const pending = reports.total + alerts.total + renders.total;
 if (pending === 0) {
-  console.log('check-safety-escalations: both queues clear');
+  console.log('check-safety-escalations: every queue clear');
   process.exit(0);
 }
 
 const summary =
   `Safety queues need an operator: ${reports.total} open report(s), ` +
-  `${alerts.total} unresolved ops alert(s). Runbook: docs/OPS.md → 신고 자동 에스컬레이션.`;
+  `${alerts.total} unresolved ops alert(s), ` +
+  `${renders.total} render(s) stalled over ${stallMinutes}m. ` +
+  `Runbook: docs/OPS.md → 신고 자동 에스컬레이션.`;
 // ::error:: puts the summary on the run page and in the failure mail preview.
 if (process.env.GITHUB_ACTIONS === 'true') console.log(`::error::${summary}`);
 console.error(`check-safety-escalations: ${summary}`);

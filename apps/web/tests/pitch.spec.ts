@@ -187,7 +187,9 @@ test('routes the pitch footer CTA into the waitlist with referral attribution', 
   await pitchFriend.click();
   await page.waitForURL('**/?src=public-pitch&ref=demo-blair#start');
   await expect(page.locator('#start')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Get an invite when we launch' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'The beta is open. The app isn’t.' }),
+  ).toBeVisible();
 
   await page.goto('/p/demo-blair');
   const createFriendword = page.getByRole('link', { name: 'Create my Friendword' });

@@ -10,7 +10,9 @@ import { handleSubmitError, requireDraftId } from './pitchFlowState';
 import type { AiConsentUiState } from './AiConsentDisclosure';
 import {
   getAiDraftFailureMessage,
+  INSUFFICIENT_SPEECH_MESSAGE,
   isAiConsentRequiredFailure,
+  isInsufficientSpeechFailure,
   isManualRecapRequiredFailure,
   preparePitchReview,
   type PitchReviewPreparationChoice,
@@ -30,6 +32,10 @@ type PitchSubmissionState = {
 export function usePitchSubmission(
   draftId: PitchDraftId | null,
   setErrorMessage: (message: string | null) => void,
+  // T001: called when the server refuses to draft from an inaudible take. The
+  // screen owns the wizard, so it clears the take and returns to the recording
+  // step; the hook only reports that a new recording is the way forward.
+  onNeedsRerecord?: () => void,
 ): PitchSubmissionState {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
@@ -114,6 +120,33 @@ export function usePitchSubmission(
         pendingChoice.current = null;
         setAiConsentState('required');
         setErrorMessage('External AI processing consent must be confirmed again.');
+        return;
+      }
+      if (isInsufficientSpeechFailure(error)) {
+        // T001: nothing was drafted and nothing was written. Resubmitting the
+        // same silent upload would fail identically, so the take is dropped and
+        // the introducer goes back to record a new one.
+        //
+        // N2: the consent state is deliberately left alone. Consent for the
+        // current revision is already on record — the server got as far as
+        // calling the provider — so re-prompting for it would ask again for
+        // something already given, and the retry after the new take does not
+        // need it.
+        pendingChoice.current = null;
+        // The server deleted the stored voice object before answering, so this
+        // device must stop claiming it exists — otherwise saveRecording refuses
+        // the next take and the advice to re-record is unfollowable. A failure
+        // here is reported instead of the refusal, because the introducer would
+        // otherwise be sent to a step that cannot accept their new take.
+        try {
+          await pitchDraftService.discardStoredRecording(activeDraftId);
+        } catch (discardError: unknown) {
+          setAiConsentState('error');
+          setErrorMessage(getAiDraftFailureMessage(discardError));
+          return;
+        }
+        setErrorMessage(INSUFFICIENT_SPEECH_MESSAGE);
+        onNeedsRerecord?.();
         return;
       }
       if (isManualRecapRequiredFailure(error)) {

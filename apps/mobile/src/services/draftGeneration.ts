@@ -1,7 +1,15 @@
 export type DraftGenerationResult = { readonly kind: 'generated' | 'not_configured' };
 
 export class DraftGenerationError extends Error {
-  constructor(readonly status: number | null) {
+  /**
+   * Machine-readable `code` from the server's error body, when it sent one.
+   * T001: the transcribe route distinguishes its 422s this way, so the app can
+   * tell "we could not hear you" from any other unprocessable response.
+   */
+  constructor(
+    readonly status: number | null,
+    readonly code: string | null = null,
+  ) {
     super('We could not create the AI draft. Check your connection and try again.');
     this.name = 'DraftGenerationError';
   }
@@ -12,6 +20,23 @@ export type DraftGenerationRequest = {
   readonly origin: string;
   readonly send: (url: string, init: RequestInit) => Promise<Response>;
 };
+
+/**
+ * Reads the server's machine-readable error code without ever letting a
+ * non-JSON or truncated error body turn into a different (misleading) failure.
+ */
+async function readErrorCode(response: Response): Promise<string | null> {
+  try {
+    const body: unknown = await response.json();
+    if (typeof body === 'object' && body !== null) {
+      const code = (body as { readonly code?: unknown }).code;
+      return typeof code === 'string' ? code : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 export async function requestDraftGeneration(
   serverDraftId: string,
@@ -48,7 +73,7 @@ export async function requestDraftGeneration(
       return { kind: 'not_configured' };
     }
     if (!response.ok) {
-      throw new DraftGenerationError(response.status);
+      throw new DraftGenerationError(response.status, await readErrorCode(response));
     }
     return { kind: 'generated' };
   } catch (error: unknown) {

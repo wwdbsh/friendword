@@ -28,6 +28,13 @@ export type TranscriptionResult = {
    * that returns no words changes nothing.
    */
   readonly words?: readonly TranscriptWord[];
+  /**
+   * Length of the audio the provider actually decoded, in seconds, when it
+   * reports one. T001 uses it as the denominator for speech coverage; without a
+   * provider-reported duration there is no trustworthy one (the request cap is
+   * a ceiling, not a measurement), so callers must treat it as optional.
+   */
+  readonly durationSeconds?: number;
 };
 
 export interface TranscriptionProvider {

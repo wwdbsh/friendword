@@ -41,6 +41,7 @@ Friendword는 공개 프로필 피드나 무한 스와이프가 있는 또 하�
 2. 친구와의 관계 유형·기간 및 동의 초대 연락처를 입력합니다. 연락처는 초대 전송에만 사용합니다.
 3. 비공개 draft에서 사진을 제안하고 30~60초 음성을 녹음합니다.
 4. AI가 `hook`, `relationship_context`, `three_specific_qualities`, `evidence_or_anecdote`, `good_match_for`, `hard_claims_requiring_confirmation` 구조의 editable JSON을 만듭니다.
+   - AI 초안 작성에는 실제로 들리는 음성이 필요합니다. transcript에 쓸 만한 말이 없으면 서버가 구조화·저장을 거부하고 Introducer를 재녹음 단계로 되돌립니다.
 5. Introducer가 검토하고 Dater에게 승인 요청을 보냅니다.
 
 ### Flow B: Dater가 신원 확인 및 승인

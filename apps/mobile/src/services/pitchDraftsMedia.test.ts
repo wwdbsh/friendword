@@ -784,6 +784,31 @@ describe('re-recording after the voice is stored', () => {
     expect(saved.recording?.upload?.validated).toBe(true);
   });
 
+  // B1 (T001): the full loop the insufficient-speech refusal promises — the
+  // server deletes the unusable object and answers 422, the app drops its
+  // record of it, and the next take is accepted AND re-uploaded to the same
+  // path, which is what mints a new object version for the next transcribe.
+  it('accepts and re-uploads a new take after the server refused the stored one', async () => {
+    const harness = await createHarness({ photos: [PHOTO_A], validate: alwaysPassed });
+    await harness.service.uploadDraftMedia(harness.id);
+    expect(harness.uploads).toEqual(['voice.m4a', await storedPhotoObject(harness, 0)]);
+
+    await harness.service.discardStoredRecording(harness.id);
+    const cleared = await harness.currentDraft();
+    expect(cleared.recording).toBeNull();
+    expect(cleared.server?.mediaUploaded).toBe(false);
+
+    const saved = await harness.local.saveRecording(harness.id, NEW_TAKE);
+    expect(saved.recording?.uri).toBe(NEW_TAKE.uri);
+    expect(saved.recording?.upload).toBeUndefined();
+
+    await harness.service.uploadDraftMedia(harness.id);
+
+    // The second voice upload is the point: same object name, new bytes.
+    expect(harness.uploads.filter((name) => name === 'voice.m4a')).toHaveLength(2);
+    expect((await harness.currentDraft()).recording?.upload?.objectName).toBe('voice.m4a');
+  });
+
   it('lets a draft whose voice was never sent record a different take', async () => {
     const harness = await createHarness({ photos: [PHOTO_A], validate: alwaysPassed });
 

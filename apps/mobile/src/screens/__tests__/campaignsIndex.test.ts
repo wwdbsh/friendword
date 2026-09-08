@@ -79,6 +79,7 @@ import {
   getCampaignName,
   getIntroducerDraftName,
   getIntroducedShareActions,
+  introducerDraftAction,
   isCampaignRevival,
   DRAFT_DELETION_FACTS,
 } from '../../../app/campaigns/index';
@@ -273,5 +274,91 @@ describe('Deleting a pitch the introducer started (T010, Issue #47)', () => {
     // not an SLA).
     expect(facts).toContain('we will not promise you a time for it');
     expect(facts).not.toMatch(/\b(24 hours|immediately|instantly|within)\b/i);
+  });
+});
+
+// T001 follow-up (issue #70). "Pitches I'm making" gated every CTA on the draft
+// having reached the server and always opened /pitch/review, so an unsent pitch
+// could end up with no way back into it at all.
+describe('the way back into an unsent pitch', () => {
+  const baseDraft = {
+    id: '10000000-0000-4000-8000-000000000009',
+    status: 'draft',
+    contextRole: 'INTRODUCER',
+    relationship: {
+      kind: 'Friend',
+      duration: '1–3 years',
+      friendFirstName: 'Dahee',
+      contact: { kind: 'email', value: 'dahee@example.com' },
+    },
+    photos: [],
+    recording: { uri: 'file:///take.m4a', durationMillis: 36_000, caption: '' },
+    server: {
+      draftId: '20000000-0000-4000-8000-000000000009',
+      consentRequestId: null,
+      consentToken: null,
+    },
+    createdAt: '2026-09-01T00:00:00.000Z',
+    updatedAt: '2026-09-01T00:00:00.000Z',
+  };
+
+  it('opens a draft that never reached the server in the composer', () => {
+    // This card used to carry no button whatsoever, which is how a local draft
+    // became unreachable after a failed submit.
+    const localOnly = PitchDraftSchema.parse({ ...baseDraft, server: null });
+
+    expect(introducerDraftAction(localOnly)).toEqual({
+      label: 'Continue editing',
+      pathname: '/pitch/new',
+      params: { draftId: localOnly.id, track: '4' },
+    });
+  });
+
+  it('sends a draft whose refused take was dropped to the recording step', () => {
+    // /pitch/review cannot prepare a draft with no voice track, so pointing the
+    // only CTA at it left the pitch unfinishable.
+    const discarded = PitchDraftSchema.parse({ ...baseDraft, recording: null });
+
+    expect(introducerDraftAction(discarded)).toEqual({
+      label: 'Continue editing',
+      pathname: '/pitch/new',
+      params: { draftId: discarded.id, track: '4' },
+    });
+  });
+
+  it('still opens a complete server-backed draft at its review screen', () => {
+    const ready = PitchDraftSchema.parse(baseDraft);
+
+    expect(introducerDraftAction(ready)).toEqual({
+      label: 'Continue editing',
+      pathname: '/pitch/review',
+      params: { draftId: ready.id },
+    });
+    expect(
+      introducerDraftAction(PitchDraftSchema.parse({ ...baseDraft, status: 'changes_requested' }))
+        ?.label,
+    ).toBe('Review requested changes');
+  });
+
+  it('does not offer to re-record a draft whose media is on another device', () => {
+    // A recovered server draft has no local files; the recording step could not
+    // accept a replacement take here.
+    const recovered = PitchDraftSchema.parse({
+      ...baseDraft,
+      id: '20000000-0000-4000-8000-000000000009',
+      recording: null,
+    });
+
+    expect(introducerDraftAction(recovered)).toEqual({
+      label: 'Review server draft',
+      pathname: '/pitch/review',
+      params: { draftId: recovered.id },
+    });
+  });
+
+  it('offers nothing for a pitch that is no longer editable', () => {
+    expect(
+      introducerDraftAction(PitchDraftSchema.parse({ ...baseDraft, status: 'consent_pending' })),
+    ).toBeNull();
   });
 });

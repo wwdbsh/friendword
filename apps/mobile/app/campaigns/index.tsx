@@ -39,6 +39,7 @@ import {
   DELETE_FAILED_MESSAGE,
   isRecoveredServerDraft,
 } from '../../src/services/pitchDraftsSupabase';
+import { RECORDING_TRACK } from '../../src/features/pitch/rerecordRecovery';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 import type { PitchDraft, PitchDraftId } from '../../src/services/types';
 import { buildInboxUrl } from '../../src/services/webOrigin';
@@ -681,21 +682,15 @@ export default function CampaignsScreen() {
                 <Text style={styles.message}>{draft.review.responseNote}</Text>
               </View>
             ) : null}
-            {draft.server !== null &&
-            (draft.status === 'draft' || draft.status === 'changes_requested') ? (
-              <HypeButton
-                label={
-                  isRecoveredServerDraft(draft) && draft.status === 'draft'
-                    ? 'Review server draft'
-                    : draft.status === 'changes_requested'
-                      ? 'Review requested changes'
-                      : 'Continue editing'
-                }
-                onPress={() =>
-                  router.push({ pathname: '/pitch/review', params: { draftId: draft.id } })
-                }
-              />
-            ) : null}
+            {(() => {
+              const action = introducerDraftAction(draft);
+              return action === null ? null : (
+                <HypeButton
+                  label={action.label}
+                  onPress={() => router.push({ pathname: action.pathname, params: action.params })}
+                />
+              );
+            })()}
             {draft.server !== null && draft.status === 'consent_pending' ? (
               <HypeButton
                 label="Share the approval invite"
@@ -775,6 +770,53 @@ export default function CampaignsScreen() {
       />
     </SafeAreaView>
   );
+}
+
+/**
+ * The one CTA an unsent pitch offers, and where it goes.
+ *
+ * T001 follow-up (issue #70): this used to be gated on `draft.server !== null`
+ * and always pointed at `/pitch/review`, which left two dead ends. A pitch that
+ * never reached the server had NO button at all, and a server-backed pitch whose
+ * take was dropped (the server refused to draft from an inaudible recording and
+ * deleted the stored object) was sent to a review screen that cannot prepare a
+ * draft with no voice track. Both now open the composer at its recording step,
+ * which is the only place a take can be replaced.
+ *
+ * A draft recovered from the account is the exception: its media is not on this
+ * device, so re-recording is not on offer here and the server copy is what it
+ * shows.
+ */
+export function introducerDraftAction(draft: PitchDraft): {
+  readonly label: string;
+  readonly pathname: '/pitch/new' | '/pitch/review';
+  readonly params: Readonly<Record<string, string>>;
+} | null {
+  if (draft.status !== 'draft' && draft.status !== 'changes_requested') {
+    return null;
+  }
+  if (isRecoveredServerDraft(draft)) {
+    return {
+      label:
+        draft.status === 'changes_requested' ? 'Review requested changes' : 'Review server draft',
+      pathname: '/pitch/review',
+      params: { draftId: draft.id },
+    };
+  }
+  if (draft.server === null || draft.recording === null) {
+    return {
+      label: 'Continue editing',
+      pathname: '/pitch/new',
+      // No re-record notice here: that sentence belongs to the moment the
+      // server refused the take, not to a card tapped days later.
+      params: { draftId: draft.id, track: String(RECORDING_TRACK) },
+    };
+  }
+  return {
+    label: draft.status === 'changes_requested' ? 'Review requested changes' : 'Continue editing',
+    pathname: '/pitch/review',
+    params: { draftId: draft.id },
+  };
 }
 
 /**

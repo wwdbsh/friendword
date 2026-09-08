@@ -7,6 +7,7 @@ import { isUnconfirmedSubmission, unconfirmedDraftMessage } from '../../services
 import { NeedsSignInError } from '../../services/pitchDraftsSupabase';
 import type { PitchDraftId } from '../../services/types';
 import { handleSubmitError, requireDraftId } from './pitchFlowState';
+import { discardRefusedTake } from './rerecordRecovery';
 import type { AiConsentUiState } from './AiConsentDisclosure';
 import {
   getAiDraftFailureMessage,
@@ -137,12 +138,13 @@ export function usePitchSubmission(
         // device must stop claiming it exists — otherwise saveRecording refuses
         // the next take and the advice to re-record is unfollowable. A failure
         // here is reported instead of the refusal, because the introducer would
-        // otherwise be sent to a step that cannot accept their new take.
-        try {
-          await pitchDraftService.discardStoredRecording(activeDraftId);
-        } catch (discardError: unknown) {
+        // otherwise be sent to a step that cannot accept their new take. The
+        // review screen recovers through the same helper, so both entry points
+        // leave the draft in one state.
+        const recovery = await discardRefusedTake(pitchDraftService, activeDraftId);
+        if (recovery.kind === 'blocked') {
           setAiConsentState('error');
-          setErrorMessage(getAiDraftFailureMessage(discardError));
+          setErrorMessage(recovery.message);
           return;
         }
         setErrorMessage(INSUFFICIENT_SPEECH_MESSAGE);

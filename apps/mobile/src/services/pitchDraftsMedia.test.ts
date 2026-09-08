@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+
+// The composer's resume rules are pure; importing them here keeps "the draft is
+// still reachable" asserted against the draft this service actually produces.
+vi.mock('./supabaseClient', () => ({ getSupabaseClient: () => null }));
+
 import { DataLayerError } from '@friendword/data';
 import type {
   BrowserSupabaseClient,
@@ -17,6 +22,12 @@ import {
   type PitchSceneTemplate,
   type PitchSceneV2,
 } from '@friendword/contracts';
+
+import {
+  furthestResumableTrack,
+  RECORDING_TRACK,
+  resumeComposerState,
+} from '../features/pitch/rerecordRecovery';
 
 import { requestMediaValidation, type MediaValidationOutcome } from './mediaValidation';
 import type { PitchSceneBuilder, PitchSceneDemotion } from './pitchSceneInput';
@@ -807,6 +818,24 @@ describe('re-recording after the voice is stored', () => {
     // The second voice upload is the point: same object name, new bytes.
     expect(harness.uploads.filter((name) => name === 'voice.m4a')).toHaveLength(2);
     expect((await harness.currentDraft()).recording?.upload?.objectName).toBe('voice.m4a');
+  });
+
+  // The other half of that loop (issue #70 follow-up): the introducer has to be
+  // able to REACH the recording step again. A draft left with no take is not a
+  // dead card — it reopens at the step that replaces the take, with the
+  // relationship and photos it already had.
+  it('leaves a discarded draft resumable at its recording step', async () => {
+    const harness = await createHarness({ photos: [PHOTO_A], validate: alwaysPassed });
+    await harness.service.uploadDraftMedia(harness.id);
+
+    await harness.service.discardStoredRecording(harness.id);
+    const cleared = await harness.currentDraft();
+
+    expect(furthestResumableTrack(cleared)).toBe(RECORDING_TRACK);
+    const resumed = resumeComposerState(cleared, RECORDING_TRACK);
+    expect(resumed.recording).toBeNull();
+    expect(resumed.savedRelationship).not.toBeNull();
+    expect(resumed.photos).toHaveLength(1);
   });
 
   it('lets a draft whose voice was never sent record a different take', async () => {

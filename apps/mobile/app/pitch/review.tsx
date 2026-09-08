@@ -22,9 +22,11 @@ import { useClipIngestStatus } from '../../src/features/pitch/useClipIngestStatu
 import {
   getAiDraftFailureMessage,
   isAiConsentRequiredFailure,
+  isInsufficientSpeechFailure,
   preparePitchReview,
   type PitchReviewPreparationChoice,
 } from '../../src/features/pitch/preparePitchReview';
+import { sendBackToRecordAgain } from '../../src/features/pitch/rerecordRecovery';
 import { HypeButton, QuietNavAction, TrustCard } from '../../src/components';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
@@ -37,7 +39,7 @@ import {
   ManualPitchNeedsAiReviewError,
   NeedsSignInError,
 } from '../../src/services/pitchDraftsSupabase';
-import type { PitchClip, PitchDraft, PitchReview } from '../../src/services/types';
+import type { PitchClip, PitchDraft, PitchDraftId, PitchReview } from '../../src/services/types';
 
 /** Shown when the name sheet is dismissed instead of answered — the pitch did not go. */
 export const NAME_REQUIRED_TO_SEND_MESSAGE =
@@ -69,10 +71,38 @@ export default function PitchReviewScreen() {
   // first place their ingest verdict can be shown.
   const clipIngest = useClipIngestStatus(draft?.id ?? null, draft?.clips ?? EMPTY_CLIPS);
 
+  /**
+   * T001 follow-up (issue #70): the server refused to draft from a take nobody
+   * can hear and deleted the stored object. This screen cannot fix that — it has
+   * no recorder — so the refused take is dropped and the introducer is sent back
+   * to the composer's recording step for THIS draft, which is exactly where the
+   * wizard's own copy of this failure leaves them. Returns false when the take
+   * could not be dropped, so the caller shows the failure instead of sending
+   * them to a step that would refuse the new recording.
+   */
+  const recoverByRerecording = useCallback(
+    async (id: PitchDraftId): Promise<boolean> => {
+      // REPLACE, inside the helper: the review screen for a draft with no take
+      // is not somewhere a back gesture should return to.
+      const recovery = await sendBackToRecordAgain(pitchDraftService, id, router);
+      if (recovery.kind === 'blocked') {
+        setAiConsentState('error');
+        setErrorMessage(recovery.message);
+        return false;
+      }
+      return true;
+    },
+    [router],
+  );
+
   const loadReview = useCallback(async (): Promise<void> => {
     setLoading(true);
     setErrorMessage(null);
     setAiConsentState('checking');
+    // The draft this read is preparing, once it is known. Carried out of the
+    // `try` so a failure can name the draft without asserting that the route
+    // param is one.
+    let preparingDraftId: PitchDraftId | null = null;
     try {
       const listing = await pitchDraftService.listMyDrafts();
       const candidate = listing.drafts.find((savedDraft) => savedDraft.id === draftId);
@@ -82,6 +112,7 @@ export default function PitchReviewScreen() {
         setErrorMessage('This draft could not be found.');
         return;
       }
+      preparingDraftId = candidate.id;
       setDraft(candidate);
       setDraftSync(listing.sync);
       setReview(candidate.review);
@@ -107,13 +138,17 @@ export default function PitchReviewScreen() {
         setErrorMessage(null);
         return;
       }
+      if (isInsufficientSpeechFailure(error) && preparingDraftId !== null) {
+        await recoverByRerecording(preparingDraftId);
+        return;
+      }
       setAiConsentState('error');
       setErrorMessage(getAiDraftFailureMessage(error));
     } finally {
       setPreparing(false);
       setLoading(false);
     }
-  }, [draftId]);
+  }, [draftId, recoverByRerecording]);
 
   useEffect(() => {
     void loadReview();
@@ -141,6 +176,10 @@ export default function PitchReviewScreen() {
       if (isAiConsentRequiredFailure(error)) {
         setAiConsentState('required');
         setErrorMessage('External AI processing consent must be confirmed again.');
+        return;
+      }
+      if (isInsufficientSpeechFailure(error)) {
+        await recoverByRerecording(draft.id);
         return;
       }
       setAiConsentState('error');

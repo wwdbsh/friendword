@@ -11,15 +11,23 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { HypeButton, StickerCard, useReducedMotion } from '../../components';
+import { HypeButton, StickerCard, TrustCard, useReducedMotion } from '../../components';
 import type { PitchRecording } from '../../services/types';
 import { LiveWaveform } from './LiveWaveform';
 import { PitchStepFrame } from './PitchStepFrame';
+import { shouldShowRerecordNotice } from './rerecordRecovery';
 import { usePitchRecorder } from './usePitchRecorder';
 
 type RecordingStepProps = {
   readonly busy: boolean;
   readonly saveErrorMessage: string | null;
+  /**
+   * Why this step is being shown again — today, the server refusing to draft
+   * from a take nobody could hear. Distinct from `saveErrorMessage`, which sits
+   * under the recorder card and was invisible below the fold on a phone: this
+   * is the first thing on the step, above the recorder.
+   */
+  readonly rerecordNotice: string | null;
   readonly recording: PitchRecording | null;
   readonly onRecordingChange: (recording: PitchRecording | null) => void;
   readonly onBack: () => void;
@@ -29,6 +37,7 @@ type RecordingStepProps = {
 export function RecordingStep({
   busy,
   saveErrorMessage,
+  rerecordNotice,
   recording,
   onRecordingChange,
   onBack,
@@ -91,6 +100,13 @@ export function RecordingStep({
         </View>
       }
     >
+      {shouldShowRerecordNotice(rerecordNotice, recording, recorderState.isRecording) ? (
+        <TrustCard tone="danger">
+          <Text accessibilityLiveRegion="polite" style={styles.notice}>
+            {rerecordNotice}
+          </Text>
+        </TrustCard>
+      ) : null}
       <StickerCard>
         <View style={styles.recorderStage}>
           <LiveWaveform isRecording={recorderState.isRecording} metering={recorderState.metering} />
@@ -165,6 +181,12 @@ function formatDuration(durationMillis: number): string {
 
 const styles = StyleSheet.create({
   footerContent: { gap: spacing.sm },
+  notice: {
+    color: colors.ink,
+    fontFamily: 'BricolageGrotesqueSemiBold',
+    fontSize: fontSizes.md,
+    lineHeight: fontSizes.md * 1.45,
+  },
   minimum: {
     color: colors.danger,
     fontFamily: 'BricolageGrotesqueSemiBold',

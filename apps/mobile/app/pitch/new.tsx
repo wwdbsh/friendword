@@ -1,6 +1,6 @@
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BackHandler } from 'react-native';
+import { BackHandler, StyleSheet, View } from 'react-native';
 
 import {
   FriendDetailsStep,
@@ -18,6 +18,15 @@ import {
   requireReviewData,
 } from '../../src/features/pitch/pitchFlowState';
 import { usePitchSubmission } from '../../src/features/pitch/usePitchSubmission';
+import {
+  INSUFFICIENT_SPEECH_NOTICE,
+  parseRequestedTrack,
+  RECORDING_TRACK,
+  resumeComposerState,
+  type PitchTrack,
+} from '../../src/features/pitch/rerecordRecovery';
+import { INSUFFICIENT_SPEECH_MESSAGE } from '../../src/features/pitch/preparePitchReview';
+import { PendingCard } from '../../src/components';
 import { trackEvent } from '@friendword/data';
 
 import { SignInSheet } from '../../src/features/auth/SignInSheet';
@@ -37,10 +46,20 @@ import type {
   RelationshipKind,
 } from '../../src/services/types';
 
-type PitchTrack = 1 | 2 | 3 | 4 | 5;
-
 export default function NewPitchScreen() {
   const router = useRouter();
+  // T001 follow-up (issue #70): the composer is also how an existing draft is
+  // reopened — the review screen sends a refused take back here, and a draft
+  // that never reached the server has nowhere else to be edited. Without this
+  // the screen always started a brand-new pitch, which is what turned "record
+  // it again" into an empty five-track wizard.
+  const params = useLocalSearchParams<{
+    readonly draftId?: string;
+    readonly track?: string;
+    readonly notice?: string;
+  }>();
+  const resumingDraftId = typeof params.draftId === 'string' ? params.draftId : null;
+  const [resuming, setResuming] = useState(resumingDraftId !== null);
   const [track, setTrack] = useState<PitchTrack>(1);
   const [relationshipKind, setRelationshipKind] = useState<RelationshipKind | null>(null);
   const [relationshipDuration, setRelationshipDuration] = useState<RelationshipDuration | null>(
@@ -56,11 +75,18 @@ export default function NewPitchScreen() {
   const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Kept apart from `errorMessage`: this one is the reason the recording step is
+  // being shown again, and it renders above the recorder rather than under it.
+  const [rerecordNotice, setRerecordNotice] = useState<string | null>(null);
   // T001: an inaudible take can only be fixed by recording again, so the
   // rejected take is dropped and the wizard returns to the recording step.
   const submission = usePitchSubmission(draftId, setErrorMessage, () => {
+    // The hook has just written the same sentence to `errorMessage`; move it to
+    // the notice so it appears once, at the top of the step it is about.
+    setErrorMessage(null);
+    setRerecordNotice(INSUFFICIENT_SPEECH_MESSAGE);
     setRecording(null);
-    setTrack(4);
+    setTrack(RECORDING_TRACK);
   });
 
   const goBack = useCallback((): void => {
@@ -99,6 +125,56 @@ export default function NewPitchScreen() {
   useEffect(() => {
     trackEvent(getSupabaseClient(), 'introducer_started', { platform: 'mobile' });
   }, []);
+
+  // Runs once per reopened draft. The saved relationship, photos and clips come
+  // back with it, so the introducer replaces the take and continues rather than
+  // re-answering the whole wizard.
+  useEffect(() => {
+    if (resumingDraftId === null) {
+      return;
+    }
+    let live = true;
+    const resume = async (): Promise<void> => {
+      try {
+        const listing = await pitchDraftService.listMyDrafts();
+        const saved = listing.drafts.find((candidate) => candidate.id === resumingDraftId);
+        if (!live) {
+          return;
+        }
+        if (saved === undefined) {
+          setErrorMessage('This pitch could not be found on this device.');
+          return;
+        }
+        const resumed = resumeComposerState(saved, parseRequestedTrack(params.track));
+        setDraftId(saved.id);
+        setRelationshipKind(resumed.relationshipKind);
+        setRelationshipDuration(resumed.relationshipDuration);
+        setFriendFirstName(resumed.friendFirstName);
+        setContactValue(resumed.contactValue);
+        setPhotos(resumed.photos);
+        setClips(resumed.clips);
+        setRecording(resumed.recording);
+        setSavedRelationship(resumed.savedRelationship);
+        setTrack(resumed.track);
+        setErrorMessage(null);
+        setRerecordNotice(
+          params.notice === INSUFFICIENT_SPEECH_NOTICE ? INSUFFICIENT_SPEECH_MESSAGE : null,
+        );
+      } catch {
+        if (live) {
+          setErrorMessage('We could not open this pitch. Check your connection and try again.');
+        }
+      } finally {
+        if (live) {
+          setResuming(false);
+        }
+      }
+    };
+    void resume();
+    return () => {
+      live = false;
+    };
+  }, [params.notice, params.track, resumingDraftId]);
 
   const saveDetails = async (): Promise<void> => {
     if (savingRef.current) {
@@ -181,6 +257,7 @@ export default function NewPitchScreen() {
         duration_ms: activeRecording.durationMillis,
       });
       setErrorMessage(null);
+      setRerecordNotice(null);
       setTrack(5);
     } catch (error: unknown) {
       // The take already sent for this pitch cannot be replaced, so the screen
@@ -197,6 +274,16 @@ export default function NewPitchScreen() {
       setSaving(false);
     }
   };
+
+  // Track 1 must not flash while the saved draft is still being read: it is the
+  // "fresh wizard" the introducer must never see after a refused take.
+  if (resuming) {
+    return (
+      <View style={styles.resuming}>
+        <PendingCard label="Opening your pitch…" />
+      </View>
+    );
+  }
 
   switch (track) {
     case 1:
@@ -245,6 +332,7 @@ export default function NewPitchScreen() {
         <RecordingStep
           busy={saving}
           recording={recording}
+          rerecordNotice={rerecordNotice}
           saveErrorMessage={errorMessage}
           onBack={goBack}
           onContinue={() => {
@@ -292,3 +380,7 @@ export default function NewPitchScreen() {
       return assertNever(track);
   }
 }
+
+const styles = StyleSheet.create({
+  resuming: { flex: 1, justifyContent: 'center', padding: 24 },
+});

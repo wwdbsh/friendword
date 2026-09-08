@@ -13,6 +13,13 @@ export type PitchSceneBuilder = (input: {
   readonly template: PitchSceneTemplate;
   readonly photoAssetIds: readonly string[];
   readonly segments: readonly PitchSceneSegment[];
+  /**
+   * The recording's provider-reported audio length from the same transcript
+   * snapshot (T003), or null when it carries none. The database times the scene
+   * by it from 0062 on, so a submit that dropped it would be refused on a
+   * recording whose words end before the audio does.
+   */
+  readonly audioDurationMs: number | null;
 }) => PitchSceneV2 | null;
 
 /**

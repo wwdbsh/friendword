@@ -898,9 +898,13 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         // fails closed on a missing verdict while enforcement is on.
       }
       // The motion timeline this save freezes. Built from the revision's own
-      // transcript segments and words and the photos still included, in play
-      // order — never from a measured audio duration, so the scene is identical
-      // on every device. Null (too short, no segments) omits the argument, and
+      // transcript segments and words, the recording's stored audio length and
+      // the photos still included, in play order — never from a duration this
+      // browser measured off the <audio> element, so the scene is identical on
+      // every device. The audio length is the provider's own report for the
+      // stored object, frozen into the transcript by /api/transcribe (T003):
+      // without it the timeline stopped at the last transcribed word and the
+      // picture froze while the voice kept going. Null (too short, no segments) omits the argument, and
       // the RPC then forward-copies the previous scene against the new asset
       // snapshot.
       //
@@ -917,6 +921,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         template,
         photoAssetIds: orderedIncludedPhotoIds(state.photos, includedAssetIds),
         segments: review.transcriptSegments,
+        audioDurationMs: review.transcriptAudioDurationMs,
         ...(review.transcriptWords.length === 0 ? {} : { words: review.transcriptWords }),
         ...(editedStructure === undefined
           ? {}

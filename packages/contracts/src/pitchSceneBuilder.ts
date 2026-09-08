@@ -248,6 +248,16 @@ export type BuildPitchSceneV2Input = {
    * without text at all rather than with a reference the database will reject.
    */
   readonly structure?: ReviewedPitchStructure | null | undefined;
+  /**
+   * The recording's audio length in milliseconds, as the transcription provider
+   * reported it and as /api/transcribe stored it on the transcript row — read it
+   * with {@link transcriptAudioDurationMs}. Absent on a transcript written before
+   * T003, which then times the scene by its last segment end as it always did.
+   *
+   * Never a client measurement: `<audio>.duration` differs per device and per
+   * decoder, and the scene has to hash identically everywhere.
+   */
+  readonly audioDurationMs?: number | null | undefined;
 };
 
 type BeatKind = 'section' | 'phrase' | 'word';
@@ -322,28 +332,87 @@ function compareText(left: string, right: string): number {
   return left < right ? -1 : 1;
 }
 
+/**
+ * The longest audio a transcript may claim, mirroring the DB's own 24-hour guard
+ * on a segment end (`> 86400` seconds yields NULL there). It is not the scene
+ * ceiling — {@link MAX_SCENE_DURATION_MS} is, and it is applied after the two
+ * candidates are compared, so this only decides which numbers count as durations
+ * at all.
+ */
+const MAX_TRANSCRIPT_AUDIO_DURATION_MS = 86_400_000;
+
 // --- Input repair -----------------------------------------------------------
+
+/**
+ * THE AUDIO LENGTH the provider reported for this recording, in milliseconds, or
+ * null when the stored transcript carries none.
+ *
+ * Mirrors `private.pitch_transcript_duration_ms` (0062), which reads the same key
+ * through `private.pitch_scene_integer`: a JSON number with no fractional part,
+ * inside INTEGER range, above zero and no longer than a day. Anything else is not
+ * a duration and is ignored here exactly as it is there, so a transcript this
+ * cannot read produces the pre-0062 answer instead of a rejected scene.
+ *
+ * `unknown` in, because the caller holds provider-shaped JSONB read back from a
+ * row, not a parsed type.
+ */
+export function transcriptAudioDurationMs(transcript: unknown): number | null {
+  if (typeof transcript !== 'object' || transcript === null || Array.isArray(transcript)) {
+    return null;
+  }
+  return usableAudioDurationMs((transcript as { readonly durationMs?: unknown }).durationMs);
+}
+
+/** The reader's single rule, applied to a value however it reached us. */
+function usableAudioDurationMs(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    return null;
+  }
+  if (value <= 0 || value > MAX_TRANSCRIPT_AUDIO_DURATION_MS) {
+    return null;
+  }
+  return value;
+}
 
 /**
  * THE SCENE'S DURATION, by the database's rule and not by ours.
  *
- * `private.pitch_transcript_duration_ms` (0048) reads the end of the LAST ARRAY
- * ELEMENT — `ORDER BY ordinality DESC LIMIT 1` — of the raw transcript, before any
- * sorting or merging, and `assert_scene_definition` then requires the scene's
- * `durationMs` to equal it exactly. So this is the raw last element too. Taking the
- * maximum end instead would be a nicer number and would have every submission from
- * a provider that returned two segments out of order rejected by the database.
+ * `private.pitch_transcript_duration_ms` (0062) returns the GREATER of the
+ * recording's provider-reported audio length and the end of the LAST ARRAY ELEMENT
+ * — `ORDER BY ordinality DESC LIMIT 1` — of the raw transcript, and
+ * `assert_scene_definition` then requires the scene's `durationMs` to equal it
+ * exactly. So this is the raw last element too. Taking the maximum end instead
+ * would be a nicer number and would have every submission from a provider that
+ * returned two segments out of order rejected by the database.
+ *
+ * The audio length is the one that matters to a viewer: T003 (issue #72) found a
+ * 54.5s recording whose last segment ended at 37.66s, so the player froze the
+ * visuals 15s before the voice stopped. It is still not a client measurement —
+ * it is what the transcription provider reported for the stored object, written
+ * into the transcript by /api/transcribe — so the scene stays identical on every
+ * device. The transcript end remains the floor: a provider that reports a
+ * duration shorter than its own last segment cannot shorten the timeline.
  *
  * The DB's own guards are mirrored: a non-numeric end, an end at or below zero, or
- * one past 24 hours yields null there, which is "this pitch has no motion".
+ * one past 24 hours yields null there, which is "this pitch has no motion". A
+ * length past the schema's own ceiling yields null here rather than a scene the
+ * schema would reject — the same answer this gave before an audio length existed.
  */
-function transcriptDurationMs(segments: readonly PitchSceneSegment[]): number | null {
+function transcriptDurationMs(
+  segments: readonly PitchSceneSegment[],
+  audioDurationMs: number | null | undefined,
+): number | null {
   const last = segments.at(-1);
   if (last === undefined || !Number.isFinite(last.endMs)) {
     return null;
   }
-  const durationMs = Math.round(last.endMs);
-  if (durationMs <= 0 || durationMs > MAX_SCENE_DURATION_MS) {
+  const segmentEndMs = Math.round(last.endMs);
+  if (segmentEndMs <= 0 || segmentEndMs > MAX_TRANSCRIPT_AUDIO_DURATION_MS) {
+    return null;
+  }
+  const audioMs = usableAudioDurationMs(audioDurationMs);
+  const durationMs = audioMs === null ? segmentEndMs : Math.max(segmentEndMs, audioMs);
+  if (durationMs > MAX_SCENE_DURATION_MS) {
     return null;
   }
   return durationMs;
@@ -902,7 +971,7 @@ export function buildPitchSceneV2(input: BuildPitchSceneV2Input): PitchSceneV2 |
     return null;
   }
 
-  const durationMs = transcriptDurationMs(input.segments);
+  const durationMs = transcriptDurationMs(input.segments, input.audioDurationMs);
   if (durationMs === null || durationMs < MIN_SCENE_DURATION_MS_V2) {
     return null;
   }

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import type { PitchSceneSegment } from './pitchScene';
-import { buildPitchSceneV2, usableTextSources } from './pitchSceneBuilder';
+import {
+  buildPitchSceneV2,
+  transcriptAudioDurationMs,
+  usableTextSources,
+} from './pitchSceneBuilder';
 import {
   MAX_SCENE_ASSETS,
   MAX_SHOT_DURATION_MS,
@@ -724,6 +728,117 @@ describe('buildPitchSceneV2 — null is a real answer', () => {
         segments: [{ startMs: 0, endMs: Number.POSITIVE_INFINITY }],
       }),
     ).toBeNull();
+  });
+});
+
+// T003 (issue #72). Production: a 54.543s recording whose last transcript
+// segment ended at 37.66s built a 37660ms scene, so the player froze the picture
+// and the rendered video ended while 15s of the friend's voice kept playing. The
+// scene is timed by the recording now, with the transcript end as its floor —
+// mirroring `private.pitch_transcript_duration_ms` (0062), which is what decides
+// whether the DB accepts the scene at all.
+describe('buildPitchSceneV2 — the scene lasts as long as the recording', () => {
+  const recording = speech(37_660, 8, 6, 500);
+  const AUDIO_MS = 54_543;
+
+  it('times the scene by the reported audio length, and covers all of it', () => {
+    for (const template of TEMPLATES) {
+      const scene = expectHealthyScene(
+        buildPitchSceneV2({
+          template,
+          photoAssetIds: photoIds(3),
+          segments: recording.segments,
+          words: recording.words,
+          audioDurationMs: AUDIO_MS,
+          structure,
+        }),
+        photoIds(3),
+      );
+      expect(scene.durationMs).toBe(AUDIO_MS);
+      // expectHealthyScene already parses, and the schema requires the shots to
+      // cover exactly [0, durationMs] — this pins the two ends explicitly,
+      // because covering the trailing silence is the entire fix.
+      expect(scene.shots.at(0)?.startMs).toBe(0);
+      expect(scene.shots.at(-1)?.endMs).toBe(AUDIO_MS);
+    }
+  });
+
+  it('leaves a transcript with no reported length exactly where it was', () => {
+    for (const template of TEMPLATES) {
+      const input = {
+        template,
+        photoAssetIds: photoIds(3),
+        segments: recording.segments,
+        words: recording.words,
+        structure,
+      } as const;
+      const before = buildPitchSceneV2(input);
+      expect(before?.durationMs).toBe(37_660);
+      // Passing the absent value explicitly must be the same build, byte for
+      // byte: mobile and web both spread a possibly-null reader result in.
+      expect(buildPitchSceneV2({ ...input, audioDurationMs: null })).toEqual(before);
+      expect(buildPitchSceneV2({ ...input, audioDurationMs: undefined })).toEqual(before);
+    }
+  });
+
+  it('never shortens a scene below the words that were transcribed', () => {
+    const scene = buildPitchSceneV2({
+      template: 'warm',
+      photoAssetIds: photoIds(3),
+      segments: recording.segments,
+      audioDurationMs: 20_000,
+    });
+    expect(scene?.durationMs).toBe(37_660);
+  });
+
+  it('ignores a length that is not whole milliseconds, as pitch_scene_integer does', () => {
+    for (const audioDurationMs of [54_543.5, Number.NaN, Number.POSITIVE_INFINITY, 0, -54_543]) {
+      const scene = buildPitchSceneV2({
+        template: 'warm',
+        photoAssetIds: photoIds(3),
+        segments: recording.segments,
+        audioDurationMs,
+      });
+      expect(scene?.durationMs).toBe(37_660);
+    }
+  });
+
+  it('refuses a recording longer than a scene may last rather than truncating it', () => {
+    expect(
+      buildPitchSceneV2({
+        template: 'warm',
+        photoAssetIds: photoIds(3),
+        segments: recording.segments,
+        audioDurationMs: 600_001,
+      }),
+    ).toBeNull();
+  });
+});
+
+// The reader the database mirrors: it decides which stored values count as a
+// duration at all, on both the mobile submit and the dater revision path.
+describe('transcriptAudioDurationMs', () => {
+  it('reads a whole-millisecond length off a stored transcript', () => {
+    expect(transcriptAudioDurationMs({ durationMs: 54_543, segments: [] })).toBe(54_543);
+  });
+
+  it('returns null for everything that is not one', () => {
+    for (const transcript of [
+      null,
+      undefined,
+      'transcript',
+      [],
+      {},
+      { durationMs: '54543' },
+      { durationMs: 54_543.5 },
+      { durationMs: true },
+      { durationMs: 0 },
+      { durationMs: -1 },
+      { durationMs: Number.NaN },
+      { durationMs: 86_400_001 },
+    ]) {
+      expect(transcriptAudioDurationMs(transcript)).toBeNull();
+    }
   });
 });
 

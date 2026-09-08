@@ -223,6 +223,43 @@ function relationshipLine(preview: ConsentPreview): string {
   return duration === null ? kind : `${kind} · ${duration}`;
 }
 
+/**
+ * How this page refers to the introducer when it may not name them.
+ *
+ * T002 (Issue #71): `get_consent_preview` (0061) returns NULL for
+ * `introducer_display_name` while the introducer has not confirmed their
+ * display name, because the bootstrap seeded it from their email local-part
+ * (0011) and this page is opened by someone who is not signed in.
+ *
+ * Both forms are spelled out rather than produced by dropping a token into the
+ * sentence: the possessive ("Sam’s original voice") and the plain subject
+ * ("what Sam says") need different fallbacks, and sentence-initial uses need a
+ * capital. Every call site below was checked as a whole sentence in both
+ * states.
+ */
+function introducerSubject(preview: ConsentPreview): string {
+  return preview.introducerDisplayName ?? 'your friend';
+}
+
+/** `Sam` / `Your friend`, for the start of a sentence. */
+function introducerSubjectLeading(preview: ConsentPreview): string {
+  return preview.introducerDisplayName ?? 'Your friend';
+}
+
+/** `Sam’s` / `your friend’s`, for mid-sentence possessive use. */
+function introducerPossessive(preview: ConsentPreview): string {
+  return preview.introducerDisplayName === null
+    ? 'your friend’s'
+    : `${preview.introducerDisplayName}’s`;
+}
+
+/** `Sam’s` / `Your friend’s`, for the start of a sentence. */
+function introducerPossessiveLeading(preview: ConsentPreview): string {
+  return preview.introducerDisplayName === null
+    ? 'Your friend’s'
+    : `${preview.introducerDisplayName}’s`;
+}
+
 async function loadReviewContext(
   client: BrowserSupabaseClient,
   repo: ConsentRepo,
@@ -596,7 +633,12 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         setResponseNote('');
         setResponseError(null);
         const nameStatus = await getDisplayNameStatus(activeClient);
-        setDisplayName(nameStatus.displayName);
+        // T002 (Issue #71): an unconfirmed `display_name` is the email
+        // local-part `handle_new_auth_user` (0011) invented. Offering it as the
+        // field's starting value turns the question into a default, and that
+        // default is what gets printed on this page — so the field starts
+        // empty and only a confirmed name is ever prefilled.
+        setDisplayName(nameStatus.confirmed ? nameStatus.displayName : '');
         // The screen is now the dater's, and every later step (name, review,
         // publishing, published) is downstream of it — no auth event may
         // reset it from here on.
@@ -1395,7 +1437,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
           <section className={styles.card} aria-live="polite">
             <span className={styles.badge}>{relationshipLine(state.preview)}</span>
             <h1 className={styles.title}>
-              {state.preview.introducerDisplayName} recorded a pitch about you.
+              {introducerSubjectLeading(state.preview)} recorded a pitch about you.
             </h1>
             <p className={styles.lede}>
               Nothing goes public until you hear it and say yes. First, confirm it’s really you.
@@ -1420,7 +1462,8 @@ export function ConsentFlow({ token }: { readonly token: string }) {
             <span className={styles.badge}>Before you review</span>
             <h1 className={styles.title}>What should we call you?</h1>
             <p className={styles.lede}>
-              Check the name below before it appears on your Friendword page. You can change it now.
+              This is the name on your page — your friend’s pitch is about you, and this is what
+              anyone they share it with will read. Pick whatever you want them to see.
             </p>
             <form className={styles.form} onSubmit={handleConfirmDisplayName}>
               <label className={styles.label} htmlFor="consent-display-name">
@@ -1447,10 +1490,10 @@ export function ConsentFlow({ token }: { readonly token: string }) {
           <section className={styles.card}>
             <span className={styles.badge}>{relationshipLine(state.preview)}</span>
             <h1 className={styles.title}>
-              Hear what {state.preview.introducerDisplayName} says about you.
+              Hear what {introducerSubject(state.preview)} says about you.
             </h1>
             <p className={styles.lede}>
-              This is {state.preview.introducerDisplayName}’s original voice — exactly what people
+              This is {introducerPossessive(state.preview)} original voice — exactly what people
               will hear if you approve it.
             </p>
 
@@ -1537,9 +1580,9 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                     <p className={styles.muted}>
                       This text publishes on your page: it runs as the captions over your photos and
                       is printed in full underneath. You can’t edit it — it’s{' '}
-                      {state.preview.introducerDisplayName}’s own words, transcribed. If any of it
-                      is wrong or you don’t want it public, use <strong>Request changes</strong> at
-                      the bottom instead of approving.
+                      {introducerPossessive(state.preview)} own words, transcribed. If any of it is
+                      wrong or you don’t want it public, use <strong>Request changes</strong> at the
+                      bottom instead of approving.
                     </p>
                     <blockquote className={styles.transcriptText} data-consent-transcript-text>
                       {state.review.transcriptText}
@@ -2314,8 +2357,8 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                 </h2>
                 <p className={styles.muted}>
                   {previewScene === null
-                    ? `A still preview built from what you approved above. On the live page, ${state.preview.introducerDisplayName}’s voice plays over these photos.`
-                    : `Press play: this is your page moving, on the exact timeline your published page will use. ${state.preview.introducerDisplayName}’s voice, your photos, your words.`}
+                    ? `A still preview built from what you approved above. On the live page, ${introducerPossessive(state.preview)} voice plays over these photos.`
+                    : `Press play: this is your page moving, on the exact timeline your published page will use. ${introducerPossessiveLeading(state.preview)} voice, your photos, your words.`}
                 </p>
                 <div className={styles.previewFrame}>
                   {previewScene !== null && previewIncludedPhotos.length > 0 ? (
@@ -2333,7 +2376,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                         audioUrl={state.voiceUrl}
                         fallbackDurationMs={previewScene.durationMs}
                         location={previewLocation}
-                        playLabel={`Play ${state.preview.introducerDisplayName}’s pitch over your photos`}
+                        playLabel={`Play ${introducerPossessive(state.preview)} pitch over your photos`}
                         pauseLabel="Pause the preview"
                         noAudioNote="The voice note isn’t ready to play here, so this preview can’t move yet — your published page still plays it."
                         // Signed storage URLs: the image optimizer only accepts

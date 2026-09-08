@@ -1,7 +1,7 @@
 import { ImageResponse } from 'next/og';
 import { z } from 'zod';
 
-import { createBrowserClient } from '@friendword/data';
+import { createBrowserClient, publicDisplayName } from '@friendword/data';
 
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
 
@@ -76,17 +76,20 @@ export async function GET(request: Request): Promise<Response> {
 
   const { data: profiles } = await serviceClient
     .from('profiles')
-    .select('user_id, display_name')
+    .select('user_id, display_name, display_name_confirmed')
     .in(
       'user_id',
       [draft.subject_user_id, draft.created_by_user_id].filter(
         (value): value is string => value !== null,
       ),
     );
+  // T002 (Issue #71): the launch kit is an image made to be posted publicly, so
+  // it prints a name only once its owner has confirmed it.
   const daterName =
-    profiles?.find((row) => row.user_id === draft.subject_user_id)?.display_name ?? 'A friend';
+    publicDisplayName(profiles?.find((row) => row.user_id === draft.subject_user_id)) ?? 'A friend';
   const introducerName =
-    profiles?.find((row) => row.user_id === draft.created_by_user_id)?.display_name ?? 'A friend';
+    publicDisplayName(profiles?.find((row) => row.user_id === draft.created_by_user_id)) ??
+    'A friend';
 
   const { data: photo } = await serviceClient
     .from('pitch_assets')

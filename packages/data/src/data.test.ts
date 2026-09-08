@@ -589,6 +589,31 @@ describe('ConsentRepo', () => {
     });
   });
 
+  // 0061 returns NULL for `introducer_display_name` when the introducer has not
+  // confirmed their name. The repo must carry that null through rather than
+  // failing the parse — this page is the dater's only way to answer the invite.
+  it('carries a withheld introducer name through as null', async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [
+        {
+          introducer_display_name: null,
+          relationship_type: 'friend',
+          relationship_duration: 'y3to10',
+          request_status: 'pending',
+        },
+      ],
+      error: null,
+    });
+    const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await expect(repo.getPreview(rawToken)).resolves.toEqual({
+      introducerDisplayName: null,
+      relationshipType: 'friend',
+      relationshipDuration: 'y3to10',
+      requestStatus: 'pending',
+    });
+  });
+
   it('returns null for unknown tokens and rejects malformed ones without a query', async () => {
     mocks.rpc.mockResolvedValue({ data: [], error: null });
     const repo = new ConsentRepo(createBrowserClient('https://project.example', 'anon-key'));
@@ -1600,11 +1625,19 @@ describe('getPublishedPitchBySlug', () => {
     relationship_duration: 'y3to10',
     structure: null,
   };
+  // T002 (Issue #71): the public page prints a display name only once its owner
+  // has confirmed it, so the flag is part of every profile fixture here.
   const profileRows = [
-    { user_id: '00000000-0000-0000-0000-000000000001', display_name: 'Maya', birth_date: null },
+    {
+      user_id: '00000000-0000-0000-0000-000000000001',
+      display_name: 'Maya',
+      display_name_confirmed: true,
+      birth_date: null,
+    },
     {
       user_id: '00000000-0000-0000-0000-000000000002',
       display_name: 'Blair',
+      display_name_confirmed: true,
       birth_date: '1994-05-20',
     },
   ];
@@ -1634,6 +1667,7 @@ describe('getPublishedPitchBySlug', () => {
       readonly allowlisted?: boolean;
       readonly datingProfile?: unknown;
       readonly draft?: unknown;
+      readonly profiles?: unknown;
     } = {},
   ): void {
     const {
@@ -1641,6 +1675,7 @@ describe('getPublishedPitchBySlug', () => {
       allowlisted = false,
       datingProfile = datingProfileRow,
       draft = draftRow,
+      profiles = profileRows,
     } = options;
     tableMock.mockImplementation((table: string) => {
       if (table === 'app_config') {
@@ -1707,7 +1742,7 @@ describe('getPublishedPitchBySlug', () => {
         };
       }
       return {
-        select: () => ({ in: async () => ({ data: profileRows, error: null }) }),
+        select: () => ({ in: async () => ({ data: profiles, error: null }) }),
       };
     });
     mocks.createClient.mockReturnValue({
@@ -1765,6 +1800,44 @@ describe('getPublishedPitchBySlug', () => {
     const client = createServiceClient('https://project.example', 'service-key');
 
     await expect(getPublishedPitchBySlug(client, 'blair-abc123')).resolves.toBeNull();
+  });
+
+  // T002 (Issue #71). `handle_new_auth_user` (0011) seeds `display_name` from
+  // the email local-part with `display_name_confirmed = false`. The published
+  // page is the most public surface in the product, so an unconfirmed name
+  // falls back to the same 'A friend' a missing profile row already produces —
+  // and only for the person who has not confirmed it.
+  it('hides an unconfirmed dater name without hiding the confirmed introducer', async () => {
+    configurePublishedPitchClient(campaignRow, {
+      profiles: [
+        profileRows[0],
+        { ...profileRows[1], display_name: 'blair.kim92', display_name_confirmed: false },
+      ],
+    });
+    const client = createServiceClient('https://project.example', 'service-key');
+
+    const pitch = await getPublishedPitchBySlug(client, 'blair-abc123');
+
+    expect(pitch?.daterDisplayName).toBe('A friend');
+    expect(pitch?.introducerDisplayName).toBe('Maya');
+    // The gate withholds the name only; the derived age still comes from the
+    // same profile row.
+    expect(pitch?.age).toBe(32);
+  });
+
+  it('hides an unconfirmed introducer name without hiding the confirmed dater', async () => {
+    configurePublishedPitchClient(campaignRow, {
+      profiles: [
+        { ...profileRows[0], display_name: 'maya.park', display_name_confirmed: false },
+        profileRows[1],
+      ],
+    });
+    const client = createServiceClient('https://project.example', 'service-key');
+
+    const pitch = await getPublishedPitchBySlug(client, 'blair-abc123');
+
+    expect(pitch?.introducerDisplayName).toBe('A friend');
+    expect(pitch?.daterDisplayName).toBe('Blair');
   });
 
   it('maps the campaign, draft, profiles, and signed voice URL when the gate is on', async () => {

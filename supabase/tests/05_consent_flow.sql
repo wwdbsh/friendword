@@ -3,6 +3,14 @@
 
 BEGIN;
 
+-- 0061 gates the preview on `display_name_confirmed`, and the seeded profiles
+-- predate that flag. This journey is the confirmed-introducer path, so it says
+-- so out loud; the unconfirmed half lives in
+-- `36_consent_preview_display_name.sql`.
+UPDATE profiles
+   SET display_name_confirmed = true
+ WHERE user_id = '00000000-0000-0000-0000-000000000004';
+
 -- 1. Introducer (user4) submits the seeded draft; capture the raw token.
 SET LOCAL ROLE authenticated;
 SET LOCAL "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000004';

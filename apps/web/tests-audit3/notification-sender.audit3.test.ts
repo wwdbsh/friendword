@@ -51,7 +51,15 @@ import {
 const RECIPIENT = '11111111-1111-4111-8111-111111111111';
 const ADDRESS = 'recipient@example.test';
 
-function fakeServiceClient(options: { email?: string | null; displayName?: string | null } = {}) {
+function fakeServiceClient(
+  options: {
+    email?: string | null;
+    displayName?: string | null;
+    // T002 (Issue #71): the greeting uses the profile name only once its owner
+    // has confirmed it, so the flag is part of the fixture.
+    displayNameConfirmed?: boolean;
+  } = {},
+) {
   const adminLookups: string[] = [];
   const client = {
     auth: {
@@ -73,7 +81,10 @@ function fakeServiceClient(options: { email?: string | null; displayName?: strin
         eq: () => builder,
         maybeSingle: () =>
           Promise.resolve({
-            data: { display_name: options.displayName ?? 'Blair Dater' },
+            data: {
+              display_name: options.displayName ?? 'Blair Dater',
+              display_name_confirmed: options.displayNameConfirmed ?? true,
+            },
             error: null,
           }),
       };
@@ -108,6 +119,35 @@ describe('notification sender pass', () => {
     mocks.completeNotification.mockResolvedValue(undefined);
     mocks.sendEmailViaResend.mockReset();
     mocks.sendEmailViaResend.mockResolvedValue({ ok: true });
+  });
+
+  // T002 (Issue #71). `handle_new_auth_user` (0011) seeds `display_name` from
+  // the email local-part. Greeting somebody as "blair.kim92" in an email both
+  // reads as a mistake and repeats a fragment of their address back at them, so
+  // the sender withholds it and `greeting()` falls back to its nameless form.
+  it('greets without a name when the recipient has not confirmed one', async () => {
+    mocks.claimNotifications.mockResolvedValue([row()]);
+    const { client } = fakeServiceClient({
+      displayName: 'blair.kim92',
+      displayNameConfirmed: false,
+    });
+
+    await runNotificationPass(client as never, CONFIG);
+
+    const sent = mocks.sendEmailViaResend.mock.calls[0]?.[0] as { html: string; text: string };
+    expect(sent.html).toContain('Hi,');
+    expect(sent.html).not.toContain('blair.kim92');
+    expect(sent.text).not.toContain('blair.kim92');
+  });
+
+  it('greets by name once the recipient has confirmed one', async () => {
+    mocks.claimNotifications.mockResolvedValue([row()]);
+    const { client } = fakeServiceClient({ displayName: 'Blair', displayNameConfirmed: true });
+
+    await runNotificationPass(client as never, CONFIG);
+
+    const sent = mocks.sendEmailViaResend.mock.calls[0]?.[0] as { html: string };
+    expect(sent.html).toContain('Hi Blair,');
   });
 
   it('[d] an empty claim sends nothing and completes nothing', async () => {

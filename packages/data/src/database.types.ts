@@ -793,7 +793,10 @@ export type Database = {
       get_consent_preview: {
         Args: { readonly raw_token: string };
         Returns: readonly {
-          readonly introducer_display_name: string;
+          // NULL when the introducer has not confirmed their display name
+          // (migration 0061): the anonymous preview never prints the
+          // email-derived placeholder.
+          readonly introducer_display_name: string | null;
           readonly relationship_type: RelationshipType | null;
           readonly relationship_duration: RelationshipDuration | null;
           readonly request_status: string;

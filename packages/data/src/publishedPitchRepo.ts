@@ -10,6 +10,7 @@ import {
 } from '@friendword/contracts';
 
 import type { ServiceSupabaseClient } from './client';
+import { publicDisplayName } from './displayName';
 import { DataLayerError } from './errors';
 import { indexTranscriptWords, type IndexedTranscriptWord } from './transcriptWordIndex';
 
@@ -312,18 +313,24 @@ export async function getPublishedPitchBySlug(
     throw new DataLayerError('publishedPitch.draft', draftError);
   }
 
+  // Explicit columns, because `display_name_confirmed` is the difference
+  // between a name and an email local-part and a star select hides which
+  // columns this page actually depends on.
   const { data: profiles, error: profilesError } = await client
     .from('profiles')
-    .select()
+    .select('user_id, display_name, display_name_confirmed, birth_date')
     .in('user_id', [campaign.owner_user_id, draft.created_by_user_id]);
   if (profilesError !== null) {
     throw new DataLayerError('publishedPitch.profiles', profilesError);
   }
 
+  // T002 (Issue #71): this is the public campaign page. An unconfirmed name is
+  // the email local-part the bootstrap invented, so it becomes the same
+  // 'A friend' the page already prints when a profile row is missing.
   const ownerProfile = profiles.find((profile) => profile.user_id === campaign.owner_user_id);
-  const daterDisplayName = ownerProfile?.display_name ?? 'A friend';
+  const daterDisplayName = publicDisplayName(ownerProfile) ?? 'A friend';
   const introducerDisplayName =
-    profiles.find((profile) => profile.user_id === draft.created_by_user_id)?.display_name ??
+    publicDisplayName(profiles.find((profile) => profile.user_id === draft.created_by_user_id)) ??
     'A friend';
 
   // CP-1: age is derived from the dater's birth date, never the raw value.

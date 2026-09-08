@@ -1,0 +1,220 @@
+/* The legal/support surface. Same Hype Mixtape tokens as the landing page, but
+   tuned for reading rather than for a first impression: a single measured
+   column, generous leading, and no gradients competing with the text. */
+
+.page {
+  min-height: 100dvh;
+  overflow-wrap: break-word;
+  background:
+    radial-gradient(
+      circle at 88% 2%,
+      color-mix(in srgb, var(--color-hype) 18%, transparent) 0,
+      transparent 22rem
+    ),
+    var(--color-background);
+  word-break: keep-all;
+}
+
+.nav,
+.body,
+.footer {
+  width: min(calc(100% - var(--space-xl) * 2), 46rem);
+  margin-inline: auto;
+}
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  min-height: 5.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-ink) 16%, transparent);
+}
+
+.wordmark {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  font-family: var(--font-display), sans-serif;
+  font-size: var(--font-size-lg);
+  font-weight: 900;
+  letter-spacing: -0.05em;
+  text-decoration: none;
+}
+
+.navLinks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-lg);
+}
+
+.quietLink {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  color: var(--color-text-secondary);
+  font-weight: 750;
+  font-size: var(--font-size-sm);
+  text-decoration: none;
+  text-underline-offset: var(--space-xs);
+}
+
+.quietLink:hover,
+.quietLink:focus-visible {
+  color: var(--color-ink);
+  text-decoration: underline;
+}
+
+.quietLinkCurrent {
+  color: var(--color-ink);
+  text-decoration: underline;
+}
+
+.body {
+  padding-block: var(--space-xxl) var(--space-xl);
+}
+
+.eyebrow {
+  margin: 0 0 var(--space-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0 0 var(--space-md);
+  font-family: var(--font-display), sans-serif;
+  font-size: var(--font-size-display);
+  font-weight: 900;
+  line-height: var(--line-tight);
+  letter-spacing: -0.04em;
+}
+
+.lede {
+  margin: 0 0 var(--space-lg);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  line-height: var(--line-relaxed);
+}
+
+/* The draft banner. Deliberately loud: this text has not been through legal
+   review, and nobody reading it — owner or user — should have to guess that. */
+.draftNote {
+  margin-block: 0 var(--space-xl);
+  padding: var(--space-md) var(--space-lg);
+  border: var(--stroke-sticker) solid var(--color-ink);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-hype) 22%, var(--color-surface));
+  box-shadow: var(--shadow-sticker-sm);
+  color: var(--color-ink);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-relaxed);
+}
+
+.draftNote strong {
+  font-weight: 800;
+}
+
+.section {
+  margin-block: var(--space-xl);
+  scroll-margin-top: var(--space-xl);
+}
+
+.section h2 {
+  margin: 0 0 var(--space-sm);
+  font-family: var(--font-display), sans-serif;
+  font-size: var(--font-size-xl);
+  font-weight: 800;
+  line-height: var(--line-tight);
+  letter-spacing: -0.03em;
+}
+
+.section h3 {
+  margin: var(--space-lg) 0 var(--space-xs);
+  font-size: var(--font-size-md);
+  font-weight: 800;
+}
+
+.section p,
+.section li {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-relaxed);
+}
+
+.section p {
+  margin: 0 0 var(--space-sm);
+}
+
+.section ul {
+  margin: 0 0 var(--space-sm);
+  padding-inline-start: var(--space-lg);
+}
+
+.section li {
+  margin-block: var(--space-xs);
+}
+
+.section a {
+  color: var(--color-ink);
+  font-weight: 700;
+  text-underline-offset: var(--space-xs);
+}
+
+/* A fact the page states about itself rather than about the reader — used for
+   the "we cannot do X" admissions that must not read as fine print. */
+.callout {
+  margin-block: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  border-inline-start: var(--stroke-trust) solid var(--color-keyword);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-relaxed);
+}
+
+.toc {
+  margin-block: var(--space-lg) var(--space-xl);
+  padding: var(--space-md) var(--space-lg);
+  border: 1px solid var(--color-border-muted);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.toc ol {
+  margin: 0;
+  padding-inline-start: var(--space-lg);
+}
+
+.toc li {
+  margin-block: var(--space-xs);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.updated {
+  margin: 0;
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md) var(--space-lg);
+  align-items: center;
+  justify-content: space-between;
+  padding-block: var(--space-lg) var(--space-xxl);
+  border-top: 1px solid color-mix(in srgb, var(--color-ink) 16%, transparent);
+}
+
+.footerWordmark {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-weight: 900;
+  letter-spacing: -0.05em;
+}

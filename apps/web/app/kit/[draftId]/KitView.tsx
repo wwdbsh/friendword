@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BenefitsRepo,
   CreatorCreditRequiredError,
+  DataLayerError,
   KitNotPublishedError,
   PitchDraftRepo,
   trackEvent,
@@ -32,7 +33,28 @@ type KitState =
     }
   | { readonly step: 'needs-credit' }
   | { readonly step: 'not-published' }
+  | { readonly step: 'not-found' }
   | { readonly step: 'error' };
+
+/**
+ * M-10: is this "there is no such kit for you", or "the network dropped"?
+ *
+ * `PitchDraftRepo.getDraft` selects the draft with `.single()`, so PostgREST
+ * answers PGRST116 ("0 rows") for BOTH a draft id that does not exist and one
+ * that exists but the RLS policy hides from this caller. Neither is retryable
+ * and both are the same sentence to the person reading — the kit is not
+ * theirs. Every other failure (offline, 5xx, an expired token mid-flight) IS
+ * retryable and keeps the "refresh" copy. Distinguishing them matters because
+ * "refresh to try again" on a mistyped or foreign link is an instruction that
+ * can never succeed.
+ */
+function isMissingDraft(error: unknown): boolean {
+  const cause = error instanceof DataLayerError ? error.cause : error;
+
+  return (
+    typeof cause === 'object' && cause !== null && 'code' in cause && cause.code === 'PGRST116'
+  );
+}
 
 /**
  * Caption copy honesty (second audit CP-5/§11): the shared link is a full
@@ -107,8 +129,8 @@ export function KitView({ draftId }: { readonly draftId: string }) {
       });
       const imageUrl = response.ok ? URL.createObjectURL(await response.blob()) : null;
       setState({ step: 'unlocked', headline: draft.headline ?? null, slug, imageUrl });
-    } catch {
-      setState({ step: 'error' });
+    } catch (error: unknown) {
+      setState({ step: isMissingDraft(error) ? 'not-found' : 'error' });
     }
   }, [client, draftId]);
 
@@ -181,6 +203,18 @@ export function KitView({ draftId }: { readonly draftId: string }) {
         {client !== null && session !== null && state.step === 'loading' && (
           <section className={styles.card} aria-live="polite">
             <h1 className={styles.title}>Opening your launch kit…</h1>
+          </section>
+        )}
+
+        {state.step === 'not-found' && (
+          <section className={styles.card}>
+            <span className={styles.badge}>Social launch kit</span>
+            <h1 className={styles.title}>We can&rsquo;t find that kit.</h1>
+            <p className={styles.muted}>
+              This link doesn&rsquo;t point at a pitch on your account. Check that you opened it
+              from the Friendword app, and that you&rsquo;re signed in with the email you recorded
+              the pitch with.
+            </p>
           </section>
         )}
 

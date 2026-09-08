@@ -10,6 +10,7 @@ import {
   type PitchRenderState,
 } from '@friendword/data';
 
+import { EmailSignIn } from '@/components/EmailSignIn';
 import { RENDER_DOWNLOAD_FILENAME } from '@/lib/renderDownload';
 
 import styles from '@/styles/flowCard.module.css';
@@ -56,7 +57,20 @@ const REQUEST_ERROR_COPY = 'We couldn’t start the export. Please try again.';
 // answered, or it answered with fewer bytes than it promised. "Didn't
 // complete" is true of both and never claims a file was saved.
 const DOWNLOAD_ERROR_COPY = 'The download didn’t complete. Please try again.';
+// M-16: a 401 from render-download is NOT the failure above. The route
+// answers 401 only when it has no bearer token or `auth.getUser` rejects the
+// one it was given — the session is gone, server-side, even though this tab
+// still holds a token object. "Try again" is a lie there: every retry sends
+// the same dead token. Say what actually has to happen, and put the form
+// that does it directly under the sentence.
+const DOWNLOAD_SIGNED_OUT_COPY =
+  'Your session expired, so we couldn’t fetch the file. Sign in again and the download will work — your export is safe.';
 const STATE_ERROR_COPY = 'The export status could not load. Refresh to try again.';
+
+/** Marks the one download failure that retrying cannot fix (M-16). */
+class DownloadSignedOutError extends Error {
+  override readonly name = 'DownloadSignedOutError';
+}
 
 type ExportView = {
   readonly renderState: PitchRenderState;
@@ -142,6 +156,9 @@ export function PitchExportCard({
   const [waitNotice, setWaitNotice] = useState<string | null>(null);
   const [passNeeded, setPassNeeded] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Kept apart from actionError (M-16): this state renders a sign-in form, not
+  // a retry line, and must not be cleared by a subsequent retryable failure.
+  const [downloadSignedOut, setDownloadSignedOut] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -259,12 +276,14 @@ export function PitchExportCard({
   async function handleDownload(revisionId: string) {
     setDownloading(true);
     setActionError(null);
+    setDownloadSignedOut(false);
     let objectUrl: string | null = null;
     try {
       const { data, error } = await client.auth.getSession();
       const accessToken = data.session?.access_token;
       if (error !== null || accessToken === undefined) {
-        throw new Error('download requires a session');
+        // Same condition the route would answer 401 to, caught one hop early.
+        throw new DownloadSignedOutError('download requires a session');
       }
       // The MP4 lives under pitch-media/<draft>/renders/, a nested prefix the
       // member storage policy cannot see (deliberately, 0054), so the bytes
@@ -284,6 +303,9 @@ export function PitchExportCard({
         `/kit/${draftId}/render-download?revisionId=${encodeURIComponent(revisionId)}`,
         { headers: { authorization: `Bearer ${accessToken}` } },
       );
+      if (response.status === 401) {
+        throw new DownloadSignedOutError('download session revoked');
+      }
       if (!response.ok) {
         throw new Error('download unavailable');
       }
@@ -309,8 +331,13 @@ export function PitchExportCard({
         campaign_slug: campaignSlug,
         channel: 'kit_mp4_download',
       });
-    } catch {
-      setActionError(DOWNLOAD_ERROR_COPY);
+    } catch (error: unknown) {
+      if (error instanceof DownloadSignedOutError) {
+        setActionError(null);
+        setDownloadSignedOut(true);
+      } else {
+        setActionError(DOWNLOAD_ERROR_COPY);
+      }
     } finally {
       if (objectUrl !== null) {
         // The click has already handed the blob to the download manager; the
@@ -446,6 +473,12 @@ export function PitchExportCard({
             </p>
           )}
           {actionError !== null && <p className={styles.error}>{actionError}</p>}
+          {downloadSignedOut && (
+            <div data-render-signed-out>
+              <p className={styles.error}>{DOWNLOAD_SIGNED_OUT_COPY}</p>
+              <EmailSignIn client={client} reason="Sign in again to download your MP4." />
+            </div>
+          )}
         </>
       )}
     </section>

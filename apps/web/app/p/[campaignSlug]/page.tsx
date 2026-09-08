@@ -11,6 +11,7 @@ import { ReferralTracker } from '@/components/ReferralTracker';
 import { ReportCampaignLink } from '@/components/ReportCampaignLink';
 import { getPitchFixture } from '@/fixtures/pitch';
 import { loadPitchAbsence } from '@/lib/publicPitchAbsence';
+import { siteOrigin } from '@/lib/siteOrigin';
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
 import { daterControlLine, structureProvenanceLine, transcriptProvenanceLine } from '@/pitch/copy';
 import { fromFixture, fromPublishedPitch, toPitchPlayerView, type PitchView } from '@/pitch/view';
@@ -20,28 +21,6 @@ import styles from './page.module.css';
 type PitchPageProps = {
   readonly params: Promise<{ readonly campaignSlug: string }>;
 };
-
-type HeaderReader = Pick<Headers, 'get'>;
-
-function metadataOrigin(requestHeaders: HeaderReader): URL {
-  const deploymentHost =
-    process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL ?? null;
-  if (deploymentHost !== null && deploymentHost.length > 0) {
-    return new URL(`https://${deploymentHost}`);
-  }
-
-  const forwardedHost = requestHeaders.get('x-forwarded-host')?.split(',')[0]?.trim();
-  const host = forwardedHost ?? requestHeaders.get('host') ?? 'localhost:3000';
-  const forwardedProtocol = requestHeaders.get('x-forwarded-proto')?.split(',')[0]?.trim();
-  const protocol =
-    forwardedProtocol === 'http' || forwardedProtocol === 'https'
-      ? forwardedProtocol
-      : host.startsWith('localhost')
-        ? 'http'
-        : 'https';
-  const origin = `${protocol}://${host}`;
-  return URL.canParse(origin) ? new URL(origin) : new URL('http://localhost:3000');
-}
 
 // Signed media URLs must be minted per request, never cached at build time.
 export const dynamic = 'force-dynamic';
@@ -63,7 +42,7 @@ async function loadPitch(campaignSlug: string): Promise<PitchView | null> {
 
 export async function generateMetadata({ params }: PitchPageProps): Promise<Metadata> {
   const { campaignSlug } = await params;
-  const origin = metadataOrigin(await headers());
+  const origin = siteOrigin(await headers());
   const isDemo = getPitchFixture(campaignSlug) !== undefined;
   const pitch = await loadPitch(campaignSlug);
 

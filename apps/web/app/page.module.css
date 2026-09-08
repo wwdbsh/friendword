@@ -434,11 +434,39 @@
 
 .footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--space-lg);
+  gap: var(--space-md) var(--space-lg);
   padding-block: calc(var(--space-xxl) * 1.5);
   color: var(--color-text-secondary);
+}
+
+/* Privacy / Terms / Support (L-1, App Store blocker B1). The App Store review
+   reaches these from the landing page, and so does anyone deciding whether to
+   hand this service a recording of their friend. */
+.footerLinks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-lg);
+}
+
+.footerLinks a {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  color: var(--color-text-secondary);
+  font-weight: 750;
+  font-size: var(--font-size-sm);
+  text-decoration: none;
+  text-underline-offset: var(--space-xs);
+}
+
+.footerLinks a:hover,
+.footerLinks a:focus-visible {
+  color: var(--color-ink);
+  text-decoration: underline;
 }
 
 .footer p {

@@ -111,6 +111,17 @@ const CLAIM_ERROR_COPY: readonly (readonly [string, string])[] = [
   ],
   ['linked to another account', 'This invite was already claimed with a different account.'],
   ['no longer claimable', 'This invite has already been answered or is no longer active.'],
+  // M-13: the H-7 one-active-campaign guard (private.enforce_one_active_campaign,
+  // migration 0039) raises check_violation with this text through
+  // approve_and_publish_pitch. "Refresh to try again" was actively wrong —
+  // refreshing never clears it, because the block is another page of theirs
+  // that is still live. Name the actual fix instead. Matched on the message
+  // rather than SQLSTATE 23514: PostgREST reports every check violation as
+  // 23514, so the code alone cannot distinguish this guard from any other.
+  [
+    'active campaign',
+    'You already have a live page — take it down or wait for it to end before publishing another.',
+  ],
 ];
 
 const DATING_INTENTS = [

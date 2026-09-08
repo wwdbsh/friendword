@@ -676,6 +676,15 @@ export function InboxView() {
                   </div>
                 </>
               )}
+              {/* B1: the only account-facing screen the web has, so it is the
+                  natural place to reach the pages that say what deletion
+                  actually removes and what it deliberately keeps. Below the
+                  buttons, not above — nothing may compete with the deletion
+                  controls someone came here to find. */}
+              <p className={styles.finePrint}>
+                <Link href="/privacy">Privacy</Link> · <Link href="/terms">Terms</Link> ·{' '}
+                <Link href="/support">Support</Link>
+              </p>
             </section>
           )}
       </div>

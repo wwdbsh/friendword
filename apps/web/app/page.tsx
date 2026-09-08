@@ -234,6 +234,11 @@ export default function HomePage() {
         <footer className={styles.footer}>
           <p className={styles.footerWordmark}>Friendword</p>
           <p>Dating, in your friends&apos; words.</p>
+          <nav className={styles.footerLinks} aria-label="Legal and support">
+            <Link href="/privacy">Privacy</Link>
+            <Link href="/terms">Terms</Link>
+            <Link href="/support">Support</Link>
+          </nav>
         </footer>
       </main>
     </>

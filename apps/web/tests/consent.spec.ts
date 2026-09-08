@@ -1077,6 +1077,43 @@ test('requires the dater to reload when approval targets a stale revision', asyn
   await expect(page.getByRole('button', { name: 'Reload the latest version' })).toBeVisible();
 });
 
+// M-13. `private.enforce_one_active_campaign` (migration 0039) is the H-7
+// guard: one published-or-paused campaign per owner. It raises a
+// check_violation, and approve_and_publish_pitch surfaces it unchanged — so
+// the Dater used to be told "Something went wrong on our side. Refresh the
+// page to try again." Refreshing cannot possibly help: the obstacle is another
+// page of theirs that is still live, and the only fixes are on the /inbox
+// screen or the clock. The message has to name one of them.
+test('names the live page blocking a second publish instead of blaming itself', async ({
+  page,
+}) => {
+  await mockClaimedReview(page);
+  await page.route('**/rest/v1/rpc/approve_and_publish_pitch*', (route) =>
+    route.fulfill({
+      status: 400,
+      json: {
+        code: '23514',
+        message:
+          'owner already has an active campaign; only one campaign may be published or paused at a time',
+        details: null,
+        hint: null,
+      },
+    }),
+  );
+
+  await page.goto(`/consent/${CONSENT_TOKEN}`);
+  await page.getByLabel('I confirm the claims above are true.').check();
+  await fillDaterProfile(page);
+  await page.getByRole('button', { name: 'Approve & publish my page' }).click();
+
+  await expect(
+    page.getByText(
+      'You already have a live page — take it down or wait for it to end before publishing another.',
+    ),
+  ).toBeVisible();
+  await expect(page.getByText('Refresh the page to try again')).toHaveCount(0);
+});
+
 // T002 (Issue #71). The stored value at this point is the email local-part
 // `handle_new_auth_user` (0011) invented. Prefilling it turns the question into
 // a default — and the default is what gets printed on this dater's public page,

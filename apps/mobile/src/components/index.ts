@@ -2,6 +2,7 @@ export { HypeButton } from './HypeButton';
 export { LoadFailureCard } from './LoadFailureCard';
 export { PendingCard } from './PendingCard';
 export { PlaceholderScreen } from './PlaceholderScreen';
+export { RouteErrorCard } from './RouteErrorCard';
 export { QuietNavAction } from './QuietNavAction';
 export { SafetyAction } from './SafetyAction';
 export { ScreenHeading } from './ScreenHeading';

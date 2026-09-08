@@ -6,11 +6,12 @@ import {
 import { Unbounded_700Bold } from '@expo-google-fonts/unbounded';
 import { colors, fonts } from '@friendword/ui-tokens';
 import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
+import { Stack, type ErrorBoundaryProps } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
+import { RouteErrorCard } from '../src/components';
 import { shouldPurgeConsentTokensOnAuthChange } from '../src/services/authDraftPurge';
 import { pitchDraftService } from '../src/services/draftServiceInstance';
 import {
@@ -20,6 +21,22 @@ import {
 import { getSupabaseClient } from '../src/services/supabaseClient';
 
 SplashScreen.preventAutoHideAsync();
+
+/**
+ * expo-router renders this in place of any route below this layout whose tree
+ * throws. Without it such a throw unmounts the route and leaves a blank white
+ * screen — invisible in a released build, and unreportable from device QA.
+ */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  return (
+    <RouteErrorCard
+      error={error}
+      onRetry={() => {
+        void retry();
+      }}
+    />
+  );
+}
 
 function reportIdentitySyncResult(result: PurchasesIdentitySyncResult): void {
   if (result.state === 'error') {

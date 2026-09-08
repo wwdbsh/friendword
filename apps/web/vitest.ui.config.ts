@@ -15,5 +15,13 @@ export default {
     environment: 'jsdom',
     globals: true,
     include: ['tests-ui/**/*.ui.test.tsx'],
+    // Node >= 25 ships an experimental global `localStorage` accessor that
+    // shadows jsdom's window.localStorage (returns undefined without
+    // --localstorage-file). Disable it in the worker so jsdom owns storage.
+    poolOptions: {
+      forks: {
+        execArgv: ['--no-experimental-webstorage'],
+      },
+    },
   },
 };

@@ -663,10 +663,7 @@ export default function CampaignsScreen() {
                 ? `${draft.relationship.kind} · ${draft.relationship.duration}`
                 : 'Relationship details still in progress'}
             </Text>
-            <Text style={styles.meta}>
-              {draft.photos.length} photo{draft.photos.length === 1 ? '' : 's'} ·{' '}
-              {draft.recording ? formatDuration(draft.recording.durationMillis) : 'No voice track'}
-            </Text>
+            <Text style={styles.meta}>{formatDraftMedia(draft)}</Text>
             {isRecoveredServerDraft(draft) ? (
               <View style={styles.recoveredNotice}>
                 <Text style={styles.recoveredTitle}>Recovered from your account</Text>
@@ -762,6 +759,7 @@ export default function CampaignsScreen() {
       </ScrollView>
       <SignInSheet
         visible={signInVisible}
+        purpose="generic"
         onClose={() => setSignInVisible(false)}
         onSignedIn={() => {
           setSignInVisible(false);
@@ -941,6 +939,71 @@ function formatActivePass(expiresAt: string | null): string {
     year: 'numeric',
   });
   return `Campaign Pass active through ${date}. Funnel analytics are available.`;
+}
+
+/**
+ * Whether the pitch's media lives on Friendword by the time it has this status.
+ *
+ * Exhaustive on purpose: a new status has to state its answer here rather than
+ * inherit one. Everything from `consent_pending` on has been submitted, so the
+ * server holds the voice track and the photos whatever this device still has —
+ * `draft` and `changes_requested` are the two stages where the composer is the
+ * only place the media has ever been.
+ */
+const MEDIA_LIVES_ON_SERVER: Readonly<Record<PitchDraft['status'], boolean>> = {
+  draft: false,
+  changes_requested: false,
+  consent_pending: true,
+  approved: true,
+  published: true,
+  paused: true,
+  expired: true,
+  archived: true,
+  deleted: true,
+};
+
+/**
+ * The media line under a pitch card, and the one it is allowed to print.
+ *
+ * M-8 (T004, Issue #73): a live pitch with two photos and a 54-second take was
+ * describing itself as "0 photos · No voice track". Both numbers come from the
+ * LOCAL draft, and this device's copy of a submitted pitch is not the pitch: a
+ * draft recovered from the account has no media at all (`recoverServerDraft`
+ * builds it with `photos: []` and `recording: null`), and a draft whose take was
+ * discarded locally after the upload keeps its photo records while the voice
+ * record is gone. Both printed a zero for "this device cannot see it", which
+ * reads as "your published pitch is empty".
+ *
+ * So once the pitch has been submitted, this line never counts down: a missing
+ * local record means the media is on Friendword, not that it does not exist. It
+ * stays quiet about what exactly is up there — this screen has not read the
+ * server's assets, so "2 photos" would be as invented as "0" — and only prints
+ * a number it actually holds the record for.
+ *
+ * The zero survives in the one place it is a fact: a pitch still in the
+ * composer, which genuinely has nothing on it yet, where saying so is what
+ * sends the introducer back to record.
+ */
+export function formatDraftMedia(draft: PitchDraft): string {
+  const photos = `${draft.photos.length} photo${draft.photos.length === 1 ? '' : 's'}`;
+  if (draft.server !== null && MEDIA_LIVES_ON_SERVER[draft.status]) {
+    if (draft.photos.length === 0) {
+      return 'Media saved on Friendword';
+    }
+    // The take is only described from a local record; without one the server's
+    // copy is all there is, and it is never "no voice track" — a pitch cannot
+    // reach this status without one.
+    return draft.recording === null
+      ? `${photos} · voice saved on Friendword`
+      : `${photos} · ${formatDuration(draft.recording.durationMillis)}`;
+  }
+  const knowsLocalMedia = draft.photos.length > 0 || draft.recording !== null;
+  if (!knowsLocalMedia && draft.server !== null) {
+    return 'Media saved on Friendword';
+  }
+  const voice =
+    draft.recording === null ? 'No voice track' : formatDuration(draft.recording.durationMillis);
+  return `${photos} · ${voice}`;
 }
 
 function formatDuration(durationMillis: number): string {

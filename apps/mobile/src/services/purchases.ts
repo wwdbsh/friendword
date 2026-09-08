@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { PurchasesRepo, type PurchaseBenefitScope } from '@friendword/data';
 
+import { diagnosticsEnabled, formatErrorForDisplay } from './errorDiagnostics';
 import {
   ensurePurchasesIdentity,
   getRevenueCatApiKey,
@@ -26,9 +27,98 @@ export type ProductIntent =
   | { readonly intent: 'creator_launch'; readonly draftId: string }
   | { readonly intent: 'campaign_pass'; readonly campaignId: string };
 
+/**
+ * Why the store cannot be used right now, in the only shapes a buyer can act on.
+ *
+ * M-9 (T004, Issue #73): the paywall printed whatever RevenueCat's SDK threw,
+ * so a misconfigured build showed the buyer "OfferingsManager.Error … configure
+ * your offerings at https://app.rev.cat/…". That text is ours to read, not
+ * theirs: it names our dashboard, it cannot be acted on from a phone, and it
+ * reads like the app is broken in a way the buyer caused. The class is what the
+ * screen needs — there is nothing to buy vs. it did not work just now vs. sign
+ * in first — and the raw text stays in the diagnostics channel.
+ */
+export type PurchaseFailureReason =
+  'not_configured' | 'unavailable' | 'no_products' | 'signed_out' | 'cancelled';
+
+/**
+ * One sentence per class, and each says whether money moved. "Nothing was
+ * charged" is the sentence a person actually wants after a payment screen
+ * fails, and every branch here reaches this point before any purchase is made
+ * or after one that threw, so it is true in all of them.
+ */
+export const PURCHASE_FAILURE_MESSAGES: Readonly<Record<PurchaseFailureReason, string>> = {
+  not_configured: 'Purchases are not switched on in this build yet. Nothing was charged.',
+  unavailable:
+    'The store could not be reached just now. Nothing was charged — try again in a moment.',
+  no_products: 'There is nothing to buy for this pitch yet. Nothing was charged.',
+  signed_out: 'Sign in first so the purchase lands on your account. Nothing was charged.',
+  cancelled: 'You cancelled the payment, so nothing was charged.',
+};
+
+export const PURCHASE_FAILURE_TITLES: Readonly<Record<PurchaseFailureReason, string>> = {
+  not_configured: 'Purchases aren’t live yet',
+  unavailable: 'The store didn’t answer',
+  no_products: 'Nothing to buy here yet',
+  signed_out: 'Sign in to buy this',
+  cancelled: 'Payment cancelled',
+};
+
+/**
+ * A failure this app raised itself, carrying the class the screen should show.
+ *
+ * Everything the SDK throws is classified as `unavailable` (or `cancelled`),
+ * because guessing a class out of a vendor's error text is how a
+ * "not configured" message ends up in front of a buyer with a working store.
+ */
+export class PurchasesUnavailableError extends Error {
+  readonly reason: PurchaseFailureReason;
+
+  constructor(reason: PurchaseFailureReason, diagnostic: string) {
+    super(diagnostic);
+    this.name = 'PurchasesUnavailableError';
+    this.reason = reason;
+  }
+}
+
+/** True for a RevenueCat rejection the buyer caused by tapping Cancel. */
+function isUserCancellation(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('userCancelled' in error)) {
+    return false;
+  }
+  return error.userCancelled === true;
+}
+
+export function classifyPurchaseFailure(error: unknown): PurchaseFailureReason {
+  if (error instanceof PurchasesUnavailableError) {
+    return error.reason;
+  }
+  return isUserCancellation(error) ? 'cancelled' : 'unavailable';
+}
+
+/**
+ * What the paywall prints for a failed purchase or restore.
+ *
+ * The raw text is appended only on a dev build, through the same gate as every
+ * other on-screen diagnostic (`formatErrorForDisplay`), so a released build
+ * shows the sentence and nothing else.
+ */
+export function describePurchaseFailure(error: unknown): string {
+  const message = PURCHASE_FAILURE_MESSAGES[classifyPurchaseFailure(error)];
+  if (!diagnosticsEnabled() || !(error instanceof Error)) {
+    return message;
+  }
+  return `${message} · ${formatErrorForDisplay(error)}`;
+}
+
 export type PurchasesStatus =
   | { readonly state: 'ready'; readonly package: PaywallPackage | null }
-  | { readonly state: 'unconfigured'; readonly reason: string };
+  | {
+      readonly state: 'unavailable';
+      readonly reason: PurchaseFailureReason;
+      /** Raw vendor text. Diagnostics only — never printed on a release build. */
+      readonly diagnostic: string;
+    };
 
 export type PurchaseFlowResult = 'confirmed' | 'timed_out';
 
@@ -86,16 +176,18 @@ export function getProductId(intent: ProductIntent): ProductId {
 export async function getPaywallStatus(intent: ProductIntent): Promise<PurchasesStatus> {
   if (getRevenueCatApiKey() === null) {
     return {
-      state: 'unconfigured',
-      reason: 'RevenueCat API key is not set (EXPO_PUBLIC_REVENUECAT_IOS_API_KEY).',
+      state: 'unavailable',
+      reason: 'not_configured',
+      diagnostic: 'RevenueCat API key is not set (EXPO_PUBLIC_REVENUECAT_IOS_API_KEY).',
     };
   }
 
   const purchases = loadPurchasesModule();
   if (purchases === null) {
     return {
-      state: 'unconfigured',
-      reason: 'Purchases need the development build — Expo Go cannot load the native module.',
+      state: 'unavailable',
+      reason: 'not_configured',
+      diagnostic: 'Purchases need the development build — Expo Go cannot load the native module.',
     };
   }
 
@@ -106,10 +198,16 @@ export async function getPaywallStatus(intent: ProductIntent): Promise<Purchases
       session === null ? null : { userId: session.user.id },
     );
     if (identityResult.state === 'unconfigured') {
-      return { state: 'unconfigured', reason: identityResult.reason };
+      return { state: 'unavailable', reason: 'not_configured', diagnostic: identityResult.reason };
     }
     if (identityResult.state === 'error') {
-      return { state: 'unconfigured', reason: identityResult.error.message };
+      // Identity failed against a store that IS configured, so this is the
+      // "not right now" class, not the "not set up" one.
+      return {
+        state: 'unavailable',
+        reason: 'unavailable',
+        diagnostic: identityResult.error.message,
+      };
     }
     const offerings = await purchases.getOfferings();
     const expectedProductId = getProductId(intent);
@@ -129,9 +227,14 @@ export async function getPaywallStatus(intent: ProductIntent): Promise<Purchases
             },
     };
   } catch (error: unknown) {
+    // The vendor text (OfferingsManager errors carry rev.cat dashboard URLs)
+    // goes to the log, which is where it has always been useful.
+    console.warn('[paywall] offerings could not be loaded', error);
     return {
-      state: 'unconfigured',
-      reason: error instanceof Error ? error.message : 'RevenueCat offerings could not be loaded.',
+      state: 'unavailable',
+      reason: 'unavailable',
+      diagnostic:
+        error instanceof Error ? error.message : 'RevenueCat offerings could not be loaded.',
     };
   }
 }
@@ -233,16 +336,23 @@ function toBenefitScope(intent: ProductIntent): PurchaseBenefitScope {
 function createProductionDependencies(): PurchaseFlowDependencies {
   const client = getSupabaseClient();
   if (client === null) {
-    throw new Error('Sign in and configure Supabase before purchasing.');
+    throw new PurchasesUnavailableError(
+      'not_configured',
+      'Sign in and configure Supabase before purchasing.',
+    );
   }
   const purchases = loadPurchasesModule();
   if (purchases === null) {
-    throw new Error(
+    throw new PurchasesUnavailableError(
+      'not_configured',
       'Purchases need the development build — Expo Go cannot load the native module.',
     );
   }
   if (getRevenueCatApiKey() === null) {
-    throw new Error('RevenueCat API key is not set (EXPO_PUBLIC_REVENUECAT_IOS_API_KEY).');
+    throw new PurchasesUnavailableError(
+      'not_configured',
+      'RevenueCat API key is not set (EXPO_PUBLIC_REVENUECAT_IOS_API_KEY).',
+    );
   }
   const repo = new PurchasesRepo(client);
 
@@ -250,7 +360,7 @@ function createProductionDependencies(): PurchaseFlowDependencies {
     ensureIdentity: async () => {
       const session = (await client.auth.getSession()).data.session;
       if (session === null) {
-        throw new Error('Sign in before purchasing.');
+        throw new PurchasesUnavailableError('signed_out', 'Sign in before purchasing.');
       }
       await ensurePurchasesIdentity(session.user.id);
     },
@@ -266,7 +376,10 @@ function createProductionDependencies(): PurchaseFlowDependencies {
           candidate.identifier === packageIdentifier && candidate.product.identifier === productId,
       );
       if (pkg === undefined) {
-        throw new Error('package not found for this paywall context');
+        throw new PurchasesUnavailableError(
+          'no_products',
+          'package not found for this paywall context',
+        );
       }
       await purchases.purchasePackage(pkg);
     },

@@ -367,6 +367,7 @@ export default function NewPitchScreen() {
           />
           <SignInSheet
             visible={submission.signInVisible}
+            purpose="send-pitch"
             onClose={submission.closeSignIn}
             onSignedIn={() => {
               submission.closeSignIn();

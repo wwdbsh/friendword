@@ -51,11 +51,28 @@ describe('what a route shows instead of a blank white screen', () => {
     );
 
     expect(markup).toContain('This screen stopped');
-    // The class is the half that identifies a device-only failure; the message
-    // alone does not.
-    expect(markup).toContain('TypeError');
     expect(markup).toContain('e.rest');
     expect(markup).toContain('data-has-retry="true"');
     expect(markup).toContain('Try this screen again');
+  });
+
+  // M-11 (T004, Issue #73): this card shares `formatErrorForDisplay` with the
+  // pitch flow, so it inherits the same rule — the class and the frames are a
+  // dev-build affordance and a released build shows the message alone.
+  it('adds the error class only on a dev build', () => {
+    const scope = globalThis as { __DEV__?: unknown };
+
+    expect(
+      renderStatic(<RouteErrorCard error={new TypeError('e.rest')} onRetry={vi.fn()} />),
+    ).not.toContain('TypeError');
+
+    scope.__DEV__ = true;
+    try {
+      expect(
+        renderStatic(<RouteErrorCard error={new TypeError('e.rest')} onRetry={vi.fn()} />),
+      ).toContain('TypeError');
+    } finally {
+      delete scope.__DEV__;
+    }
   });
 });

@@ -316,6 +316,7 @@ export default function PitchReviewScreen() {
         </SafeAreaView>
         <SignInSheet
           visible={signInVisible}
+          purpose="send-pitch"
           onClose={() => setSignInVisible(false)}
           onSignedIn={() => {
             setSignInVisible(false);
@@ -356,6 +357,7 @@ export default function PitchReviewScreen() {
         </SafeAreaView>
         <SignInSheet
           visible={signInVisible}
+          purpose="send-pitch"
           onClose={() => setSignInVisible(false)}
           onSignedIn={() => {
             setSignInVisible(false);
@@ -421,6 +423,7 @@ export default function PitchReviewScreen() {
         </SafeAreaView>
         <SignInSheet
           visible={signInVisible}
+          purpose="send-pitch"
           onClose={() => setSignInVisible(false)}
           onSignedIn={() => {
             setSignInVisible(false);
@@ -454,6 +457,7 @@ export default function PitchReviewScreen() {
       />
       <SignInSheet
         visible={signInVisible}
+        purpose="send-pitch"
         onClose={() => setSignInVisible(false)}
         onSignedIn={() => {
           setSignInVisible(false);

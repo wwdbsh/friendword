@@ -230,6 +230,7 @@ export default function InterestsScreen() {
       </ScrollView>
       <SignInSheet
         visible={signInVisible}
+        purpose="generic"
         onClose={() => setSignInVisible(false)}
         onSignedIn={() => {
           setSignInVisible(false);

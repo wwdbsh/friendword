@@ -6,10 +6,23 @@ vi.mock('@friendword/data/src/purchasesRepo', () => ({
 }));
 vi.mock('./supabaseClient', () => ({ getSupabaseClient: () => null }));
 
+const identity = vi.hoisted(() => ({
+  getRevenueCatApiKey: vi.fn<() => string | null>(() => null),
+  loadPurchasesModule: vi.fn<() => { getOfferings(): Promise<unknown> } | null>(() => null),
+  syncPurchasesIdentity: vi.fn(() => Promise.resolve({ state: 'ready' as const })),
+  ensurePurchasesIdentity: vi.fn(() => Promise.resolve()),
+}));
+vi.mock('./purchasesIdentity', () => identity);
+
 import {
+  classifyPurchaseFailure,
+  describePurchaseFailure,
+  getPaywallStatus,
   parseProductIntentParams,
   runPurchaseFlow,
   runRestoreFlow,
+  PurchasesUnavailableError,
+  PURCHASE_FAILURE_MESSAGES,
   type PurchaseFlowDependencies,
 } from './purchases';
 
@@ -242,5 +255,83 @@ describe('purchase confirmation sequence', () => {
       }),
     ).rejects.toThrow('RevenueCat identity mismatch');
     expect(issueIntent).not.toHaveBeenCalled();
+  });
+});
+
+// M-9 (T004, Issue #73). Simulator QA saw the paywall print RevenueCat's own
+// error — class name, configuration advice and an app.rev.cat URL — at the
+// person trying to pay. Everything below is about which text is the buyer's and
+// which is ours.
+describe('what a buyer is told when the store does not work', () => {
+  const INTENT = { intent: 'creator_launch' as const, draftId: DRAFT_ID };
+  // Verbatim shape of the failure QA hit.
+  const VENDOR_ERROR = new Error(
+    'OfferingsManager.Error.configurationError: There is an issue with your configuration. Check the underlying error for more details. Configure them at https://app.rev.cat/projects/x/offerings',
+  );
+
+  it('classifies an unrecognised SDK throw as "not right now", never as misconfiguration', () => {
+    expect(classifyPurchaseFailure(VENDOR_ERROR)).toBe('unavailable');
+    expect(classifyPurchaseFailure(new PurchasesUnavailableError('signed_out', 'raw'))).toBe(
+      'signed_out',
+    );
+    expect(classifyPurchaseFailure(new PurchasesUnavailableError('no_products', 'raw'))).toBe(
+      'no_products',
+    );
+    expect(classifyPurchaseFailure({ userCancelled: true })).toBe('cancelled');
+  });
+
+  it('shows a sentence with no vendor text, class name or dashboard link', () => {
+    const shown = describePurchaseFailure(VENDOR_ERROR);
+
+    expect(shown).toBe(PURCHASE_FAILURE_MESSAGES.unavailable);
+    expect(shown).not.toContain('rev.cat');
+    expect(shown).not.toContain('OfferingsManager');
+    expect(shown).not.toContain('configuration');
+  });
+
+  it('keeps that raw text for a dev build, where it is the point', () => {
+    const scope = globalThis as { __DEV__?: unknown };
+    scope.__DEV__ = true;
+    try {
+      expect(describePurchaseFailure(VENDOR_ERROR)).toContain('OfferingsManager');
+    } finally {
+      delete scope.__DEV__;
+    }
+  });
+
+  it('says nothing was charged in every class, because nothing was', () => {
+    for (const message of Object.values(PURCHASE_FAILURE_MESSAGES)) {
+      expect(message.toLowerCase()).toContain('charged');
+    }
+  });
+
+  it('reports an offerings failure as a class plus a diagnostic, not as copy', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    identity.getRevenueCatApiKey.mockReturnValue('appl_key');
+    identity.loadPurchasesModule.mockReturnValue({
+      getOfferings: () => Promise.reject(VENDOR_ERROR),
+    });
+
+    const status = await getPaywallStatus(INTENT);
+
+    expect(status).toEqual({
+      state: 'unavailable',
+      reason: 'unavailable',
+      diagnostic: VENDOR_ERROR.message,
+    });
+    // The vendor text is still readable — in the log, which is where it helps.
+    expect(warn).toHaveBeenCalled();
+    identity.getRevenueCatApiKey.mockReturnValue(null);
+    identity.loadPurchasesModule.mockReturnValue(null);
+    warn.mockRestore();
+  });
+
+  it('separates "not set up" from "did not answer"', async () => {
+    identity.getRevenueCatApiKey.mockReturnValue(null);
+
+    const status = await getPaywallStatus(INTENT);
+
+    expect(status.state).toBe('unavailable');
+    expect(status.state === 'unavailable' ? status.reason : null).toBe('not_configured');
   });
 });

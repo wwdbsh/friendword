@@ -455,6 +455,20 @@ export default function AccountScreen() {
 
   useFocusEffect(readSession);
 
+  /**
+   * Re-reads everything this screen shows about the person who just signed in.
+   *
+   * Both states are reset first: the session because it is still `signed_out`
+   * from a moment ago, and the name because the previous read either never ran
+   * or ran for nobody. Anything short of that leaves the sign-in prompt on
+   * screen behind a live session (M-2).
+   */
+  const onSignedIn = useCallback((): void => {
+    setSession('loading');
+    setDisplayName({ status: 'loading' });
+    readSession();
+  }, [readSession]);
+
   /** Runs {@link endSession} and turns its outcome into what the screen shows. */
   async function signOut(): Promise<void> {
     if (client === null) {
@@ -572,8 +586,17 @@ export default function AccountScreen() {
       </ScrollView>
       <SignInSheet
         visible={signInVisible}
+        purpose="account"
         onClose={() => setSignInVisible(false)}
-        onSignedIn={() => setSignInVisible(false)}
+        /* M-2 (T004, Issue #73): the session read runs on focus, and signing in
+           from a sheet mounted ON this screen never re-focuses it — so the
+           screen kept offering "Sign in to manage your account" to somebody who
+           had just signed in, until they navigated away and came back. Closing
+           the sheet is not the whole job; the screen has to ask again. */
+        onSignedIn={() => {
+          setSignInVisible(false);
+          onSignedIn();
+        }}
       />
       <DisplayNameSheet
         visible={nameSheetVisible}

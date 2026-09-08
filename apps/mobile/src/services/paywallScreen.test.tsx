@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -67,11 +70,17 @@ vi.mock('../components', async () => {
   };
 });
 vi.mock('./purchases', () => ({
+  describePurchaseFailure: (error: unknown) => String(error),
   getPaywallStatus: mocks.getPaywallStatus,
   parseProductIntentParams: () => null,
   runPurchaseFlow: vi.fn(),
   runRestoreFlow: vi.fn(),
+  // The real copy tables are pinned in purchases.test.ts; the screen only needs
+  // something to index into.
+  PURCHASE_FAILURE_MESSAGES: { unavailable: '', not_configured: '', no_products: '' },
+  PURCHASE_FAILURE_TITLES: { unavailable: '', not_configured: '', no_products: '' },
 }));
+vi.mock('./errorDiagnostics', () => ({ diagnosticsEnabled: () => false }));
 vi.mock('./supabaseClient', () => ({ getSupabaseClient: () => null }));
 vi.mock('./webOrigin', () => ({ getWebOrigin: () => 'https://friendword.example' }));
 
@@ -128,5 +137,38 @@ describe('PaywallScreen', () => {
     expect(getConfirmedBody({ intent: 'creator_launch', draftId: DRAFT_ID }, false)).toContain(
       'Creator Kit',
     );
+  });
+});
+
+// M-9 (T004, Issue #73). The failure card is only reachable after an effect
+// resolves, and this harness renders statically, so the wiring is pinned at the
+// source: the vendor's text must not appear in the tree except behind the
+// diagnostics gate, and the two escapes must stay outside the status branches.
+describe('the paywall when the store does not answer', () => {
+  const SOURCE = readFileSync(join(process.cwd(), 'app/paywall.tsx'), 'utf8');
+
+  it('prints the mapped sentence rather than the SDK reason string', () => {
+    expect(SOURCE).not.toContain('{status.reason}');
+    expect(SOURCE).toContain('PURCHASE_FAILURE_TITLES[status.reason]');
+    expect(SOURCE).toContain('PURCHASE_FAILURE_MESSAGES[status.reason]');
+  });
+
+  it('shows the raw diagnostic only behind the dev-build gate', () => {
+    const diagnosticAt = SOURCE.indexOf('{status.diagnostic}');
+    const gateAt = SOURCE.indexOf('diagnosticsEnabled() ? (');
+
+    expect(diagnosticAt).toBeGreaterThan(-1);
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(gateAt).toBeLessThan(diagnosticAt);
+    // One occurrence, one gate: no second unguarded copy of it.
+    expect(SOURCE.split('{status.diagnostic}')).toHaveLength(2);
+  });
+
+  it('leaves restore and back reachable whatever the status card says', () => {
+    const afterCards = SOURCE.slice(SOURCE.indexOf('{note !== null ?'));
+
+    expect(afterCards).toContain("'Restore purchases'");
+    expect(afterCards).toContain('label="Back"');
+    expect(afterCards).not.toContain('status?.state');
   });
 });

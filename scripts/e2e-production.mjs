@@ -118,9 +118,26 @@ async function unenrolSandboxTesters() {
 
 const initialHeadline = 'E2E Blair makes ordinary plans memorable.';
 const revisedHeadline = 'E2E Blair makes every gathering feel welcoming.';
-const daterHeadline = 'E2E Blair, in Blair’s own words.';
-const daterBody =
-  'I rewrote this myself: warm plans, honest follow-through, and room for something steady.';
+// 0047/0050: the Dater edits the five published structure fields. Whenever the
+// revision structure carries all five, create_dater_revision DERIVES headline and
+// body from it and ignores new_headline/new_body — so the harness has to take the
+// same path the consent editor takes. The derivation below is byte-identical to
+// deriveDaterPitchHeadline/deriveDaterPitchBody in
+// packages/contracts/src/daterPitchEdit.ts and to private.dater_revision_*.
+const daterStructure = {
+  hook: 'E2E Blair, in Blair’s own words.',
+  relationship_context: 'Maya and I have been friends since our very first job.',
+  three_specific_qualities: ['warm', 'honest', 'steady'],
+  evidence_or_anecdote:
+    'I rewrote this myself: warm plans, honest follow-through, and room for something steady.',
+  good_match_for: 'Someone kind who wants to build something steady.',
+};
+const daterHeadline = daterStructure.hook;
+const daterBody = [
+  daterStructure.relationship_context,
+  daterStructure.evidence_or_anecdote,
+  `A good match: ${daterStructure.good_match_for}`,
+].join('\n\n');
 const daterTranscript = {
   text: 'E2E transcript: Blair is the friend who shows up.',
   segments: [
@@ -149,6 +166,10 @@ async function cleanup(label, operation) {
     if (error) {
       failures += 1;
       console.error(`CLEANUP FAIL ${label}`);
+    } else {
+      // Restored launch-gate values are part of the run's safety evidence, so
+      // successful cleanups are logged too, not just failures.
+      console.log(`CLEANUP OK ${label}`);
     }
   } catch {
     failures += 1;
@@ -284,6 +305,16 @@ try {
     })
     .eq('id', draft.id);
   if (contentError) throw new Error(`draft content update: ${contentError.message}`);
+
+  // Slice 7 (CP-1) transcript freeze: the provider transcript has to exist on the
+  // draft BEFORE the first consent revision is cut. 0032's trigger only fills a
+  // NULL revision transcript at insert time, and every later revision copies the
+  // previous one, so seeding after submit would never reach a revision.
+  const { error: transcriptSeedError } = await admin
+    .from('pitch_drafts')
+    .update({ transcript: daterTranscript })
+    .eq('id', draft.id);
+  if (transcriptSeedError) throw new Error(`transcript seed: ${transcriptSeedError.message}`);
 
   const { data: submission, error: submitError } = await introducer.client.rpc(
     'submit_pitch_for_consent',
@@ -477,7 +508,7 @@ try {
   }
   const { data: latestRevision, error: latestRevisionError } = await dater.client
     .from('consent_revisions')
-    .select('id, revision_number, headline, asset_ids')
+    .select('id, revision_number, headline, asset_ids, transcript')
     .eq('id', latestRequest.revision_id)
     .single();
   if (latestRevisionError || !latestRevision) {
@@ -581,6 +612,9 @@ try {
       draftId: draft.id,
       headline: daterHeadline,
       body: daterBody,
+      // 0047: the qualities publish verbatim but appear in neither the derived
+      // headline nor the derived body, so they join the moderated string.
+      qualities: daterStructure.three_specific_qualities,
     }),
   });
   // Keyed host → 200 with a verdict; keyless host → 501 (moderation skipped and
@@ -592,13 +626,10 @@ try {
   );
 
   // 6h. Slice 7 (CP-1): the dater rewrites the copy as a new immutable
-  // revision that freezes the draft transcript, and sets publish preferences.
-  const { error: transcriptSeedError } = await admin
-    .from('pitch_drafts')
-    .update({ transcript: daterTranscript })
-    .eq('id', draft.id);
-  if (transcriptSeedError) throw new Error(`transcript seed: ${transcriptSeedError.message}`);
-
+  // revision, and sets publish preferences. The revision carries the transcript
+  // frozen into revision 1 at submit time (0050's create_dater_revision copies
+  // `latest.transcript` forward; it never re-reads pitch_drafts), so this asserts
+  // the freeze semantics rather than a late draft-side seed.
   const { data: daterRevisionRows, error: daterRevisionError } = await dater.client.rpc(
     'create_dater_revision',
     {
@@ -606,6 +637,7 @@ try {
       new_headline: daterHeadline,
       new_body: daterBody,
       included_asset_ids: [voiceAsset.id, photo1Asset.id, photo2Asset.id, daterPhotoAsset.id],
+      new_structure: daterStructure,
     },
   );
   const daterRevisionId = daterRevisionRows?.[0]?.revision_id;
@@ -620,13 +652,14 @@ try {
     .eq('id', daterRevisionId)
     .single();
   check(
-    '6h. dater cuts an immutable, dater-edited revision with frozen transcript and voice path',
+    '6h. dater revision carries the transcript frozen at submit time, plus the voice path',
     !daterRevisionError &&
       typeof daterRevisionId === 'string' &&
       daterRequestRow?.revision_id === daterRevisionId &&
       daterRevisionRow?.revision_number === latestRevision.revision_number + 1 &&
       daterRevisionRow?.headline === daterHeadline &&
       daterRevisionRow?.body === daterBody &&
+      latestRevision.transcript?.text === daterTranscript.text &&
       daterRevisionRow?.transcript?.text === daterTranscript.text &&
       daterRevisionRow?.dater_edited === true &&
       typeof daterRevisionRow?.voice_asset_path === 'string',
@@ -950,7 +983,9 @@ try {
     );
     check(
       '10d. /p/[slug] renders the dater-approved body and the full transcript (CP-2)',
-      html.includes(daterBody) &&
+      html.includes(daterStructure.relationship_context) &&
+        html.includes(daterStructure.evidence_or_anecdote) &&
+        html.includes(daterStructure.good_match_for) &&
         html.includes('Read the full voice transcript') &&
         html.includes('E2E transcript: Blair is the friend who shows up.'),
       `status=${pageResponse.status}`,

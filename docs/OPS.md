@@ -593,9 +593,40 @@ GitHub Actions는 2026-07-25에 **분량 소진·과금 실패로 폐기**했다
 `scheduled-ops`는 워크스페이스 install이 필요해 실행당 ~3분이므로 **매일 1회**(≈90분/월),
 `safety-escalation`은 install 없이 무의존 스크립트만 돌려 1분 최소 과금으로 **매시간**
 (≈730분/월). 과거 실패의 원인이던 "무거운 잡을 매시간"(≈1,460분/월) 조합은 금지입니다.
-CI 워크플로(`ci.yml`)는 여전히 **disabled** 상태이며, push 전 로컬
+CI 워크플로(`ci.yml`)는 2026-09-08에 **빠른 PR 게이트**로 재설계했습니다 — `pull_request`와
+main push에서 단일 job으로 checkout → pnpm(`packageManager` 핀을 그대로 읽음) →
+Node `.nvmrc`(22) + pnpm store 캐시 → `pnpm install --frozen-lockfile` →
+`pnpm -r typecheck` → `pnpm lint` → `pnpm format:check` → `pnpm -r test` →
+`pnpm --filter @friendword/web test:audit3` → `pnpm --filter @friendword/web test:ui`.
+DB·브라우저가 필요 없는 검사만 남겼고, `concurrency`로 같은 브랜치의 이전 run을 취소합니다.
+DB/RLS 하니스와 web E2E는 `.github/workflows/optional-checks.yml`로 옮겨
+**`workflow_dispatch` 수동 실행**만 남겼습니다(마이그레이션·RLS·동의/발행 흐름을 건드린 뒤,
+그리고 릴리스 전에 돌립니다). 루트 `test:audit3`는 `scripts/test-db-audit3.sh`(로컬 Postgres)를
+함께 돌리므로 PR 게이트에서는 web 필터 버전만 씁니다.
+
+**이 워크플로는 아직 GitHub에서 `disabled_manually`입니다.** 머지 후
+`gh workflow enable CI`로 켜야 동작합니다. 켜기 전까지는 push 전 로컬
 게이트(`pnpm lint && pnpm typecheck && pnpm test && pnpm format:check` + DB 하니스)가
 회귀 검증의 본체입니다.
+
+**Vercel 배포 실패 알림** — Vercel의 실패한 배포는 워크플로 실패가 아니라서 소유자의
+"failed workflows only" 메일 채널(아래 안전 에스컬레이션 섹션과 같은 채널)에 잡히지
+않았습니다. `.github/workflows/deploy-status.yml`이 `deployment_status` 이벤트를 받아
+`state == 'failure'`일 때만 checkout·install 없이 배포 URL·로그 URL·설명을 찍고 exit 1
+합니다(1 빌링 분 미만). 이 워크플로도 머지 후 활성화가 필요합니다.
+
+**Vercel 프로젝트 중복(미해소)** — 레포에 연결된 Vercel 프로젝트가 `friendword-web`과
+`friendword-web-nmsi` **두 개**이고 push마다 둘 다 배포됩니다. 어느 쪽이 friendword.com을
+서빙하는지는 저장소만으로 확인할 수 없습니다. **소유자가 Vercel 대시보드에서 확인한 뒤
+중복 프로젝트를 삭제해야 합니다** — 그때까지 배포 실패 알림이 두 배로 오고, 어느 프로젝트의
+환경변수를 고쳐야 하는지도 모호합니다.
+
+**매직 링크 이메일 전달 점검 (2026-09-08, 미해소)** — 웹의 "Email me a sign-in link" 요청
+2건이 **200을 반환했지만 15분 내에 메일이 도착하지 않았습니다**. 같은 시각 앱의 OTP 코드
+메일과 알림 메일은 수 초 내에 도착했으므로 SMTP 전체 장애는 아닙니다. 소유자가 Supabase
+Auth 로그(magiclink 이벤트)와 Auth SMTP 설정·rate limit(특히 시간당 메일 상한과 magiclink
+템플릿)을 확인해야 합니다. 원인 확정 전까지 웹 매직 링크를 **유일한 로그인 경로로 안내하지
+마십시오**.
 
 pg_cron이 실행하는 순수 SQL pass 2종:
 

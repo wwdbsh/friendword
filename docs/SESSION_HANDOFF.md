@@ -1,6 +1,6 @@
 # PROJECT HANDOFF
 
-> 갱신: **2026-08-11 KST** (fcp Goal `render-launch-path` 종료 시점). 작업 규칙은 [`CLAUDE.md`](../CLAUDE.md)(매 세션 자동 로드), 결정 이력과 근거는 [`docs/DECISIONS.md`](DECISIONS.md)(50건, 각 항목에 날짜·이유·검토한 대안·영향). **이 문서는 "지금 어디에 서 있는가"만 다룹니다** — 왜 그렇게 결정했는지는 DECISIONS를 읽으십시오.
+> 갱신: **2026-09-08 KST** (fcp Goal `launch-readiness` 종료 시점). 작업 규칙은 [`CLAUDE.md`](../CLAUDE.md)(매 세션 자동 로드), 결정 이력과 근거는 [`docs/DECISIONS.md`](DECISIONS.md)(50건, 각 항목에 날짜·이유·검토한 대안·영향). **이 문서는 "지금 어디에 서 있는가"만 다룹니다** — 왜 그렇게 결정했는지는 DECISIONS를 읽으십시오.
 >
 > 이 문서는 **세션이 바뀌어도, 기계가 바뀌어도 살아남는 유일한 인계 수단**입니다. Claude의 `~/.claude` 메모리는 머신 로컬이라 따라오지 않습니다. 새 세션은 `CLAUDE.md` → 이 문서 → `DECISIONS.md` 최신 3건 순으로 읽으면 됩니다.
 
@@ -21,112 +21,52 @@
 
 ---
 
-## 1. 지금 상태 (2026-08-11 — fcp Goal `render-launch-path` 완료)
+## 1. 지금 상태 (2026-09-08 — fcp Goal `launch-readiness` 종료)
 
-> **Goal `render-launch-path`(Issue #1) 종료 (2026-08-11).** 목표였던 두 문장이 전부 실증됐습니다: **승인된 피치가 프로덕션에서 MP4가 되고**(T009 — 실캠페인 내보내기 요청→kick 체인 claim 1.2초→3분19초 완주→오디오 스트림 MD5 원본 동일·엔드카드 canonical), **베타 개방 직전 상태에 도달했습니다**(전 게이트 green, hosted 0056 정합, 런치 게이트 4종 off로 사용자 결정만 대기). 태스크별 증거는 Issue #2~#31과 병합 PR #12~#33, 판정 이력은 DECISIONS 2026-08-05~11 항목.
+> **Goal `launch-readiness`(Issue #69) 종료 (2026-09-08).** Claude가 실기기 없이 프로덕션 웹(Playwright 격리 프로필)·iOS 시뮬레이터(orca 좌표 탭 + CGEvent swipe)·hosted e2e 스크립트로 핵심 루프 전 구간을 자율 QA했고, 찾은 결함을 Task #70~#80·PR #81~#92로 수리·배포했다. 사용자는 승인 범위(Issue/PR/머지/db push 전권, sandbox 스위치는 드릴 중 임시)를 주고 자율 실행을 위임했다. 판정 이력은 `docs/DECISIONS.md` 2026-09-08 항목 8건, 결함 원장은 `docs/QA_FINDINGS_2026-09-08.md`.
 >
-> 핵심 도착점 요약:
+> 핵심 도착점:
 >
-> - **렌더 파이프라인 프로덕션 실증**: Performance 머신(2vCPU/4GB, Vercel Pro) 위에서 60s 워스트케이스 벤치 완주 — **자막 포함 renderMs 364s**(기준 480s, 여유 24%), peak 메모리 815MB~1.52GB(`proc-rss-sampled`, 기준 3.44GB), 4회 outputBytes 동일(결정론). cap=1 유지. 기회주의 kick 체인·invocation-지속 가정·과금 원자성(소비=성공 시점) 전부 실측 확정.
-> - **자막 크롬(T017, A안)**: 웹 플레이어·MP4 공용 — `captionChrome.ts` 순수 함수 하나를 웹은 CSS 키프레임으로, 캡처는 프레임별 평가로 소비(결정론이 seek 시그니처에 편입). 전 치수 컨테이너 단위(dvh 제거 — 어떤 임베드 크기에서도 비율 동일). scene·scene_hash 불변.
-> - **모바일 창작 플로우 실기기 검증(T015, TestFlight #9)**: 녹음 무결성 게이트(무음 테이크 거부), AI 초안 실생성(OpenAI), 에러 계측(클래스+프레임 화면 표시). EAS env는 빌드 프로필-환경 연결(eas.json `environment`)로만 주입됨 — **베이크 검증은 IPA 추출로**(대시보드 신뢰 금지, 2회 사고).
-> - **운영 수리 이력**: hosted SMTP(Resend 도메인 인증 — 이전엔 소유자 외 전 사용자 가입 불가), Auth Site URL·Redirect(nmsi→friendword.com — 오리진 세션 분열 방지), 이메일 템플릿 통일, OPENAI_API_KEY·REVENUECAT_WEBHOOK_AUTH_TOKEN Vercel 설정(사용자).
-> - **QA 데이터(hosted, 무해·보존)**: 캠페인 `sumin-n2g2ma`(allowlist 격리, 2026-08-18 자연 만료), QA 계정 wwdbsh+dater/+sim, 죽은 드래프트 3건(자기초대 등 — B1 백로그의 실증 사례). 삭제하지 않음 — 목록이 곧 기록.
-> - **백로그**: `docs/TASKS.md` 2026-08-11 절 — B1(초대 이메일 복구 경로), B2(scene v-next — 새 schemaVersion 필수), B3(계측 잔손질), B4('rest' 크래시 감시).
+> - **핵심 루프 프로덕션 실증**: 앱 6트랙 창작 → 동의 링크 → 웹 Dater 로그인(8자리 코드)·리뷰·승인·발행 → 공개 페이지(무가입) → 관심(프로필·AI 동의·실 moderation) → 알림 메일 실도착(관심 도착·수락·렌더 완료) → 인박스 수락 → 인트로 룸 양방향 채팅 → kit MP4 렌더·다운로드. 재QA 캠페인 `jordan-tbn8xp`(QA 계정, 9/15 만료).
+> - **High 결함 4건 수리·배포**: H-1 무음 전사 가드(#83·#84 — `/api/transcribe` 422 `insufficient_speech`, 무음 오브젝트 삭제, 앱은 같은 초안의 Track 4로 복귀), H-2 이메일 로컬파트 공개 차단(#81 + 0061 — `publicDisplayName`, 모바일 이름 확정 시트, 동의·관심 폼 프리필 제거), H-4 scene 길이=오디오 길이(#85 + 0062 — `transcript.durationMs`, ffprobe video 42.03s ≥ audio 40.54s 실측), H-5 Vercel 배포 8/12 이후 전부 실패(#82 — `pnpm@11.26.0` 핀).
+> - **Medium**: 로그인 시트 문구·Account 즉시 갱신·Live 카드 미디어 표시·결제 화면 SDK 원문 제거·에러 배너 스택 프레임 dev 전용(#86), PHPicker 권한 프롬프트 제거(#87), kit 없음/401 문구·동의 승인 규칙 문구·robots/sitemap·`/privacy` `/terms` `/support` 초안(#90).
+> - **하니스·CI**: e2e-production 68/68(앱의 structure 경로로 재작성), CI PR 게이트 활성(typecheck·lint·format·test·web audit3·ui, 약 2분), DB/e2e는 `optional-checks` 수동, `deploy-status`가 Vercel 실패를 실패 워크플로로 승격(#89).
+> - **결제**: 0060 드릴을 DB 계층 재생으로 실증(#91 — 창·등록·SANDBOX intent·지급·멱등·restore·환불·원복). HTTP 웹훅 단계는 로컬 `.env` 토큰이 프로덕션과 달라 401 — 실 스토어 왕복은 실기기 항목.
+> - **출시 키트**: `docs/APP_STORE_SUBMISSION.md`(#88, 6.9" 스크린샷 6장), `docs/LAUNCH_STRATEGY.md`(#92).
+>
+> hosted 상태: migration 0062까지 적용. 게이트 `public_beta_enabled=on`, `real_payments_enabled=off`, `sandbox_payments_enabled=off`, 등록부 0행. 라이브 캠페인은 QA용 `jordan-tbn8xp` 1건(9/15 만료 후 정리). 프로필 6개 중 미확정 1개(소유자 본인 계정으로 추정 — 앱 Account에서 이름 확정 필요).
 
-|             |                                                                                                                                                                                                                                                                                              |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 코드        | `858ccbe` on `main` (자막 크롬 — Goal 마지막 코드 병합)                                                                                                                                                                                                                                      |
-| hosted DB   | **0057까지 적용·정합** (`supabase migration list` 로컬=원격, 2026-08-11 push — 릴스 계측 allowlist. 실측: 익명 `reel_visit` 204·익명 `s1_intent_created` 401급 거부·미지 이벤트 거부). `0040`은 의도적 갭. **`0058`(이벤트 알림 outbox)은 브랜치에만 있고 hosted 미적용 — 사용자 push 대기** |
-| 런치 게이트 | **`public_beta_enabled=on` (2026-08-11 사용자 전환 — 공개 베타 개방)** · `real_payments_enabled=off` · `identity_enforcement=off` · `media_validation_enforcement=off` · `media_render_concurrency_cap=1`                                                                                    |
-| 전 게이트   | green (2026-08-12 T003 리뷰 반영 후 재실행, 브랜치 `fcp/40-event-email-v1`): DB 하니스 31파일 exit 0 · 패키지 743(contracts 293·mobile 268·data 136·domain 13·adapters 11·ui-tokens 22) · audit3 228 · ui 42 · render 98(+14 skip) · Playwright 80 · build·typecheck·lint·format ✓           |
-
-**green test ≠ 완료 증거입니다.** 이 리포에서 전 게이트 green인 채로 프로덕션이 깨져 있던 사고가 이 Goal에서만 3건 더 나왔습니다(폰트 local() 게이트, EAS env 미베이크 2회) — 전부 "하니스가 프로덕션보다 약함" 계열. 산출물(IPA·MP4·실응답)을 직접 검증하는 것이 규칙입니다.
-
-> **진행 중 (2026-08-11 착수 / 2026-08-12 독립 리뷰 반영, fcp Goal `#40` 계열):** T003 —
-> **이벤트 이메일 알림 v1**이 브랜치 `fcp/40-event-email-v1`에 있습니다. 관심 도착→Dater,
-> 수락·거절→발신자, 렌더 완료→요청자 **4종**이 `notification_outbox`(migration **0058**,
-> service-role 전용)에 적재되고 Next.js 발송 라우트가 Resend로 보냅니다.
->
-> 리뷰 반영으로 바뀐 운영 사실 5가지: ① `notification_email_enabled`는 **`off`로 시드**되며
-> 켜는 것이 OPS.md 활성화 체크리스트의 마지막 단계입니다(첫 발송 = 의도적 행위). ② 한 pass는
-> **4건/300초 lease**이고 pass가 자기 데드라인을 넘기면 남은 항목을 leased인 채로 두고 멈춥니다
-> (같은 사람에게 두 번 보내지 않기 위해 — 관계는 `timeBudget.ts` + 관계 테스트가 고정).
-> ③ 자기 kick 조건은 "배치 가득"이 아니라 **`sent > 0`**. ④ 실패 항목은 **`attempts × 5분`**
-> 백오프 뒤에만 재claim되고, 만료는 `expired_before_send`(무시도, 무알림)와
-> `expired_after_attempts`(시도 있었음, **알림**)로 갈립니다. ⑤ 인박스 거절 문구는
-> "Declined. Your reason and details are never shared with them." — 배달 여부를 단정하지
-> 않으므로 배포 전후 어느 날에도 참입니다.
->
-> **아직 hosted에 push되지 않았고, 시크릿이 없어 실발송은 한 번도 검증되지 않았습니다** —
-> 게이트는 전부 green이지만 이것은 "제어 흐름이 맞다"는 뜻이지 "메일이 도착한다"는 뜻이
-> 아닙니다(§6의 반복된 교훈). 켜는 절차와 시크릿 목록은 `docs/OPS.md` →
-> **이벤트 이메일 알림 → 활성화 체크리스트**, 설계 근거는 DECISIONS 2026-08-11 T003 항목과
-> 그 아래 2026-08-12 리뷰 반영 항목.
-
-> **진행 중 (2026-08-12 착수, fcp Goal `#44` 계열):** T007 — **회원 탈퇴: 모바일 진입 +
-> 데이터 소거 실증**이 브랜치 `fcp/44-account-deletion`에 있습니다. 모바일 홈에 `Account`
-> 진입점과 탈퇴 화면(2단 확인, 두 번째는 `DELETE` 타이핑)이 생겼고 웹과 **같은 RPC**
-> `request_account_deletion()`을 부릅니다 — App Store Guideline 5.1.1(v)의 9/30 출시
-> 블로커였습니다. **migration 0건.**
->
-> 이 태스크가 찾아 고친 실제 잔존 PII: 삭제 잡은 보존·이관되는 draft에서 `voice.m4a`
-> 하나만 지웠는데, 렌더러가 원본 오디오 스트림을 그대로 복사하므로
-> **`<draft>/renders/*.mp4`가 같은 녹음의 비트 동일 사본**으로 남아 있었습니다(kit 서명
-> URL로 다운로드 가능). 이제 렌더 산출물과 그 `media_render_jobs` 행까지 함께 지웁니다.
->
-> **hosted 합성 계정 왕복 1회로 소거를 실증했습니다**(신규 계정 → PII 적재 → 앱과 동일한
-> 인증 RPC로 탈퇴 → `run-scheduled-ops.mjs` 수동 1회 → 전 테이블 0행·auth 404·storage 0).
-> 실행 전후 hosted 총계가 동일해 오폭이 없음도 확인했습니다. 다만 **공유 캠페인·렌더가 있는
-> 경로는 하니스로만 증명**했고 실계정으로 재현하지 않았습니다(불가침 대상 보호).
->
-> **고위험 독립 리뷰 반영 완료(같은 브랜치, hosted 왕복 불필요 — 로컬 증명만):** 가장 큰 것은
-> **재시도 비수렴 blocker**였습니다. 잡의 범위 질의가 `pitch_drafts.created_by_user_id`로
-> 찾는데 소유권 이관 stage가 바로 그 컬럼을 덮어쓰므로, "이관 성공 → 목소리 소거 전 실패"가
-> 한 번 나면 녹음이 storage에 **영구히** 남고 이후 재시도는 전부 "할 일 없음"으로 성공을
-> 보고했습니다. **목소리 소거를 이관 앞으로** 옮겨 수정하고, 잡을 직접 부르는
-> `packages/data/src/accountErasureJob.test.ts`(주입 admin 스텁, 5건)를 신설해 **수정 전 red /
-> 수정 후 green을 실증**했습니다. 함께: stage 내부 순서(렌더잡 → 객체 → 사후 재나열 확인),
-> 탈퇴 문구의 transcript 보존 명시, 파싱 실패해도 로컬 blob을 비우는 소거,
-> 결과 미확정 실패 문구 + 재진입 시 `account_status` 판별, `pitch_render_unlocks`·share kit
-> 결제자 케이스 픽스처. 상세와 남은 위험은 DECISIONS 2026-08-12 T007 항목과 그 아래
-> 리뷰 반영 절, 삭제 후 잔존/소거 표는 `docs/PRIVACY_DATA_MAP.md`, 문의 대응과 재시도 성질은
-> `docs/OPS.md` → 데이터 삭제 요청.
+---
 
 ## 2. 사용자 결정 대기 (Advisor가 임의로 정하지 않음)
 
-1. **`public_beta_enabled`** — 켜는 즉시 S2 관심 전달이 활성화됩니다. **릴스 배포는 이 스위치 이후**(`CLAUDE.md` §16). 렌더·자막·퍼널이 전부 실증된 지금, 이것이 유일한 기술 외 관문입니다.
-2. **`real_payments_enabled` 시점** — 해커톤 Grand Prize shortlist가 RevenueCat 계측 제출-기간-내(~9/30) 매출로 결정되므로 베타 시점과 같은 축에서 판단(`HACKATHON_RULES.md`). 켜기 전 sandbox 결제 왕복 검증(OPS.md 게이트 드릴) 필요.
-3. **릴스 배포 시작** — 베타 스위치 이후. 첫 실사용자 캠페인 MP4부터 자막이 구워집니다(T017 완료로 조건 충족).
-4. **Ship Kit participant form** — 스폰서 퍽 해제용(자격 무관).
-5. `identity_enforcement`·`media_validation_enforcement` — 베타 운영 데이터를 보고 판단.
+`docs/LAUNCH_STRATEGY.md` §7 D1~D8이 권위다. 요약:
+
+1. **법적 페이지 확정**(D1) — `/privacy` `/terms` `/support`의 `[TO CONFIRM]`(지원 이메일·아동안전 연락처·관할·법인·보존 기간). ASC 제출 필수.
+2. **심사자 로그인**(D2) — Supabase test-OTP 주소 등록.
+3. **심사 기간 sandbox 창**(D3) — 제출~승인 동안 `sandbox_payments_enabled=on` + 심사 계정 등록, 승인 후 off.
+4. **`real_payments_enabled` 시점**(D4) — 권장 B(실기기 드릴 후).
+5. **실기기 5분 드릴**(D5) — sandbox 구매·restore·환불 + MP4 저장. `TestFlight` 새 빌드(T003 포함)가 먼저 나가야 한다.
+6. **중복 Vercel 프로젝트 삭제**(D6) — `friendword-web`(중복)·`friendword-web-nmsi`(프로덕션 추정). 매 push마다 두 번 빌드 중.
+7. **시드 Introducer 10명**(D7), **웹훅 토큰 정합**(D8).
+
+---
 
 ## 3. 다음에 할 일 (권장 순서)
 
-1. **[사용자] 0059 push + 합성 왕복 1회 (T010 / Issue #47 — 데이터 파괴 경로)** — `supabase/migrations/0059_pitch_draft_cleanup.sql`이 아직 hosted에 없습니다(`delete_my_pitch_draft`가 `PGRST202`로 실측 확인됨, 2026-08-12). 순서: `supabase db push --linked` → hosted에 함수·ACL 존재 확인 → **합성 계정 왕복 스크립트 1회**:
-
-   ```sh
-   node scripts/qa/hosted-pitch-draft-cleanup-proof.mjs
-   ```
-
-   스크립트는 자기가 만든 `59010000-0000-4000-8000-0000000000…` 접두 id(`SYNTHETIC_ID_PREFIX`)와 `t010-cleanup-*@friendword.invalid` 계정(`SYNTHETIC_EMAIL_LOCALPART_PREFIX`·`SYNTHETIC_EMAIL_DOMAIN`)만 건드립니다. 확인 항목: **P0** anon 키로 호출 시 함수 본문 이전에 권한 거부(로컬 하니스로는 증명 불가 — hosted 기본 권한이 anon에게 EXECUTE를 주므로), 보호 규칙 **P1**(캠페인 있는 pitch 거부)·**P2**(진행 중 잡 거부)·**P3**(타인 draft 거부)·**P6**(결제 크레딧 거부와 원장 제거 후 성공), **P4** happy path의 정확한 파괴 범위(저장소 객체는 sweep 몫으로 **남김**), **P5** 정리 후 합성 네임스페이스 잔존 0과 **실행 전 존재하던 모든 id의 id 단위 생존**(총계 비교가 아니라 — 라이브 프로젝트에서 실사용자 가입 한 건이 총계를 흔들고, 같은 크기의 맞교환은 총계로 잡히지 않습니다). 픽스처 생성 이후는 try/finally이므로 어느 단계가 던져도 합성 행·객체·계정을 정리하고, 정리하지 못한 항목은 삼키지 않고 이름으로 나열한 뒤 non-zero로 끝냅니다. **이 확인 전에는 "정리 삭제 완료"라고 주장하지 않습니다.** 불가침: QA 캠페인 `sumin-n2g2ma`, 만료 캠페인 `jordan-ba9m1u`(둘 다 `UNTOUCHABLE_CAMPAIGN_SLUGS`로 슬러그·id·status까지 대조), 실계정 죽은 draft 26건 — 스크립트는 이들을 **읽고 id 단위로 생존만 확인**하며 쓰지 않습니다.
-
-2. **[사용자] 0058 push + 알림 시크릿 설정 + 스위치 켜기 + 실발송 왕복 1회** — `docs/OPS.md` → 이벤트 이메일 알림 → **활성화 체크리스트**의 7단계를 순서대로. 핵심은 순서입니다: push → 시크릿 등록·재배포 → 스위치 **off인 채로** 라우트 200 확인 → 큐 내용 확인 → 메일함 열어 둔 채 `notification_email_enabled='on'` → 실계정 관심 표현 1건으로 메일 도착 육안 확인. 이 확인 전까지 "알림 완료"라고 주장하지 않습니다.
-3. **첫 실사용자 캠페인 1건을 밀착 관찰** — 창작→승인→publish→렌더(자막 포함 첫 실파일)→릴스 업로드까지. B1(초대 이메일 오입력)이 실사용자에게 터지면 백로그 우선순위 상향.
-4. **릴스 배포 개시** + `real_payments_enabled` 판단(sandbox 드릴 선행).
-5. 9/30 스토어 출시 마감 역산 유지(`HACKATHON_RULES.md`), App Store 제출물 준비 트랙 별도 기립.
-
-### 2026-09-08 상태 (전체 재작성은 T011 몫 — 여기는 델타만)
-
-- **hosted 마이그레이션**: 0058·0059·0060·0061·0062가 모두 hosted에 적용됐습니다. 위 1·2번 항목("0059/0058 push 대기")은 **완료**이며 다음 재작성에서 걷어냅니다.
-- **알림**: `notification_email_enabled`가 켜져 있고 실발송 왕복이 2026-09-08에 육안 확인됐습니다.
-- **QA 캠페인**: `sumin-n2g2ma`는 만료·아카이브됐습니다(더 이상 라이브 표면이 아님).
-- **배포**: pnpm 핀 불일치로 나던 Vercel 배포 실패는 #82에서 수정됐습니다.
-- **근거·후속**: 자세한 사유는 `docs/DECISIONS.md`의 2026-09-08 항목을, 남은 작업 목록은 Goal #69(Issues #70–#80)를 따릅니다.
+1. **[사용자] D1·D2·D3 확정 → `eas build --profile production` → TestFlight → 실기기 드릴(D5) → App Store 제출** (`docs/APP_STORE_SUBMISSION.md` 절차, 첫 제출 상한 9/12).
+2. **[사용자] 앱 Account에서 본인 표시 이름 확정** — 0061 이후 미확정 이름은 공개 표면에서 'A friend'로 나온다.
+3. **[Claude] 실기기 드릴 결과로 `docs/OPS.md` 드릴 기록의 HTTP 단계를 닫고, 러너북 §3 예시 SQL 컬럼명 정정.**
+4. **[사용자+Claude] 시드 캠페인 10개 → 릴스 20개 → 지표 주간 기록**(`LAUNCH_STRATEGY.md` §5·§6).
+5. **[Claude] 백로그(우선순위순)**: M-7/M-15 소개자 입력 이름과 Dater 확정 이름 불일치 안내, M-17 웹 매직링크 미도착 원인(Supabase Auth 로그), B1 초대 이메일 교체, 렌더 큐 정체 exit 2 실증, `sumin-n2g2ma`·`jordan-ba9m1u`·QA 캠페인 정리(9/15 이후), 옛 Goal #37의 T011·T012·T016 정리(T012 상품 문구 재설계는 첫 20캠페인 후).
 
 ### 미착수·보류 (범위 밖으로 명시적으로 남긴 것)
 
-- 백로그 B1~B4(`docs/TASKS.md` 2026-08-11 절), Phase 3b(클립 in scene·얼굴 블러 — 렌더는 v2 전용), Phase 5(비용 가드레일 확장·사람 검토 큐), Instagram Private Replies(Meta App Review), Play Install Referrer(android 디렉터리 부재), 모바일 내보내기 표면(웹 kit만).
+- 실 스토어 sandbox 구매 왕복(실기기), iOS Safari blob 다운로드 실기기 확인, App Store 제출 버튼.
+- scene v-next(B2), 얼굴 검증 벤더, 푸시 알림, 다국어(전사 가드는 영어 우선 — CJK 무공백 문장은 거짓 거부 가능).
+- 시뮬레이터 마이크는 무음이라 실제 음성 QA는 TTS m4a를 스토리지에 직접 올려 수행했다(`scratchpad` 절차는 `docs/QA_FINDINGS_2026-09-08.md` 참조).
+
+---
 
 ## 4. 새 기계 부트스트랩
 

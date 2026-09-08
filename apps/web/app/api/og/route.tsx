@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   DataLayerError,
   isCampaignPubliclyVisible,
+  publicDisplayName,
   type ServiceSupabaseClient,
 } from '@friendword/data';
 
@@ -95,7 +96,7 @@ async function loadCampaignOg(
 
   const { data: profiles, error: profilesError } = await client
     .from('profiles')
-    .select('user_id, display_name')
+    .select('user_id, display_name, display_name_confirmed')
     .in('user_id', [campaign.owner_user_id, draft.created_by_user_id]);
   if (profilesError !== null) throw new DataLayerError('campaignOg.profiles', profilesError);
 
@@ -123,12 +124,16 @@ async function loadCampaignOg(
     throw new DataLayerError('campaignOg.photoSigning', signingError);
   }
 
+  // T002 (Issue #71): the OG card is the most widely re-shared surface in the
+  // product — it is scraped into other people's timelines. An unconfirmed
+  // display name is the email local-part the bootstrap invented (0011), so it
+  // gets the same 'A friend' a missing profile row already gets.
   return {
     daterName:
-      profiles.find((profile) => profile.user_id === campaign.owner_user_id)?.display_name ??
+      publicDisplayName(profiles.find((profile) => profile.user_id === campaign.owner_user_id)) ??
       'A friend',
     introducerName:
-      profiles.find((profile) => profile.user_id === draft.created_by_user_id)?.display_name ??
+      publicDisplayName(profiles.find((profile) => profile.user_id === draft.created_by_user_id)) ??
       'A friend',
     photoUrl: signedPhoto.signedUrl,
   };

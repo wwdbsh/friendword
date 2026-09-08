@@ -3,6 +3,7 @@ export * from './auth';
 export * from './client';
 export * from './consentRepo';
 export * from './database.types';
+export * from './displayName';
 export * from './errors';
 export * from './interestIntentRepo';
 export * from './interestRepo';

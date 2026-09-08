@@ -3,7 +3,13 @@ import {
   ACCOUNT_DELETION_FACTS,
   accountDeletionConfirmationMatches,
 } from '@friendword/contracts';
-import { getSession, SafetyRepo, UnauthenticatedError } from '@friendword/data';
+import {
+  confirmDisplayName,
+  getDisplayNameStatus,
+  getSession,
+  SafetyRepo,
+  UnauthenticatedError,
+} from '@friendword/data';
 import { colors, fonts, fontSizes, radii, spacing, strokes } from '@friendword/ui-tokens';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -17,6 +23,7 @@ import {
   SignInPromptCard,
   TrustCard,
 } from '../../src/components';
+import { DisplayNameSheet } from '../../src/features/auth/DisplayNameSheet';
 import { SignInSheet } from '../../src/features/auth/SignInSheet';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
@@ -58,6 +65,13 @@ export const SIGN_OUT_FACTS: readonly string[] = [
   'The pitches saved on this phone stay where they are, ready for when you sign back in.',
   'The approval links you have already sent stop working on this device — sign back in to open them again.',
 ];
+
+/**
+ * Says what is unknown and what is untouched. It deliberately does not claim
+ * the name is unset — the read failed, so this device does not know.
+ */
+export const DISPLAY_NAME_UNREADABLE_MESSAGE =
+  'We could not read the name on your pitches. Nothing changed — check your connection and try again.';
 
 export const SIGN_OUT_UNCONFIGURED_MESSAGE =
   'This build is not connected to Friendword, so there is no session to end.';
@@ -103,6 +117,30 @@ export async function endSession(client: SignOutClient | null): Promise<SignOutO
 export type AccountDeletionStep = 'idle' | 'confirming' | 'deleting' | 'deleted';
 
 /**
+ * The name other people see, and whether its owner ever agreed to it.
+ *
+ * T002 (Issue #71): `handle_new_auth_user` (0011) seeds `display_name` from the
+ * email local-part with `display_name_confirmed = false`. Until it is
+ * confirmed, no public surface prints it — so this screen must not present it
+ * as "your name" either. It says the name is not set yet, and shows the
+ * placeholder as what it is.
+ */
+export type AccountDisplayName = {
+  readonly name: string;
+  readonly confirmed: boolean;
+};
+
+/**
+ * `failed` exists because a profile read that never comes back used to leave
+ * "Checking the name on your pitches…" on the screen forever, which reads as
+ * "we are still working" rather than "ask again".
+ */
+export type AccountDisplayNameState =
+  | { readonly status: 'loading' }
+  | { readonly status: 'failed' }
+  | { readonly status: 'ready'; readonly value: AccountDisplayName };
+
+/**
  * `closed` is the re-entry case: the server says this account is already
  * `deleted`, whatever this app previously believed about the request.
  */
@@ -128,6 +166,9 @@ type AccountContentProps = {
   readonly typed: string;
   readonly errorMessage: string | null;
   readonly localClosure: LocalClosureOutcome;
+  readonly displayName: AccountDisplayNameState;
+  readonly onEditDisplayName: () => void;
+  readonly onRetryDisplayName: () => void;
   readonly onSignIn: () => void;
   readonly onSignOut: () => void;
   readonly onStartConfirmation: () => void;
@@ -145,6 +186,9 @@ export function AccountContent({
   typed,
   errorMessage,
   localClosure,
+  displayName,
+  onEditDisplayName,
+  onRetryDisplayName,
   onSignIn,
   onSignOut,
   onStartConfirmation,
@@ -199,6 +243,48 @@ export function AccountContent({
           almost everyone who opens this screen actually wants. Hidden once the
           deletion confirmation is armed, so the screen never offers two
           competing account actions at the same time. */}
+      {/* T002 (Issue #71): the one place to set or change the name that goes on
+          a pitch. Before this existed, the mobile introducer had no way to
+          choose it at all — the account was created with a fragment of their
+          email address in that field. */}
+      {step === 'idle' && (
+        <TrustCard>
+          <Text style={styles.cardTitle}>Your name</Text>
+          {displayName.status === 'loading' ? (
+            <Text style={styles.message}>Checking the name on your pitches…</Text>
+          ) : displayName.status === 'failed' ? (
+            <>
+              <Text style={styles.message}>{DISPLAY_NAME_UNREADABLE_MESSAGE}</Text>
+              <HypeButton
+                label="Check again"
+                onPress={onRetryDisplayName}
+                secondary
+                variant="trust"
+              />
+            </>
+          ) : displayName.value.confirmed ? (
+            <>
+              <Text style={styles.message}>
+                Your friends and their pages see you as {displayName.value.name}.
+              </Text>
+              <HypeButton
+                label="Change my name"
+                onPress={onEditDisplayName}
+                secondary
+                variant="trust"
+              />
+            </>
+          ) : (
+            <>
+              <Text style={styles.message}>
+                You have not chosen a name yet, so your pitches say “a friend” instead. Pick the
+                name you want your friend — and anyone they share their page with — to read.
+              </Text>
+              <HypeButton label="Set my name" onPress={onEditDisplayName} variant="trust" />
+            </>
+          )}
+        </TrustCard>
+      )}
       {step === 'idle' && (
         <TrustCard>
           <Text style={styles.cardTitle}>Sign out</Text>
@@ -292,6 +378,10 @@ export default function AccountScreen() {
   const [signInVisible, setSignInVisible] = useState(false);
   const [signOutStep, setSignOutStep] = useState<AccountSignOutStep>('idle');
   const [signOutError, setSignOutError] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState<AccountDisplayNameState>({ status: 'loading' });
+  const [nameSheetVisible, setNameSheetVisible] = useState(false);
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
 
   /**
    * Clears this device and ends the session, and reports whether both finished.
@@ -338,6 +428,19 @@ export default function AccountScreen() {
         setSession(next);
         if (next === 'closed') {
           await closeLocally();
+          return;
+        }
+        if (next === 'signed_in') {
+          const status = await getDisplayNameStatus(client).catch(() => null);
+          if (!active) return;
+          setDisplayName(
+            status === null
+              ? { status: 'failed' }
+              : {
+                  status: 'ready',
+                  value: { name: status.displayName, confirmed: status.confirmed },
+                },
+          );
         }
       })
       .catch(() => {
@@ -400,6 +503,32 @@ export default function AccountScreen() {
     setStep('deleted');
   }
 
+  /**
+   * Writes the chosen name and then RE-READS it. The screen shows what the
+   * server says, never what this device just tried to set.
+   */
+  async function saveDisplayName(name: string): Promise<void> {
+    if (client === null) {
+      setNameError(SIGN_OUT_UNCONFIGURED_MESSAGE);
+      return;
+    }
+    setNameSaving(true);
+    setNameError(null);
+    try {
+      await confirmDisplayName(client, name);
+      const status = await getDisplayNameStatus(client);
+      setDisplayName({
+        status: 'ready',
+        value: { name: status.displayName, confirmed: status.confirmed },
+      });
+      setNameSheetVisible(false);
+    } catch {
+      setNameError('We could not save that name. Check your connection and try again.');
+    } finally {
+      setNameSaving(false);
+    }
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -412,6 +541,15 @@ export default function AccountScreen() {
           typed={typed}
           errorMessage={errorMessage}
           localClosure={localClosure}
+          displayName={displayName}
+          onRetryDisplayName={() => {
+            setDisplayName({ status: 'loading' });
+            readSession();
+          }}
+          onEditDisplayName={() => {
+            setNameError(null);
+            setNameSheetVisible(true);
+          }}
           onSignIn={() => setSignInVisible(true)}
           onSignOut={() => {
             void signOut();
@@ -436,6 +574,19 @@ export default function AccountScreen() {
         visible={signInVisible}
         onClose={() => setSignInVisible(false)}
         onSignedIn={() => setSignInVisible(false)}
+      />
+      <DisplayNameSheet
+        visible={nameSheetVisible}
+        busy={nameSaving}
+        confirmLabel="Save my name"
+        errorMessage={nameError}
+        onClose={() => {
+          setNameError(null);
+          setNameSheetVisible(false);
+        }}
+        onConfirm={(name) => {
+          void saveDisplayName(name);
+        }}
       />
     </SafeAreaView>
   );

@@ -234,7 +234,10 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
       if (cancelled) {
         return;
       }
-      setDisplayName(nameStatus.displayName);
+      // T002 (Issue #71): same rule as the consent page — an unconfirmed name
+      // is the email local-part from the bootstrap (0011), so the field asks
+      // rather than proposing it. Only a confirmed name is prefilled.
+      setDisplayName(nameStatus.confirmed ? nameStatus.displayName : '');
       setDisplayNameConfirmed(nameStatus.confirmed);
 
       const revision = await getAiDisclosureRevision(client);
@@ -802,7 +805,8 @@ export function InterestFlow({ campaignId, campaignSlug, daterName }: InterestFl
                       onChange={(event) => setDisplayName(event.target.value)}
                     />
                     <p className={styles.muted}>
-                      Confirm how your name should appear before sending your profile.
+                      This is the name {daterName} sees with your profile. Pick whatever you want
+                      them to read.
                     </p>
                   </>
                 )}

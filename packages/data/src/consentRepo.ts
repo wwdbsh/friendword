@@ -94,7 +94,13 @@ const publishPreferencesSchema = z
   .strict();
 
 export type ConsentPreview = {
-  readonly introducerDisplayName: string;
+  /**
+   * `null` when the introducer has not confirmed their display name: 0061
+   * withholds it rather than printing the email local-part the bootstrap
+   * invented. The consent page has a no-name variant of every line that used
+   * to interpolate it.
+   */
+  readonly introducerDisplayName: string | null;
   readonly relationshipType: RelationshipType | null;
   readonly relationshipDuration: RelationshipDuration | null;
   readonly requestStatus: string;
@@ -280,7 +286,7 @@ export function isTranscriptionEditableStatus(status: string): boolean {
 
 const previewRowSchema = z.array(
   z.object({
-    introducer_display_name: z.string(),
+    introducer_display_name: z.string().nullable(),
     relationship_type: z.string().nullable(),
     relationship_duration: z.string().nullable(),
     request_status: z.string(),

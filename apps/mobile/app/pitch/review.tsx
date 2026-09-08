@@ -5,7 +5,12 @@ import { ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fonts, fontSizes, spacing } from '@friendword/ui-tokens';
 
+import { DisplayNameSheet } from '../../src/features/auth/DisplayNameSheet';
 import { SignInSheet } from '../../src/features/auth/SignInSheet';
+import {
+  confirmAndRecheckDisplayName,
+  readDisplayNameGate,
+} from '../../src/features/auth/displayNameConfirmation';
 import {
   AiConsentDisclosure,
   type AiConsentUiState,
@@ -22,6 +27,7 @@ import {
 } from '../../src/features/pitch/preparePitchReview';
 import { HypeButton, QuietNavAction, TrustCard } from '../../src/components';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
+import { getSupabaseClient } from '../../src/services/supabaseClient';
 import {
   isUnconfirmedSubmission,
   unconfirmedDraftMessage,
@@ -32,6 +38,10 @@ import {
   NeedsSignInError,
 } from '../../src/services/pitchDraftsSupabase';
 import type { PitchClip, PitchDraft, PitchReview } from '../../src/services/types';
+
+/** Shown when the name sheet is dismissed instead of answered — the pitch did not go. */
+export const NAME_REQUIRED_TO_SEND_MESSAGE =
+  'Your pitch was not sent. Your friend sees your name on it, so pick one first — you can also set it on your account screen.';
 
 /** Stable identity, so a draft-less render does not restart the ingest poll. */
 const EMPTY_CLIPS: readonly PitchClip[] = [];
@@ -46,6 +56,9 @@ export default function PitchReviewScreen() {
   const [preparing, setPreparing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [signInVisible, setSignInVisible] = useState(false);
+  const [nameSheetVisible, setNameSheetVisible] = useState(false);
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [aiConsentState, setAiConsentState] = useState<AiConsentUiState>('checking');
   const [needsAiReview, setNeedsAiReview] = useState(false);
@@ -150,6 +163,17 @@ export default function PitchReviewScreen() {
     finalizeInFlight.current = true;
     setBusy(true);
     try {
+      // T002 (Issue #71): the introducer's name is printed on the pitch and on
+      // the page it becomes, and `handle_new_auth_user` (0011) filled that
+      // field with their email local-part. Ask BEFORE anything is sent, so the
+      // dater never receives an invite from "sanghyun.lee92". `unavailable`
+      // (no session, no server, failed read) proceeds: the public surfaces
+      // withhold an unconfirmed name on their own.
+      if ((await readDisplayNameGate(getSupabaseClient())) === 'needs_confirmation') {
+        setNameError(null);
+        setNameSheetVisible(true);
+        return;
+      }
       await pitchDraftService.saveReview(draft.id, review);
       const wasChangesRequested = draft.status === 'changes_requested';
       const finalized = await pitchDraftService.finalizeConsent(draft.id);
@@ -184,6 +208,30 @@ export default function PitchReviewScreen() {
     } finally {
       finalizeInFlight.current = false;
       setBusy(false);
+    }
+  };
+
+  /**
+   * Saves the name, re-reads the server's answer, and only then resumes the
+   * submit. `finalize` is re-entered from the top, so the draft state and the
+   * unconfirmed-submission block are re-checked rather than assumed.
+   */
+  const confirmNameThenFinalize = async (name: string): Promise<void> => {
+    setNameSaving(true);
+    setNameError(null);
+    try {
+      const gate = await confirmAndRecheckDisplayName(getSupabaseClient(), name);
+      if (gate === 'needs_confirmation') {
+        setNameError('That name was not saved. Try again.');
+        return;
+      }
+      setNameSheetVisible(false);
+      setErrorMessage(null);
+      await finalize();
+    } catch {
+      setNameError('We could not save that name. Check your connection and try again.');
+    } finally {
+      setNameSaving(false);
     }
   };
 
@@ -371,6 +419,22 @@ export default function PitchReviewScreen() {
         onSignedIn={() => {
           setSignInVisible(false);
           void finalize();
+        }}
+      />
+      <DisplayNameSheet
+        visible={nameSheetVisible}
+        busy={nameSaving}
+        errorMessage={nameError}
+        onClose={() => {
+          setNameError(null);
+          setNameSheetVisible(false);
+          // Dismissing the sheet cancels the submit. Saying so is the whole
+          // point: the previous screen looks identical either way, and a
+          // pitch silently not sent is the worst outcome here.
+          setErrorMessage(NAME_REQUIRED_TO_SEND_MESSAGE);
+        }}
+        onConfirm={(name) => {
+          void confirmNameThenFinalize(name);
         }}
       />
     </>

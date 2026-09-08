@@ -118,6 +118,7 @@ vi.mock('../../components', async () => {
   };
 });
 vi.mock('../../features/auth/SignInSheet', () => ({ SignInSheet: () => null }));
+vi.mock('../../features/auth/DisplayNameSheet', () => ({ DisplayNameSheet: () => null }));
 vi.mock('../../services/draftServiceInstance', () => ({ pitchDraftService: {} }));
 vi.mock('../../services/supabaseClient', () => ({ getSupabaseClient: () => null }));
 
@@ -145,6 +146,9 @@ function render(overrides: Partial<Parameters<typeof AccountContent>[0]> = {}): 
       typed=""
       errorMessage={null}
       localClosure="pending"
+      displayName={{ status: 'ready', value: { name: 'Drew', confirmed: true } }}
+      onEditDisplayName={noop}
+      onRetryDisplayName={noop}
       onSignIn={noop}
       onSignOut={noop}
       onStartConfirmation={noop}

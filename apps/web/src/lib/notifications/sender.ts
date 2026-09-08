@@ -3,6 +3,7 @@ import 'server-only';
 import {
   claimNotifications,
   completeNotification,
+  publicDisplayName,
   type ClaimedNotification,
   type ServiceSupabaseClient,
 } from '@friendword/data';
@@ -69,13 +70,17 @@ async function resolveRecipientName(
 ): Promise<string | null> {
   const { data, error } = await client
     .from('profiles')
-    .select('display_name')
+    .select('display_name, display_name_confirmed')
     .eq('user_id', userId)
     .maybeSingle();
   if (error !== null || data === null) {
     return null;
   }
-  return data.display_name;
+  // T002 (Issue #71): an unconfirmed name is the email local-part the bootstrap
+  // invented (0011). Greeting somebody by a fragment of their own email address
+  // in an email is both wrong and a small disclosure, so the templates fall
+  // back to their nameless greeting — `greeting()` already renders "Hi," here.
+  return publicDisplayName(data);
 }
 
 async function deliverOne(

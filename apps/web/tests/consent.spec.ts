@@ -1077,17 +1077,22 @@ test('requires the dater to reload when approval targets a stale revision', asyn
   await expect(page.getByRole('button', { name: 'Reload the latest version' })).toBeVisible();
 });
 
-test('confirms a fallback display name before the review step', async ({ page }) => {
-  await mockClaimedReview(page, { displayName: 'dater', confirmed: false });
+// T002 (Issue #71). The stored value at this point is the email local-part
+// `handle_new_auth_user` (0011) invented. Prefilling it turns the question into
+// a default — and the default is what gets printed on this dater's public page,
+// so the field starts EMPTY and the dater types their own name.
+test('asks for a display name without proposing the email-derived one', async ({ page }) => {
+  await mockClaimedReview(page, { displayName: 'blair.kim92', confirmed: false });
 
   await page.goto(`/consent/${CONSENT_TOKEN}`);
 
-  await test.step('Then the fallback name asks for explicit approval', async () => {
+  await test.step('Then the field is empty rather than prefilled', async () => {
     await expect(page.getByRole('heading', { name: 'What should we call you?' })).toBeVisible();
-    await expect(page.getByLabel('Your name')).toHaveValue('dater');
+    await expect(page.getByLabel('Your name')).toHaveValue('');
+    await expect(page.getByText('blair.kim92')).toHaveCount(0);
   });
 
-  await test.step('When the dater fixes their name, the review begins', async () => {
+  await test.step('When the dater types their name, the review begins', async () => {
     await page.getByLabel('Your name').fill('Blair');
     await page.getByRole('button', { name: 'Save & review the pitch' }).click();
     await expect(

@@ -9,6 +9,12 @@ export default {
       'server-only': new URL('./tests-audit3/serverOnlyShim.ts', import.meta.url).pathname,
     },
   },
+  // The image routes (/api/og, /api/kit-image) are .tsx and build their card
+  // with JSX. The repo tsconfig leaves `jsx: preserve` for Next, which esbuild
+  // falls back to the classic runtime for — and there is no `React` global in
+  // this node env. The automatic runtime is what Next itself compiles these
+  // routes with.
+  esbuild: { jsx: 'automatic' as const },
   test: {
     environment: 'node',
     globals: true,

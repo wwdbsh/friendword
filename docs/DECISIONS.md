@@ -696,3 +696,11 @@
 - **영향**: 문서만. hosted는 0062까지, 게이트는 beta on·real off·sandbox off. QA 잔여 데이터: 캠페인 `jordan-tbn8xp`(9/15 만료), 보관된 `jordan-5k4udr`·`jordan-7slicc`·`jordan-ba9m1u`, QA 계정 3개(소유자 별칭), SANDBOX 라벨 entitlement 1행.
 - **과정 기록**: 두 번(T002·T003 초기) 컨트롤러의 review 전이보다 머지를 먼저 해 원장을 수동 정합했다 — 이후 태스크는 review→ready→머지 순서를 지켰다. 에이전트 생성이 tmux fork 실패로 막힌 뒤(T008부터) 드릴·문서는 오케스트레이터가 직접 수행했다. 시뮬레이터 Fast Refresh가 QA 중 두 차례 '빈 화면·위저드 초기화'로 오인됐다 — 에이전트 편집과 시뮬레이터 QA는 같은 워킹 트리에서 동시에 하지 않는다(별도 worktree에서 Metro 서빙).
 - **남은 위험**: 실 스토어 결제 미검증(D4/D5), 법적 페이지 초안 상태(D1), 심사자 로그인·sandbox 창(D2/D3), 구버전 앱 번들의 sceneless 폴백(T009 빌드 선행), 전사 가드의 비영어 거짓 거부, 웹 매직링크 미도착 원인 미확인.
+
+## 2026-09-08: 성장 전략은 "이미 유행하는 틱톡 포맷의 제품화"로 포지셔닝하고, Most Viral·Growth Loop·#BuildInPublic·HAMM에 분산 응모한다 (GROWTH_PLAYBOOK)
+
+- **결정**: `docs/GROWTH_PLAYBOOK_2026-09.md`를 채택한다. 포지셔닝은 "댓글창 대신 친구가 통제하는 수신함"(틱톡 커뮤니티 매치메이킹 영상의 다음 버전), 콘텐츠는 반복 가능한 5포맷(F1 리액션·F2 drop-your-info 업그레이드·F3 방식 투표·F4 #SayItForThem·F5 빌드인퍼블릭), 시딩은 밀도 우선(소유자 네트워크 10 → Dater→Introducer 전환 10 + Noise 크리에이터), CTA는 "Comment FRIEND" DM 자동응답, 수상은 Most Viral(Noise, 1순위)·Growth Loop(Layers)·#BuildInPublic·HAMM 분산. Grand Prize는 매출 창(결제 활성 시점)에 좌우되므로 서사·수치만 준비한다.
+- **이유**: Shipaton 규칙 원문(매출 총액 shortlist + "post-release growth" 심사), 2025 수상작의 실제 수치, Censuswide 등 외부 조사("친구 추천 신뢰 64%"), 셋로그·Cerca·Ship·Wingman 사례가 모두 "친구의 보증 + 동의 + 작은 밀도"를 가리킨다. 우리 제품의 공유 객체(무료 MP4 + 엔드카드 + ?src/?ref 귀속)가 이미 루프 계측을 갖춘다.
+- **검토 대안**: 유료 광고·인플루언서 지급(비용 상한·미검증 CAC로 기각), 여러 캠페인 동시 운영(DB가 소유자당 1개 강제), 웹 결제 퍼널(Stripe, 범위 밖), 한국어 시장 즉시 공략(전사 영어 고정 — 소규모 개발 후 결정 항목으로 남김).
+- **영향**: 문서만. 가이드라인 준수를 마케팅 규칙으로 명문화(사람에 대한 투표·외모 점수·딥페이크·안전 보장 금지). 사용자 결정은 LAUNCH_STRATEGY D1~D8 유지 + 한국어 전사 개방 여부 추가.
+- **남은 위험**: 모든 전환율은 가설(첫 20캠페인 후 갱신). 외부 통계는 2차 출처 인용치(원문 확인 전 제출문에 수치로 쓰지 않는다). Noise·Layers 자격 요건(계정·SDK)은 소유자 행동이 선행.

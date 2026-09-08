@@ -1,5 +1,7 @@
 # 출시·매출 전략 — 2026-09-08 (T010 / Issue #79)
 
+> 성장·바이럴 전략의 상세(수상 카테고리 대조, 시장 신호, 콘텐츠 포맷 5종, 시딩, 채널·CTA, 22일 액션 플랜)는 [`GROWTH_PLAYBOOK_2026-09.md`](GROWTH_PLAYBOOK_2026-09.md)가 권위다. 이 문서는 결정 항목 D1~D8과 결제 시점만 유지한다.
+
 > 근거는 저장소 문서만 사용했다(`HACKATHON_RULES.md`, `REVENUECAT_SETUP.md`, `COST_MODEL.md`, `GROWTH_EVIDENCE.md`, `ANALYTICS_PLAN.md`, `PRODUCT.md`, `OPS.md`, `APP_STORE_SUBMISSION.md`). **시장 수치·경쟁사 수치는 인용하지 않는다.** 가설은 가설로 표기한다. 사용자 결정이 필요한 항목은 §7에 모았다.
 
 ## 1. 지금 서 있는 자리 (사실)

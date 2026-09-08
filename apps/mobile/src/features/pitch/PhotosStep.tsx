@@ -6,6 +6,7 @@ import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { HypeButton, StickerCard } from '../../components';
 import { clipIngestLabel } from '../../services/clipIngest';
 import { getClipMaxBytes } from '../../services/clipUploadLimits';
+import { ensureVisualLibraryReadAccess } from '../../services/mediaLibraryAccess';
 import {
   remainingVisualSelection,
   selectPickedVisuals,
@@ -47,8 +48,8 @@ export function PhotosStep({
 
   const pickVisuals = async (): Promise<void> => {
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
+      const access = await ensureVisualLibraryReadAccess();
+      if (!access.granted) {
         setErrorMessage('Photo access is needed to suggest photos and videos for your friend.');
         return;
       }

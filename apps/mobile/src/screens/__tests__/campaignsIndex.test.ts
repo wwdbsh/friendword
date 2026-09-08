@@ -74,6 +74,7 @@ import { PitchDraftSchema } from '../../services/types';
 import {
   canDeleteDraft,
   canGetCampaignPass,
+  formatDraftMedia,
   countWaitingInterests,
   formatWaitingInterests,
   getCampaignName,
@@ -360,5 +361,137 @@ describe('the way back into an unsent pitch', () => {
     expect(
       introducerDraftAction(PitchDraftSchema.parse({ ...baseDraft, status: 'consent_pending' })),
     ).toBeNull();
+  });
+});
+
+// M-8 (T004, Issue #73). A live pitch with two photos and a 54-second take
+// described itself as "0 photos · No voice track": the counts are read off the
+// LOCAL draft, and a draft recovered from the account has no local media at all.
+describe('the media line under a pitch card', () => {
+  const BASE = {
+    contextRole: 'INTRODUCER' as const,
+    relationship: null,
+    photos: [],
+    recording: null,
+    review: {
+      headline: 'Sumin',
+      body: '',
+      structure: {
+        hook: '',
+        relationship_context: '',
+        three_specific_qualities: ['', '', ''],
+        evidence_or_anecdote: '',
+        good_match_for: '',
+        hard_claims_requiring_confirmation: [],
+      },
+      generationMode: 'manual' as const,
+      responseNote: null,
+    },
+    createdAt: '2026-09-08T00:00:00.000Z',
+    updatedAt: '2026-09-08T00:00:00.000Z',
+  };
+  const SERVER_ID = '10000000-0000-4000-8000-000000000001';
+
+  function draft(overrides: Record<string, unknown>) {
+    return PitchDraftSchema.parse({ id: SERVER_ID, status: 'published', ...BASE, ...overrides });
+  }
+
+  it('never prints a zero for media this device simply cannot see', () => {
+    const recovered = draft({
+      server: {
+        draftId: SERVER_ID,
+        consentRequestId: null,
+        consentToken: null,
+        mediaUploaded: true,
+      },
+    });
+
+    const line = formatDraftMedia(recovered);
+
+    expect(line).not.toContain('0 photo');
+    expect(line).not.toContain('No voice track');
+    expect(line).toContain('Friendword');
+  });
+
+  // The "Dahee — Live" card: the photo records survived on this device, the take
+  // was discarded locally after it was uploaded. A pitch cannot reach a live
+  // status without a voice track, so "No voice track" was a claim about the
+  // pitch that the server flatly contradicts.
+  it('never says a submitted pitch has no voice track', () => {
+    const live = draft({
+      photos: [
+        { uri: 'file://a.jpg', width: 10, height: 10 },
+        { uri: 'file://b.jpg', width: 10, height: 10 },
+      ],
+      recording: null,
+      server: {
+        draftId: '30000000-0000-4000-8000-000000000003',
+        consentRequestId: null,
+        consentToken: null,
+        mediaUploaded: true,
+      },
+    });
+
+    const line = formatDraftMedia(live);
+
+    expect(line).toBe('2 photos · voice saved on Friendword');
+    expect(line).not.toContain('No voice track');
+  });
+
+  it('says the same for every status past the composer, not just published', () => {
+    for (const status of ['consent_pending', 'approved', 'paused', 'expired', 'archived']) {
+      const submitted = draft({
+        status,
+        photos: [{ uri: 'file://a.jpg', width: 10, height: 10 }],
+        recording: null,
+        server: {
+          draftId: '30000000-0000-4000-8000-000000000003',
+          consentRequestId: null,
+          consentToken: null,
+          mediaUploaded: true,
+        },
+      });
+
+      expect(formatDraftMedia(submitted)).toBe('1 photo · voice saved on Friendword');
+    }
+  });
+
+  // Still in the composer: this device IS the pitch, so its records are the
+  // truth and the missing take is the thing the introducer has to go fix.
+  it('keeps the local truth while the pitch is still being composed', () => {
+    const composing = draft({
+      id: 'local-3',
+      status: 'changes_requested',
+      photos: [{ uri: 'file://a.jpg', width: 10, height: 10 }],
+      recording: null,
+      server: {
+        draftId: '30000000-0000-4000-8000-000000000003',
+        consentRequestId: null,
+        consentToken: null,
+        mediaUploaded: false,
+      },
+    });
+
+    expect(formatDraftMedia(composing)).toBe('1 photo · No voice track');
+  });
+
+  it('still counts the media a locally held draft actually has', () => {
+    const local = draft({
+      id: 'local-1',
+      status: 'draft',
+      photos: [{ uri: 'file://a.jpg', width: 10, height: 10 }],
+      recording: { uri: 'file://a.m4a', durationMillis: 54_000, caption: '' },
+      server: null,
+    });
+
+    expect(formatDraftMedia(local)).toBe('1 photo · 54 sec voice track');
+  });
+
+  // An empty pitch that never reached the server has genuinely nothing on it,
+  // and saying so is the truth that gets the introducer back to recording.
+  it('keeps the honest zero for a pitch that has nothing yet', () => {
+    expect(formatDraftMedia(draft({ id: 'local-2', status: 'draft', server: null }))).toBe(
+      '0 photos · No voice track',
+    );
   });
 });

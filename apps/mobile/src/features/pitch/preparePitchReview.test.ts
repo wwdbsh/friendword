@@ -410,7 +410,7 @@ describe('preparePitchReview', () => {
     );
   });
 
-  it('carries the error class and frame for an unrecognised failure', () => {
+  it('carries the error class and frame for an unrecognised failure on a dev build', () => {
     // T015 defect 2: the device-only "rest" crash reaches this branch and a
     // released build shows nothing but the message, which does not say whether
     // the throw came from app code or from a library call.
@@ -418,10 +418,32 @@ describe('preparePitchReview', () => {
     error.stack =
       "TypeError: undefined is not an object (evaluating 'e.rest')\n    at from (http://10.0.0.2:8081/index.bundle?platform=ios&dev=true:98765:12)";
 
-    const message = getAiDraftFailureMessage(error);
+    const scope = globalThis as { __DEV__?: unknown };
+    scope.__DEV__ = true;
+    const message = (() => {
+      try {
+        return getAiDraftFailureMessage(error);
+      } finally {
+        delete scope.__DEV__;
+      }
+    })();
 
     expect(message).toContain("evaluating 'e.rest'");
     expect(message).toContain('TypeError');
     expect(message).toContain('from@index.bundle:98765:12');
+  });
+
+  // M-11 (T004, Issue #73): a released build shows the sentence only. The
+  // banner an introducer reads after a failed AI draft is product copy, not a
+  // crash report.
+  it('shows an unrecognised failure without its class or frames on a release build', () => {
+    const error = new TypeError("undefined is not an object (evaluating 'e.rest')");
+    error.stack =
+      "TypeError: undefined is not an object (evaluating 'e.rest')\n    at from (http://10.0.0.2:8081/index.bundle?platform=ios&dev=true:98765:12)";
+
+    const message = getAiDraftFailureMessage(error);
+
+    expect(message).toBe("undefined is not an object (evaluating 'e.rest')");
+    expect(message).not.toContain('index.bundle');
   });
 });

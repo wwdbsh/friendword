@@ -24,8 +24,57 @@ import {
 import { createAuthGateway } from '../../services/authSession';
 import { getSupabaseClient } from '../../services/supabaseClient';
 
+/**
+ * Why this sheet was opened, which is the only thing that makes its copy true.
+ *
+ * M-1 (T004, Issue #73): the sheet was written for one caller — the submit step
+ * — and then reused by four more. Opened from Account it still said "Sign in to
+ * send it", promised "your pitch stays private until your friend approves it",
+ * and offered "Verify and send pitch" to somebody who was trying to change
+ * their name. The copy is not decoration: the button names the act it performs,
+ * and naming the wrong one is how a person learns not to read the buttons.
+ */
+export type SignInPurpose = 'send-pitch' | 'account' | 'generic';
+
+type SignInCopy = {
+  readonly badge: string;
+  readonly title: string;
+  readonly subtitle: string;
+  readonly confirmLabel: string;
+};
+
+/**
+ * One entry per purpose, and every entry says what the code will actually do
+ * next. Only `send-pitch` may promise anything about a pitch, because it is the
+ * only one whose caller submits one when this sheet closes.
+ */
+export const SIGN_IN_COPY: Readonly<Record<SignInPurpose, SignInCopy>> = {
+  'send-pitch': {
+    badge: 'Almost there',
+    title: 'Sign in to send it',
+    subtitle:
+      'Your pitch stays private until your friend approves it. We just need to know who is hyping.',
+    confirmLabel: 'Verify and send pitch',
+  },
+  account: {
+    badge: 'Your account',
+    title: 'Sign in to your account',
+    subtitle:
+      'Your name, your pitches and your account settings are tied to your email. Sign in to manage them.',
+    confirmLabel: 'Verify and sign in',
+  },
+  generic: {
+    badge: 'Sign in',
+    title: 'Sign in to Friendword',
+    subtitle: 'We email you a one-time code — there is no password to remember.',
+    confirmLabel: 'Verify and sign in',
+  },
+};
+
 type SignInSheetProps = {
   readonly visible: boolean;
+  /** Required, not defaulted: a wrong-context sheet is exactly the bug M-1 is. */
+  readonly purpose: SignInPurpose;
   readonly onClose: () => void;
   readonly onSignedIn: () => void;
 };
@@ -65,8 +114,12 @@ function useIosKeyboardHeight(): number {
 }
 
 /**
- * Email OTP sign-in, shown on demand right before a pitch is submitted.
+ * Email OTP sign-in, shown on demand at the moment an act needs an account.
  * Matches the product rule: composing is free, acting requires an account.
+ *
+ * `purpose` decides what it says. Every caller states why it opened the sheet,
+ * because the heading, the promise under it and the confirm button all describe
+ * what happens next — and what happens next is the caller's, not the sheet's.
  *
  * T014 (audit MUI-11, MUI-12, MUI-14) rebuilt its surface, not its behaviour:
  *
@@ -85,7 +138,7 @@ function useIosKeyboardHeight(): number {
  *   "Not now" escape and the error text under the input were simply
  *   unreachable — on the one modal that blocks the pitch from being sent.
  */
-export function SignInSheet({ visible, onClose, onSignedIn }: SignInSheetProps) {
+export function SignInSheet({ visible, purpose, onClose, onSignedIn }: SignInSheetProps) {
   const [stage, setStage] = useState<Stage>('email');
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
@@ -94,6 +147,7 @@ export function SignInSheet({ visible, onClose, onSignedIn }: SignInSheetProps) 
   const keyboardHeight = useIosKeyboardHeight();
 
   const client = getSupabaseClient();
+  const copy = SIGN_IN_COPY[purpose];
 
   const reset = (): void => {
     setStage('email');
@@ -171,15 +225,13 @@ export function SignInSheet({ visible, onClose, onSignedIn }: SignInSheetProps) 
           >
             <View style={styles.badge}>
               <Text maxFontSizeMultiplier={maxControlFontScale} style={styles.badgeText}>
-                Almost there
+                {copy.badge}
               </Text>
             </View>
-            <Text style={styles.title}>
-              {stage === 'email' ? 'Sign in to send it' : 'Check your inbox'}
-            </Text>
+            <Text style={styles.title}>{stage === 'email' ? copy.title : 'Check your inbox'}</Text>
             <Text style={styles.subtitle}>
               {stage === 'email'
-                ? 'Your pitch stays private until your friend approves it. We just need to know who is hyping.'
+                ? copy.subtitle
                 : `We emailed a ${EMAIL_OTP_LENGTH}-digit code to ${email.trim()}.`}
             </Text>
 
@@ -237,7 +289,7 @@ export function SignInSheet({ visible, onClose, onSignedIn }: SignInSheetProps) 
                 <ActivityIndicator color={colors.onPop} />
               ) : (
                 <Text maxFontSizeMultiplier={maxControlFontScale} style={styles.primaryButtonText}>
-                  {stage === 'email' ? 'Send my code' : 'Verify and send pitch'}
+                  {stage === 'email' ? 'Send my code' : copy.confirmLabel}
                 </Text>
               )}
             </Pressable>

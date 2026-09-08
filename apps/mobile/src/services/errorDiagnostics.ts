@@ -14,6 +14,22 @@
  */
 export const MAX_ERROR_DIAGNOSTIC_CHARS = 200;
 
+/**
+ * Whether this build may print developer diagnostics on a user-facing surface.
+ *
+ * The class-and-frames suffix was added (B4) to read a crash off a TestFlight
+ * screenshot, and it did its job — but a released build was then showing
+ * "DraftGenerationError @ entry.bundle:248152:31" to the person who just tried
+ * to write a pitch. Metro defines `__DEV__` in every dev bundle and sets it to
+ * false in a release build, so it is exactly the line between "someone is
+ * debugging this" and "someone is using this". Read off `globalThis` because
+ * the constant does not exist at all under plain Node (the unit tests), where
+ * the answer is the same as a release build: no frames.
+ */
+export function diagnosticsEnabled(): boolean {
+  return (globalThis as { __DEV__?: unknown }).__DEV__ === true;
+}
+
 const MAX_FRAMES = 2;
 
 /**
@@ -95,10 +111,23 @@ function condenseStack(stack: string | undefined): string {
  * `error.message` with the error's class and top frames appended, capped so it
  * still fits on a phone screen. The message stays first and unchanged, so copy
  * that already reads well is not rewritten.
+ *
+ * The appended part is developer diagnostics, so it is gated: a release build
+ * shows the human sentence and nothing else. `showDiagnostics` defaults to
+ * {@link diagnosticsEnabled} and is a parameter only so the tests can pin both
+ * halves without reaching into globals.
  */
-export function formatErrorForDisplay(error: unknown): string {
+export function formatErrorForDisplay(
+  error: unknown,
+  showDiagnostics: boolean = diagnosticsEnabled(),
+): string {
   if (!(error instanceof Error)) {
-    return `An unexpected error occurred. · ${typeof error}`;
+    return showDiagnostics
+      ? `An unexpected error occurred. · ${typeof error}`
+      : 'An unexpected error occurred.';
+  }
+  if (!showDiagnostics) {
+    return error.message;
   }
   const frames = condenseStack(error.stack);
   const diagnostic = frames === '' ? ` · ${error.name}` : ` · ${error.name} @ ${frames}`;

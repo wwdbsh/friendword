@@ -95,12 +95,14 @@ vi.mock('react-native', async () => {
 vi.mock('../../services/authSession', () => ({ createAuthGateway: vi.fn() }));
 vi.mock('../../services/supabaseClient', () => ({ getSupabaseClient: () => null }));
 
-import { SignInSheet } from './SignInSheet';
+import { SIGN_IN_COPY, SignInSheet, type SignInPurpose } from './SignInSheet';
 
 const SOURCE = readFileSync(join(process.cwd(), 'src/features/auth/SignInSheet.tsx'), 'utf8');
 
-function renderSheet(): string {
-  return renderStatic(<SignInSheet visible onClose={vi.fn()} onSignedIn={vi.fn()} />);
+function renderSheet(purpose: SignInPurpose = 'send-pitch'): string {
+  return renderStatic(
+    <SignInSheet visible purpose={purpose} onClose={vi.fn()} onSignedIn={vi.fn()} />,
+  );
 }
 
 // MUI-12. The sheet had no scroll view and no height cap, so on a small phone
@@ -163,5 +165,48 @@ describe('the sign-in sheet inside the design system', () => {
     // The badge and the primary action are capped; the body copy is not.
     expect(markup).toContain('data-cap="1.4"');
     expect(markup).toContain('data-cap="none"');
+  });
+});
+
+// M-1 (T004, Issue #73). Simulator QA opened this sheet from Account and was
+// told to "Sign in to send it", promised their pitch stayed private until a
+// friend approved it, and offered "Verify and send pitch" — three sentences
+// about a pitch, on the screen where somebody wanted to change their name.
+describe('what the sheet says about why it opened', () => {
+  it('keeps the submit copy for the flow that actually sends a pitch', () => {
+    const markup = renderSheet('send-pitch');
+
+    expect(markup).toContain('Sign in to send it');
+    expect(markup).toContain('Your pitch stays private until your friend approves it');
+  });
+
+  it('promises nothing about a pitch when it was opened from the account screen', () => {
+    const markup = renderSheet('account');
+
+    expect(markup).toContain(SIGN_IN_COPY.account.title);
+    expect(markup).not.toContain('Sign in to send it');
+    expect(markup).not.toContain('until your friend approves it');
+  });
+
+  it('says nothing about a pitch in the generic case either', () => {
+    const markup = renderSheet('generic');
+
+    expect(markup).toContain(SIGN_IN_COPY.generic.title);
+    expect(markup).not.toContain('your friend approves it');
+  });
+
+  // The confirm button names the act it performs. Only one purpose sends a
+  // pitch, so only one button may say so — and the string is read off the
+  // shared table rather than transcribed, so the copy has one home.
+  it('offers to send a pitch only where a pitch is being sent', () => {
+    expect(SIGN_IN_COPY['send-pitch'].confirmLabel).toBe('Verify and send pitch');
+    expect(SIGN_IN_COPY.account.confirmLabel).not.toContain('pitch');
+    expect(SIGN_IN_COPY.generic.confirmLabel).not.toContain('pitch');
+  });
+
+  it('gives each purpose its own badge so the sheet is not always "Almost there"', () => {
+    expect(renderSheet('send-pitch')).toContain('Almost there');
+    expect(renderSheet('account')).not.toContain('Almost there');
+    expect(renderSheet('generic')).not.toContain('Almost there');
   });
 });

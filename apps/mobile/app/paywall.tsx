@@ -6,11 +6,15 @@ import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { HypeButton, QuietNavAction, TrustCard } from '../src/components';
+import { diagnosticsEnabled } from '../src/services/errorDiagnostics';
 import {
+  describePurchaseFailure,
   getPaywallStatus,
   parseProductIntentParams,
   runPurchaseFlow,
   runRestoreFlow,
+  PURCHASE_FAILURE_MESSAGES,
+  PURCHASE_FAILURE_TITLES,
   type ProductIntent,
   type PurchasesStatus,
 } from '../src/services/purchases';
@@ -121,7 +125,11 @@ export default function PaywallScreen() {
         setNote(null);
         return;
       }
-      setNote(error instanceof Error ? error.message : 'The purchase did not complete.');
+      // M-9: the buyer gets the class of failure in a sentence they can act
+      // on; the vendor's own text goes to the log and, on a dev build only, to
+      // the tail of that sentence.
+      console.warn('[paywall] purchase flow failed', error);
+      setNote(describePurchaseFailure(error));
     }
   };
 
@@ -185,23 +193,27 @@ export default function PaywallScreen() {
 
         {status === null ? <Text style={styles.subtitle}>Loading offering…</Text> : null}
 
-        {status?.state === 'unconfigured' ? (
+        {/* M-9 (T004, Issue #73): this card used to print the SDK's own text —
+            "OfferingsManager.Error", configuration advice, app.rev.cat links —
+            at the person trying to pay. It now says which of the three things
+            went wrong and that nothing was charged. The raw text is logged, and
+            appended here only on a dev build. "Restore purchases" and "Back"
+            stay below whatever this card says: a failed catalog must never
+            strand somebody who already owns the thing. */}
+        {status?.state === 'unavailable' ? (
           <TrustCard>
-            <Text style={styles.cardTitle}>Billing isn’t live yet</Text>
-            <Text style={styles.subtitle}>{status.reason}</Text>
-            <Text style={styles.finePrint}>
-              Once this product is configured in RevenueCat, it will appear here automatically.
-            </Text>
+            <Text style={styles.cardTitle}>{PURCHASE_FAILURE_TITLES[status.reason]}</Text>
+            <Text style={styles.subtitle}>{PURCHASE_FAILURE_MESSAGES[status.reason]}</Text>
+            {diagnosticsEnabled() ? (
+              <Text style={styles.finePrint}>{status.diagnostic}</Text>
+            ) : null}
           </TrustCard>
         ) : null}
 
         {status?.state === 'ready' && status.package === null ? (
           <TrustCard>
-            <Text style={styles.cardTitle}>This offering isn’t available yet</Text>
-            <Text style={styles.subtitle}>
-              RevenueCat responded, but the product for this paywall context is missing from the
-              current offering.
-            </Text>
+            <Text style={styles.cardTitle}>{PURCHASE_FAILURE_TITLES.no_products}</Text>
+            <Text style={styles.subtitle}>{PURCHASE_FAILURE_MESSAGES.no_products}</Text>
           </TrustCard>
         ) : null}
 

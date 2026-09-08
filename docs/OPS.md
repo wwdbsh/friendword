@@ -398,6 +398,18 @@ review id는 위 7단계의 조회나 `SELECT id, provider_event_id, reason FROM
 
 나머지 reason과 종결 절차는 아래 "RevenueCat review resolve", "RevenueCat review 큐" 절을 따릅니다.
 
+### 2026-09-08 드릴 실행 기록 (T008 / Issue #77 — 경로 B, 자율 실행)
+
+- **범위**: Campaign Pass, 대상 캠페인 `jordan-tbn8xp`(QA 계정 소유, 라이브). `real_payments_enabled`는 시작·종료 모두 `off`로 확인.
+- **§1 창 열기**: `sandbox_test_accounts` 등록 + `sandbox_payments_enabled=on` — 정상.
+- **§2 구매 의도**: 앱과 같은 인자로 `issue_purchase_intent(product_id, scope_id)` 호출 → `purchase_intents.environment='SANDBOX'`, status `issued` — 정상.
+- **§3 지급**: `NON_RENEWING_PURCHASE`(SANDBOX, intent 첨부) → `recorded=true, needs_review=false`, `campaign_entitlements` active·environment SANDBOX, 캠페인 `ends_at` +30일, 성장 이벤트 `campaign_pass_purchased`의 `properties.environment='SANDBOX'` — 정상.
+- **§4 멱등**: 같은 event id 재전송 → `deduplicated=true`; 같은 transaction·새 event id(restore) → 효익 중복 없음(`expires_at` 동일) — 정상.
+- **§6 환불**: `REFUND` → `campaign_pass_deactivation`, entitlement `active=false`, `needs_review=false` — 정상.
+- **§7 정리**: 스위치 `off`, 등록 삭제, 캠페인 `status`/`ends_at` 원복 — 전부 확인. 남는 흔적은 SANDBOX 라벨의 비활성 entitlement 1행과 24시간 뒤 만료되는 intent 1행(집계 제외 대상).
+- **HTTP 웹훅 단계는 실행하지 못함**: `https://friendword.com/api/revenuecat`이 로컬 `.env`의 `REVENUECAT_WEBHOOK_AUTH_TOKEN`으로 `401` — 로컬 파일이 Vercel 값과 다르다. 위 결과는 `record_revenuecat_event(payload)`를 service-role로 직접 호출한 것(라우트의 검증·매핑은 audit3 테스트가 덮음). **실 스토어 구매→RevenueCat→웹훅 전달**은 여전히 실기기 항목이다.
+- 러너북 정정: §3 조회 SQL의 `purchase_events.app_user_id`·`needs_review`, `campaign_entitlements.ends_at` 컬럼은 존재하지 않는다(실제: `purchase_events.provider_event_id/event_type/environment`, `campaign_entitlements.active/expires_at/environment`). 다음 개정 때 예시 SQL을 실제 컬럼으로 맞출 것.
+
 ## 신고 auto-pause 정책 (0024 이후)
 
 - 24시간 내 **distinct reporter identity 2개 이상**의 high-severity 신고(campaign 대상)가 있어야 자동 pause됩니다. identity는 authenticated user id 또는 익명 salted IP hash이며, hash 없는 legacy 익명 행은 카운트되지 않습니다.

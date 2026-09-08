@@ -1,74 +1,44 @@
 name: CI
 
+# Fast PR gate. Everything here runs without a database, without Playwright
+# browsers and without hosted credentials, so a PR check costs a few Actions
+# minutes. The heavier suites (DB/RLS harnesses, web E2E) live in
+# optional-checks.yml and are run on demand.
 on:
   push:
     branches: [main]
   pull_request:
 
+# A new push to the same branch supersedes the previous run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build-and-test:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      # No `version:` on purpose: action-setup reads `packageManager`
+      # (pnpm@11.26.0) from package.json, so the pin has exactly one home and
+      # cannot drift away from what corepack uses locally.
       - uses: pnpm/action-setup@v4
+      # .nvmrc pins Node 22; package.json engines say ">=22". Nothing in the
+      # dependency tree needs newer, so CI stays on the LTS the repo declares
+      # even though the maintainer's machine runs 26.
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
+          # Caches the pnpm store keyed on pnpm-lock.yaml.
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm -r typecheck
       - run: pnpm lint
-      - run: pnpm typecheck
-      - run: pnpm test
       - run: pnpm format:check
-      - run: pnpm --filter @friendword/web build
-      - run: pnpm --filter @friendword/web test:audit
-      - run: pnpm --filter @friendword/web test:audit2
+      - run: pnpm -r test
+      # The root `test:audit3` script also runs scripts/test-db-audit3.sh, which
+      # needs a local PostgreSQL. The PR gate runs the acceptance suite only; the
+      # SQL harness runs in optional-checks.yml.
       - run: pnpm --filter @friendword/web test:audit3
-
-  web-e2e:
-    runs-on: ubuntu-latest
-    env:
-      NEXT_PUBLIC_SUPABASE_URL: https://ci-mock.supabase.co
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @friendword/web exec playwright install --with-deps chromium
-      - run: pnpm --filter @friendword/web test:e2e
-
-  db-tests:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      PGHOST: localhost
-      PGPORT: '5432'
-      PGUSER: postgres
-      PGPASSWORD: postgres
-    steps:
-      - uses: actions/checkout@v4
-      - run: bash scripts/test-db.sh
-      - run: bash scripts/test-db-audit.sh
-      # Second audit release gate (Slice 10): the audit2 acceptance suite
-      # is all-green (14/14) and stays in CI from here on.
-      - run: bash scripts/test-db-audit2.sh
-      # Third audit Slice 0 (P0-NEW-4): the public beta gate is now
-      # authoritative over publishing; this regression stays in CI.
-      - run: bash scripts/test-db-audit3.sh
+      - run: pnpm --filter @friendword/web test:ui

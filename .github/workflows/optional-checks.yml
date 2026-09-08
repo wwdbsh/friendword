@@ -1,0 +1,59 @@
+name: Optional checks
+
+# The suites that are too slow or too infrastructure-heavy for every PR:
+# the DB/RLS harnesses (need PostgreSQL) and the web E2E suite (needs
+# Playwright browsers). Run them from the Actions tab before a release or
+# after touching migrations, RLS or the consent/publish flows.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: optional-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  db-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/test-db.sh
+      - run: bash scripts/test-db-audit.sh
+      - run: bash scripts/test-db-audit2.sh
+      - run: bash scripts/test-db-audit3.sh
+
+  web-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://ci-mock.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @friendword/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @friendword/web test:e2e

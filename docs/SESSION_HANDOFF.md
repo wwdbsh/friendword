@@ -116,6 +116,14 @@
 4. **릴스 배포 개시** + `real_payments_enabled` 판단(sandbox 드릴 선행).
 5. 9/30 스토어 출시 마감 역산 유지(`HACKATHON_RULES.md`), App Store 제출물 준비 트랙 별도 기립.
 
+### 2026-09-08 상태 (전체 재작성은 T011 몫 — 여기는 델타만)
+
+- **hosted 마이그레이션**: 0058·0059·0060·0061·0062가 모두 hosted에 적용됐습니다. 위 1·2번 항목("0059/0058 push 대기")은 **완료**이며 다음 재작성에서 걷어냅니다.
+- **알림**: `notification_email_enabled`가 켜져 있고 실발송 왕복이 2026-09-08에 육안 확인됐습니다.
+- **QA 캠페인**: `sumin-n2g2ma`는 만료·아카이브됐습니다(더 이상 라이브 표면이 아님).
+- **배포**: pnpm 핀 불일치로 나던 Vercel 배포 실패는 #82에서 수정됐습니다.
+- **근거·후속**: 자세한 사유는 `docs/DECISIONS.md`의 2026-09-08 항목을, 남은 작업 목록은 Goal #69(Issues #70–#80)를 따릅니다.
+
 ### 미착수·보류 (범위 밖으로 명시적으로 남긴 것)
 
 - 백로그 B1~B4(`docs/TASKS.md` 2026-08-11 절), Phase 3b(클립 in scene·얼굴 블러 — 렌더는 v2 전용), Phase 5(비용 가드레일 확장·사람 검토 큐), Instagram Private Replies(Meta App Review), Play Install Referrer(android 디렉터리 부재), 모바일 내보내기 표면(웹 kit만).
@@ -123,12 +131,14 @@
 ## 4. 새 기계 부트스트랩
 
 ```
-Node 22(.nvmrc) · corepack → pnpm 11.12.0 · pnpm install
+Node 22+(.nvmrc는 22, 이 머신은 26) · corepack → pnpm 11.26.0(`package.json`의 `packageManager`) · pnpm install
 ```
 
 - **`.env`는 git에 없습니다. 이전 머신에서 직접 복사하십시오**(변수 목록 `.env.example`). **Claude에게 값을 주지 마십시오** — 형식·연결성만 확인합니다.
 - DB 테스트에 **brew Postgres 17** 필요. 러너는 `bash scripts/test-db.sh`(plain Postgres + hosted 권한 에뮬레이션 `supabase/tests/helpers/auth_stub.sql`). `supabase start` 스택과는 별개입니다.
 - hosted push는 supabase CLI 로그인 필요. 시뮬레이터 QA는 Xcode.
+- **QA 도구**: 웹은 Playwright의 격리 프로필(사용자 Chrome 프로필을 건드리지 않음), iOS 시뮬레이터는 orca 좌표 탭 + CGEvent 스와이프 헬퍼로 조작합니다.
+- brew `node@22`는 현재 이 머신에서 깨져 있어 시스템 Node 26으로 실행합니다(`engines`는 `>=22`이므로 유효). CI는 `.nvmrc`대로 22를 씁니다.
 - **`test:e2e` 실행 절차** (2026-08-04 교정 — 본질은 "**env가 실린 dev 서버가 :3000에 떠 있어야 한다**"입니다):
   ```
   # dev 서버가 이미 :3000에 있으면 그대로 재사용. 없으면:

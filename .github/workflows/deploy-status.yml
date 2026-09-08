@@ -1,0 +1,33 @@
+name: Deploy status
+
+# Vercel reports every deployment through the GitHub Deployments API. A failed
+# deployment is not a failed workflow, so it never reaches the owner's
+# "failed workflows only" email notification. This job turns a failed
+# deployment into a failed workflow run, which does. No checkout, no install:
+# it stays well under one billable minute.
+on:
+  deployment_status:
+
+jobs:
+  report-failure:
+    if: github.event.deployment_status.state == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report the failed deployment
+        env:
+          ENVIRONMENT: ${{ github.event.deployment_status.environment }}
+          TARGET_URL: ${{ github.event.deployment_status.target_url }}
+          LOG_URL: ${{ github.event.deployment_status.log_url }}
+          DESCRIPTION: ${{ github.event.deployment_status.description }}
+          CREATOR: ${{ github.event.deployment_status.creator.login }}
+          SHA: ${{ github.event.deployment.sha }}
+        run: |
+          echo "Deployment failed."
+          echo "environment: ${ENVIRONMENT}"
+          echo "commit:      ${SHA}"
+          echo "reported by: ${CREATOR}"
+          echo "deployment:  ${TARGET_URL}"
+          echo "logs:        ${LOG_URL}"
+          echo "description: ${DESCRIPTION}"
+          exit 1

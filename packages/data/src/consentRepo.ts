@@ -7,6 +7,7 @@ import {
   parsePitchScene,
   pitchSceneSchema,
   pitchStructureSchema,
+  transcriptAudioDurationMs as transcriptAudioDurationMsOf,
   type DaterPitchStructureEdit,
   type PitchSceneAnyVersion,
 } from '@friendword/contracts';
@@ -175,6 +176,15 @@ export type ConsentReview = {
    * is also the only state the DB accepts a scene without wordPops in.
    */
   readonly transcriptWords: readonly IndexedTranscriptWord[];
+  /**
+   * The recording's audio length in milliseconds as the transcription provider
+   * reported it (T003), or null on a transcript written before it was stored.
+   * The scene must be timed by this when it is present — the database requires
+   * it from 0062 — so that the approved motion covers the whole recording
+   * instead of stopping at the last transcribed word. Still not a client
+   * measurement: it describes the stored object, identically on every device.
+   */
+  readonly transcriptAudioDurationMs: number | null;
   /**
    * The motion timeline the Dater is approving, exactly as the server stored it
    * (migration 0048), in whichever schemaVersion the row holds. Null on a legacy
@@ -501,6 +511,12 @@ export class ConsentRepo {
       (revision as { readonly transcript?: unknown }).transcript ?? null,
       transcriptSegments,
     );
+    // Read off the raw snapshot for the same reason `words` is: `durationMs` is
+    // additive (T003), and the reader is the contracts one so this repo and the
+    // database cannot disagree about which values count as a duration.
+    const transcriptAudioDurationMs = transcriptAudioDurationMsOf(
+      (revision as { readonly transcript?: unknown }).transcript ?? null,
+    );
 
     // The scene is read back as stored (migration 0048), v1 or v2. A stored scene
     // that fails the shared safety floors reads as absent, so the surface falls
@@ -521,6 +537,7 @@ export class ConsentRepo {
       transcriptText,
       transcriptSegments,
       transcriptWords,
+      transcriptAudioDurationMs,
       scene: parsedScene,
       daterEdited,
       structureReviewed,

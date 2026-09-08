@@ -715,6 +715,9 @@ describe('ConsentRepo', () => {
       transcriptSegments: [],
       // No segments -> nothing for a word reference to point into (A7).
       transcriptWords: [],
+      // This snapshot predates T003 and reports no audio length; the scene is
+      // then timed by its segments exactly as it was before.
+      transcriptAudioDurationMs: null,
       // No segments -> no legal scene; the preview falls back (A4).
       scene: null,
       daterEdited: false,
@@ -790,6 +793,40 @@ describe('ConsentRepo', () => {
         { startMs: 0, endMs: 12_000, text: 'Blair is the best.' },
         { startMs: 12_000, endMs: 24_000, text: 'Truly.' },
       ]);
+    });
+
+    // T003 (issue #72): the recording's own length has to reach the builder, or
+    // the rebuilt scene stops at the last transcribed word while the audio runs
+    // on. It comes off the snapshot, never off an <audio> element.
+    it('exposes the provider-reported audio length, and null when there is none', async () => {
+      signedInSession();
+      const withAudio = await revisionWith({
+        transcript: {
+          text: 'Blair is the best.',
+          durationMs: 54_543,
+          segments: [{ start: 0, end: 37.66, text: 'Blair is the best.' }],
+        },
+      }).getConsentReview(draftId);
+      expect(withAudio.transcriptAudioDurationMs).toBe(54_543);
+
+      const legacy = await revisionWith({
+        transcript: {
+          text: 'Blair is the best.',
+          segments: [{ start: 0, end: 37.66, text: 'Blair is the best.' }],
+        },
+      }).getConsentReview(draftId);
+      expect(legacy.transcriptAudioDurationMs).toBeNull();
+
+      // Not a duration: dropped rather than coerced, exactly as
+      // private.pitch_scene_integer drops it, so the client and the DB agree.
+      const malformed = await revisionWith({
+        transcript: {
+          text: 'Blair is the best.',
+          durationMs: '54543',
+          segments: [{ start: 0, end: 37.66, text: 'Blair is the best.' }],
+        },
+      }).getConsentReview(draftId);
+      expect(malformed.transcriptAudioDurationMs).toBeNull();
     });
 
     it('reads a legacy revision with no scene columns as scene: null', async () => {

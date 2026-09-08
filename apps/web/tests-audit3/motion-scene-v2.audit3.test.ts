@@ -821,3 +821,74 @@ describe('a builder scene plays as built', () => {
     }
   });
 });
+
+// T003 / issue #72 — the picture must not freeze while the voice keeps going.
+//
+// Production: a 54.543s recording whose last transcript segment ended at 37.66s
+// published a 37660ms scene. `sceneV2Frame` clamps its clock to
+// `scene.durationMs`, and `renderScene` cuts the video at the same number, so
+// the last fifteen seconds of the friend's voice played over one frozen frame
+// (and over an ended video stream in the MP4).
+//
+// The interpreter is not what changed — the duration handed to it is — so both
+// halves are pinned here: the recording-length scene keeps moving to the end,
+// and the old words-only scene demonstrably froze.
+describe('the scene covers the whole recording (T003)', () => {
+  const SEGMENTS = [
+    { startMs: 0, endMs: 12_500 },
+    { startMs: 12_500, endMs: 25_000 },
+    { startMs: 25_000, endMs: 37_660 },
+  ];
+  const AUDIO_MS = 54_543;
+  const PHOTOS_USED = [photoId(1), photoId(2), photoId(3)];
+
+  function built(audioDurationMs: number | null): PitchSceneV2 {
+    const scene = buildPitchSceneV2({
+      template: 'warm',
+      photoAssetIds: PHOTOS_USED,
+      segments: SEGMENTS,
+      audioDurationMs,
+    });
+    if (scene === null) {
+      throw new Error('the builder must produce a scene for this recording');
+    }
+    return scene;
+  }
+
+  it('plays past the last transcribed word, all the way to the audio length', () => {
+    const scene = built(AUDIO_MS);
+    const bound = sceneV2PhotoIndexes(scene, PHOTOS_USED);
+    if (bound === null) {
+      throw new Error('the scene must bind to its photos');
+    }
+
+    expect(scene.durationMs).toBe(AUDIO_MS);
+    expect(scene.shots.at(-1)?.endMs).toBe(AUDIO_MS);
+    // Every millisecond after the words stop still resolves to something on
+    // screen, and the frame at 45s is not the frame the old scene was stuck on.
+    for (let elapsedMs = 37_660; elapsedMs <= AUDIO_MS; elapsedMs += 149) {
+      const frame = sceneV2Frame(scene, bound, elapsedMs, options());
+      expect(frame.photo === null ? frame.backdrop !== null : true).toBe(true);
+    }
+    expect(sceneV2Frame(scene, bound, 45_000, options())).not.toEqual(
+      sceneV2Frame(scene, bound, AUDIO_MS, options()),
+    );
+  });
+
+  it('froze on the words-only timeline, which is the defect', () => {
+    const scene = built(null);
+    const bound = sceneV2PhotoIndexes(scene, PHOTOS_USED);
+    if (bound === null) {
+      throw new Error('the scene must bind to its photos');
+    }
+
+    expect(scene.durationMs).toBe(37_660);
+    // The clock clamp: 45s and 54.5s of audio both render the 37.66s frame.
+    expect(sceneV2Frame(scene, bound, 45_000, options())).toEqual(
+      sceneV2Frame(scene, bound, 37_660, options()),
+    );
+    expect(sceneV2Frame(scene, bound, AUDIO_MS, options())).toEqual(
+      sceneV2Frame(scene, bound, 37_660, options()),
+    );
+  });
+});

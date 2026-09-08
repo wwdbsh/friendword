@@ -11,6 +11,7 @@ import {
 } from '@friendword/data';
 import {
   buildPitchSceneV2,
+  transcriptAudioDurationMs,
   type DraftInputs,
   type PitchSceneV2,
   type RelationshipDuration as ServerRelationshipDuration,
@@ -885,8 +886,14 @@ export class HybridPitchDraftService implements PitchDraftService {
    * as the submit that follows, and the reconcile above already depends on that
    * read.
    *
-   * The server still accepts v1 scenes, so reverting this to the v1 builder is a
-   * safe rollback: only what this device writes changes.
+   * NOT a one-line rollback any more. The server still accepts v1 scenes, but a
+   * v1 scene is timed by the last transcript segment, and from migration 0062 the
+   * database times a pitch by the GREATEST of that and the recording's stored
+   * audio length — so on any recording whose words end before the audio does, a
+   * v1 scene is refused and this submit silently sends the pitch with no motion.
+   * Backing this change out means the forward migration that restores the old
+   * rule AND stripping `durationMs` from the transcripts already written; see
+   * the rollback note in 0062 and the T003 entry in docs/DECISIONS.md.
    */
   private async submissionScene(
     repo: PitchDraftRepository,
@@ -905,7 +912,15 @@ export class HybridPitchDraftService implements PitchDraftService {
     if (photoAssetIds.length === 0) {
       return null;
     }
-    return this.buildScene({ template: PITCH_SCENE_TEMPLATE, photoAssetIds, segments });
+    return this.buildScene({
+      template: PITCH_SCENE_TEMPLATE,
+      photoAssetIds,
+      segments,
+      // T003: the scene must cover the whole recording, not just its words. The
+      // length is read from the same snapshot the segments came from, with the
+      // contracts reader the database mirrors — never measured on this device.
+      audioDurationMs: transcriptAudioDurationMs(transcript),
+    });
   }
 
   /**

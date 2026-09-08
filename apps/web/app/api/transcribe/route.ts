@@ -49,6 +49,46 @@ function wordTimings(transcript: unknown): {
 }
 
 /**
+ * T003 (issue #72): the length of the recording, as the PROVIDER reported it for
+ * the object it just decoded, in whole milliseconds — or nothing, when it
+ * reported none or reported something a duration cannot be.
+ *
+ * This is what the scene is timed by from 0062 on. It has to be persisted, and
+ * persisted here, for two reasons: it is a fact about the stored audio (so every
+ * device that rebuilds the scene from this row gets the same number, which a
+ * client `<audio>.duration` would not give), and the database validates a
+ * submitted scene against `transcript->'durationMs'` — a value only this route
+ * writes.
+ *
+ * Written only when it is at least the end of the last transcript segment. The
+ * database takes the GREATEST of the two anyway, so a shorter value would be
+ * inert rather than dangerous; it is dropped because a transcript should not
+ * carry a length its own words contradict.
+ *
+ * Whole milliseconds because `private.pitch_scene_integer` — the DB's reader and
+ * the one the contracts builder mirrors — accepts only an integral JSON number.
+ */
+function audioDuration(transcript: {
+  readonly durationSeconds?: number;
+  readonly segments?: readonly { readonly end: number }[];
+}): { readonly durationMs?: number } {
+  const seconds = transcript.durationSeconds;
+  if (seconds === undefined || !Number.isFinite(seconds)) {
+    return {};
+  }
+  const durationMs = Math.round(seconds * 1000);
+  // The 24-hour ceiling is the database's own guard on a transcript duration.
+  if (durationMs <= 0 || durationMs > 86_400_000) {
+    return {};
+  }
+  const lastSegmentEnd = transcript.segments?.at(-1)?.end;
+  if (lastSegmentEnd !== undefined && durationMs < Math.round(lastSegmentEnd * 1000)) {
+    return {};
+  }
+  return { durationMs };
+}
+
+/**
  * Turns the introducer's uploaded voice note into the structured draft
  * (Flow A step 5): transcription → PitchStructure → headline/body on the
  * draft. Requires the introducer's own access token; runs the real OpenAI
@@ -316,6 +356,12 @@ export async function POST(request: Request): Promise<NextResponse> {
       text: transcript.text,
       language: transcript.language,
       segments: transcript.segments ?? [],
+      // T003: the provider's own audio length. The scene builders and
+      // `private.pitch_transcript_duration_ms` (0062) read it from here and time
+      // the approved motion by it, so a pitch no longer freezes at the end of
+      // its last transcribed word. Absent when the provider reported none — the
+      // row then reads exactly as a pre-T003 row and is timed by its segments.
+      ...audioDuration(transcript),
       // A7: word-level timings, additive and optional. The request and the
       // adapter type are owned by the mobile/adapters side, so this reads the
       // field structurally and simply omits it when the provider (or an older

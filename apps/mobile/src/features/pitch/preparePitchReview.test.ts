@@ -6,8 +6,13 @@ import { AiConsentPersistenceError, AiConsentRequiredError } from '../../service
 import { DraftGenerationError } from '../../services/draftGeneration';
 import { PitchDraftSchema, type PitchDraft, type PitchReview } from '../../services/types';
 import {
+  ALREADY_TRANSCRIBED_MESSAGE,
+  DRAFT_NOT_EDITABLE_MESSAGE,
   getAiDraftFailureMessage,
+  INSUFFICIENT_SPEECH_MESSAGE,
+  TRANSCRIBE_IN_PROGRESS_MESSAGE,
   isAiConsentRequiredFailure,
+  isInsufficientSpeechFailure,
   ManualRecapRequiredError,
   preparePitchReview,
   type PitchReviewPreparationDependencies,
@@ -276,6 +281,33 @@ describe('preparePitchReview', () => {
     expect(isAiConsentRequiredFailure(new DraftGenerationError(429))).toBe(false);
   });
 
+  // S1: the server's other 409s are not a consent problem, and telling someone
+  // to re-confirm consent when their draft already exists is simply untrue.
+  it('separates the consent 409 from the transcribe route\u2019s other 409s', () => {
+    expect(isAiConsentRequiredFailure(new DraftGenerationError(409, 'ai_consent_required'))).toBe(
+      true,
+    );
+    expect(isAiConsentRequiredFailure(new DraftGenerationError(409, 'already_transcribed'))).toBe(
+      false,
+    );
+    expect(
+      isAiConsentRequiredFailure(new DraftGenerationError(409, 'transcription_in_progress')),
+    ).toBe(false);
+    expect(isAiConsentRequiredFailure(new DraftGenerationError(409, 'draft_not_editable'))).toBe(
+      false,
+    );
+
+    expect(getAiDraftFailureMessage(new DraftGenerationError(409, 'already_transcribed'))).toBe(
+      ALREADY_TRANSCRIBED_MESSAGE,
+    );
+    expect(
+      getAiDraftFailureMessage(new DraftGenerationError(409, 'transcription_in_progress')),
+    ).toBe(TRANSCRIBE_IN_PROGRESS_MESSAGE);
+    expect(getAiDraftFailureMessage(new DraftGenerationError(409, 'draft_not_editable'))).toBe(
+      DRAFT_NOT_EDITABLE_MESSAGE,
+    );
+  });
+
   it('keeps manual writing free of consent and AI, yet still stores the media', async () => {
     const draft = draftWithServerRecording('A real recap story about Jordan.');
     const uploadDraftMedia = vi.fn(async () => draft);
@@ -355,6 +387,26 @@ describe('preparePitchReview', () => {
     );
     expect(getAiDraftFailureMessage(new DraftGenerationError(503))).toBe(
       'AI features are temporarily disabled',
+    );
+  });
+
+  // T001 (issue #70): a 422 the server tagged as insufficient speech is not a
+  // retryable error — the same upload would fail identically — so it must be
+  // recognisable and must read as "record it again".
+  it('recognises the insufficient-speech refusal and only that', () => {
+    expect(isInsufficientSpeechFailure(new DraftGenerationError(422, 'insufficient_speech'))).toBe(
+      true,
+    );
+    expect(isInsufficientSpeechFailure(new DraftGenerationError(422, null))).toBe(false);
+    expect(isInsufficientSpeechFailure(new DraftGenerationError(422, 'moderation'))).toBe(false);
+    expect(isInsufficientSpeechFailure(new DraftGenerationError(429, 'insufficient_speech'))).toBe(
+      false,
+    );
+    expect(isAiConsentRequiredFailure(new DraftGenerationError(422, 'insufficient_speech'))).toBe(
+      false,
+    );
+    expect(getAiDraftFailureMessage(new DraftGenerationError(422, 'insufficient_speech'))).toBe(
+      INSUFFICIENT_SPEECH_MESSAGE,
     );
   });
 

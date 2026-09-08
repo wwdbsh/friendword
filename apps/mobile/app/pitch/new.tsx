@@ -56,7 +56,12 @@ export default function NewPitchScreen() {
   const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const submission = usePitchSubmission(draftId, setErrorMessage);
+  // T001: an inaudible take can only be fixed by recording again, so the
+  // rejected take is dropped and the wizard returns to the recording step.
+  const submission = usePitchSubmission(draftId, setErrorMessage, () => {
+    setRecording(null);
+    setTrack(4);
+  });
 
   const goBack = useCallback((): void => {
     if (savingRef.current) {

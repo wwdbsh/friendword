@@ -38,6 +38,33 @@ export class ProviderRequestError extends Error {
   }
 }
 
+/**
+ * The provider returned a response but no text at all — whisper's answer to a
+ * recording it heard nothing in. T001 (issue #70): this is the same product
+ * situation as a transcript of "." and must reach the caller as such, not as a
+ * generic provider failure, so it carries its own type and a stable `code`
+ * (checked as well as `instanceof`, so a duplicated module instance still maps).
+ */
+export const EMPTY_TRANSCRIPTION_CODE = 'empty_transcription';
+
+export class EmptyTranscriptionError extends Error {
+  override readonly name = 'EmptyTranscriptionError';
+  readonly code = EMPTY_TRANSCRIPTION_CODE;
+
+  constructor() {
+    super('transcription returned no text');
+  }
+}
+
+export function isEmptyTranscriptionError(error: unknown): boolean {
+  return (
+    error instanceof EmptyTranscriptionError ||
+    (typeof error === 'object' &&
+      error !== null &&
+      (error as { readonly code?: unknown }).code === EMPTY_TRANSCRIPTION_CODE)
+  );
+}
+
 /** Real transcription: audio.uri must be a fetchable (signed) URL. */
 export class OpenAiTranscriptionProvider implements TranscriptionProvider {
   constructor(private readonly apiKey: string) {}
@@ -72,6 +99,7 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
     const data = (await response.json()) as {
       readonly text?: string;
       readonly language?: string;
+      readonly duration?: number;
       readonly segments?: readonly {
         readonly start?: number;
         readonly end?: number;
@@ -84,7 +112,7 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
       }[];
     };
     if (typeof data.text !== 'string' || data.text.trim() === '') {
-      throw new ProviderRequestError('transcription', 502);
+      throw new EmptyTranscriptionError();
     }
 
     const segments = (data.segments ?? [])
@@ -120,6 +148,11 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
       language: typeof data.language === 'string' ? data.language : 'en',
       segments,
       words,
+      // verbose_json reports the decoded audio length; it is the only
+      // trustworthy denominator for the T001 speech-coverage check.
+      ...(typeof data.duration === 'number' && data.duration > 0
+        ? { durationSeconds: data.duration }
+        : {}),
     };
   }
 }
@@ -127,6 +160,7 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
 const STRUCTURE_SYSTEM_PROMPT = `You turn a friend's spoken dating pitch into structured JSON.
 Rules:
 - Use only what the speaker actually said; never invent facts.
+- If the transcript contains no concrete statements about the person, invent nothing: leave the fields as short and empty as the schema allows, and record what is missing in "hard_claims_requiring_confirmation".
 - "hook": one short, warm opening line in the introducer's voice.
 - "relationship_context": how they know each other, from the transcript and the provided context.
 - "three_specific_qualities": exactly 3 short qualities actually mentioned or clearly implied.

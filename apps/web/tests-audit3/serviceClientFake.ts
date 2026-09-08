@@ -9,6 +9,12 @@ export type ServiceFakeConfig = {
   readonly draftOwnerId?: string;
   readonly draftSubjectId?: string;
   readonly draftStatus?: string;
+  /**
+   * Status per successive `pitch_drafts` read, for the TOCTOU case where the
+   * draft moves on between the route's gate and a later re-read. The last entry
+   * answers every further read; `draftStatus` covers the reads before it.
+   */
+  readonly draftStatuses?: readonly string[];
   // reserve_provider_usage result: either a returned row or an error.
   readonly reserveRow?: Record<string, unknown> | null;
   readonly reserveError?: { readonly message: string } | null;
@@ -18,30 +24,46 @@ export type ServiceFakeConfig = {
   readonly signedUrl?: string | null;
   readonly signError?: { readonly message: string } | null;
   readonly downloadBytes?: Uint8Array | null;
+  /** Row an `.update(...).select(...).maybeSingle()` resolves to (default: none). */
+  readonly updateReturnsRow?: Record<string, unknown> | null;
+  /** Error the storage `remove` call reports (default: it succeeds). */
+  readonly removeError?: { readonly message: string } | null;
 };
 
 export type ServiceFake = {
   readonly client: unknown;
   readonly rpcCalls: RpcCall[];
   readonly upserts: Array<{ table: string; row: Record<string, unknown> }>;
+  readonly updates: Array<{ table: string; row: Record<string, unknown> }>;
+  readonly deletes: string[];
+  readonly removedObjects: string[];
 };
 
 export function createServiceFake(config: ServiceFakeConfig = {}): ServiceFake {
   const rpcCalls: RpcCall[] = [];
   const upserts: Array<{ table: string; row: Record<string, unknown> }> = [];
+  const updates: Array<{ table: string; row: Record<string, unknown> }> = [];
+  const deletes: string[] = [];
+  const removedObjects: string[] = [];
+  let draftReads = 0;
 
   function makeQuery(table: string) {
-    let op: 'select' | 'upsert' | 'update' | 'insert' = 'select';
+    let op: 'select' | 'upsert' | 'update' | 'insert' | 'delete' = 'select';
     const resolveSelect = () => {
       if (table === 'users') {
         return { data: { account_status: config.accountStatus ?? 'active' }, error: null };
       }
       if (table === 'pitch_drafts') {
+        const sequence = config.draftStatuses;
+        const status =
+          sequence === undefined
+            ? (config.draftStatus ?? 'draft')
+            : (sequence[Math.min(draftReads++, sequence.length - 1)] ?? 'draft');
         return {
           data: {
             created_by_user_id: config.draftOwnerId ?? null,
             subject_user_id: config.draftSubjectId ?? null,
-            status: config.draftStatus ?? 'draft',
+            status,
           },
           error: null,
         };
@@ -51,7 +73,10 @@ export function createServiceFake(config: ServiceFakeConfig = {}): ServiceFake {
       }
       return { data: null, error: null };
     };
-    const resolveWrite = () => ({ data: null, error: null });
+    const resolveWrite = () =>
+      op === 'update'
+        ? { data: config.updateReturnsRow ?? null, error: null }
+        : { data: null, error: null };
     const builder: Record<string, unknown> = {
       select() {
         return builder;
@@ -68,8 +93,14 @@ export function createServiceFake(config: ServiceFakeConfig = {}): ServiceFake {
       order() {
         return builder;
       },
-      update() {
+      delete() {
+        op = 'delete';
+        deletes.push(table);
+        return builder;
+      },
+      update(row: Record<string, unknown>) {
         op = 'update';
+        updates.push({ table, row });
         return builder;
       },
       insert(row: Record<string, unknown>) {
@@ -121,7 +152,11 @@ export function createServiceFake(config: ServiceFakeConfig = {}): ServiceFake {
         error: null,
       });
     },
-    remove() {
+    remove(names: readonly string[]) {
+      removedObjects.push(...names);
+      if (config.removeError) {
+        return Promise.resolve({ data: null, error: config.removeError });
+      }
       return Promise.resolve({ data: [], error: null });
     },
   };
@@ -142,7 +177,7 @@ export function createServiceFake(config: ServiceFakeConfig = {}): ServiceFake {
     },
   };
 
-  return { client, rpcCalls, upserts };
+  return { client, rpcCalls, upserts, updates, deletes, removedObjects };
 }
 
 /** Minimal structurally-valid PNG (magic + IHDR) so checkMediaSignature passes. */

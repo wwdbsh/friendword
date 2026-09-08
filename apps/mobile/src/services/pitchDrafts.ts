@@ -77,6 +77,15 @@ export interface PitchDraftService {
   refreshClipIngest(id: PitchDraftId): Promise<PitchDraft>;
   /** Rejects with {@link StoredVoiceReplacementError} for a take that would replace stored bytes. */
   saveRecording(id: PitchDraftId, recording: PitchRecording): Promise<PitchDraft>;
+  /**
+   * T001 (issue #70): drops this draft's take and the record that its bytes are
+   * stored, after the server refused to draft from an inaudible recording and
+   * deleted the stored object. Without this the local ledger still claims the
+   * voice object exists, so {@link StoredVoiceReplacementError} would refuse the
+   * next take and the introducer would be told to re-record with no way to do
+   * it.
+   */
+  discardStoredRecording(id: PitchDraftId): Promise<PitchDraft>;
   prepareForReview(id: PitchDraftId): Promise<PitchDraft>;
   uploadDraftMedia(id: PitchDraftId): Promise<PitchDraft>;
   loadGeneratedReview(id: PitchDraftId): Promise<PitchDraft>;
@@ -491,6 +500,18 @@ export class MockPitchDraftService implements PitchDraftService {
         recording: { ...recording, ...(upload === undefined ? {} : { upload }) },
       };
     });
+  }
+
+  async discardStoredRecording(id: PitchDraftId): Promise<PitchDraft> {
+    return this.updateDraft(id, (draft) => ({
+      ...draft,
+      recording: null,
+      // Both halves of {@link hasStoredVoiceObject} have to go: the per-take
+      // upload record and the draft-wide "media is on the server" flag. The
+      // photos keep their own upload records, so the next submit re-uploads the
+      // voice only.
+      ...(draft.server === null ? {} : { server: { ...draft.server, mediaUploaded: false } }),
+    }));
   }
 
   async prepareForReview(id: PitchDraftId): Promise<PitchDraft> {

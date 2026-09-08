@@ -54,14 +54,64 @@ const productionDependencies: PitchReviewPreparationDependencies = {
   recordAiConsent: recordAiProcessingConsent,
 };
 
+/**
+ * S1: /api/transcribe answers 409 for three different situations — consent must
+ * be confirmed again, this recording was already transcribed, another attempt
+ * is mid-transcription — and this used to map all of them back to the consent
+ * disclosure, which is untrue for two of them. A 409 with no code at all is
+ * still read as consent: that is what an older server sends, and consent was
+ * its only 409 the app could act on.
+ */
 export function isAiConsentRequiredFailure(error: unknown): boolean {
   return (
     error instanceof AiConsentRequiredError ||
-    (error instanceof DraftGenerationError && error.status === 409)
+    (error instanceof DraftGenerationError &&
+      error.status === 409 &&
+      (error.code === 'ai_consent_required' || error.code === null))
   );
 }
 
+export const ALREADY_TRANSCRIBED_MESSAGE =
+  'We already wrote a draft from this recording — open this pitch again to see it.';
+
+export const TRANSCRIBE_IN_PROGRESS_MESSAGE =
+  'This recording is still being written up. Give it a few seconds and try again.';
+
+export const DRAFT_NOT_EDITABLE_MESSAGE = 'This pitch can no longer be edited.';
+
+const CODED_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
+  already_transcribed: ALREADY_TRANSCRIBED_MESSAGE,
+  transcription_in_progress: TRANSCRIBE_IN_PROGRESS_MESSAGE,
+  draft_not_editable: DRAFT_NOT_EDITABLE_MESSAGE,
+};
+
+/**
+ * T001 (issue #70): the server refused to draft because the recording carried
+ * no usable speech. The only way forward is a new recording, so this failure is
+ * routed back to the recording step rather than shown as a retryable error —
+ * retrying the same upload would fail identically.
+ */
+export function isInsufficientSpeechFailure(error: unknown): boolean {
+  return (
+    error instanceof DraftGenerationError &&
+    error.status === 422 &&
+    error.code === 'insufficient_speech'
+  );
+}
+
+export const INSUFFICIENT_SPEECH_MESSAGE =
+  "We couldn't hear enough in that recording to write from — record it again.";
+
 export function getAiDraftFailureMessage(error: unknown): string {
+  if (isInsufficientSpeechFailure(error)) {
+    return INSUFFICIENT_SPEECH_MESSAGE;
+  }
+  if (error instanceof DraftGenerationError && error.code !== null) {
+    const coded = CODED_FAILURE_MESSAGES[error.code];
+    if (coded !== undefined) {
+      return coded;
+    }
+  }
   if (error instanceof DraftGenerationError && error.status === 429) {
     return 'AI usage limit reached — try again later';
   }

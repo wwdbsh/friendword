@@ -12,7 +12,19 @@ export type ProviderReservation =
       readonly granted: boolean;
       readonly leaseToken: string | null;
     }
-  | { readonly ok: false; readonly httpStatus: number; readonly message: string };
+  | {
+      readonly ok: false;
+      readonly httpStatus: number;
+      readonly message: string;
+      /**
+       * Machine-readable reason, so a caller can answer with a code instead of
+       * leaving the client to guess from the status. Several distinct refusals
+       * share one status (409 covers "consent required" here and "already
+       * transcribed"/"in progress" in the transcribe route), and the mobile app
+       * used to map every 409 back to the consent disclosure.
+       */
+      readonly code: string;
+    };
 
 type ReserveRow = {
   readonly reservation_id: string;
@@ -65,16 +77,36 @@ function extractReserveRow(data: unknown): ReserveRow | null {
 
 function mapReserveError(message: string): ProviderReservation {
   if (message.includes('consent is required')) {
-    return { ok: false, httpStatus: 409, message: 'external AI processing consent is required' };
+    return {
+      ok: false,
+      httpStatus: 409,
+      message: 'external AI processing consent is required',
+      code: 'ai_consent_required',
+    };
   }
   if (message.includes('kill switch')) {
-    return { ok: false, httpStatus: 503, message: 'AI features are temporarily disabled' };
+    return {
+      ok: false,
+      httpStatus: 503,
+      message: 'AI features are temporarily disabled',
+      code: 'ai_disabled',
+    };
   }
   if (message.includes('cap reached') || message.includes('quota exceeded')) {
-    return { ok: false, httpStatus: 429, message: 'AI usage limit reached — try again later' };
+    return {
+      ok: false,
+      httpStatus: 429,
+      message: 'AI usage limit reached — try again later',
+      code: 'ai_quota_exceeded',
+    };
   }
   console.warn('provider budget: reservation failed');
-  return { ok: false, httpStatus: 500, message: 'provider budget reservation failed' };
+  return {
+    ok: false,
+    httpStatus: 500,
+    message: 'provider budget reservation failed',
+    code: 'provider_budget_failed',
+  };
 }
 
 /**
@@ -113,7 +145,12 @@ export async function reserveProviderUsage(
 
   const row = extractReserveRow(data);
   if (row === null) {
-    return { ok: false, httpStatus: 500, message: 'provider budget reservation failed' };
+    return {
+      ok: false,
+      httpStatus: 500,
+      message: 'provider budget reservation failed',
+      code: 'provider_budget_failed',
+    };
   }
   return {
     ok: true,

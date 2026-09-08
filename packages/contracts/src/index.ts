@@ -10,3 +10,4 @@ export * from './pitchSceneGoldenVectors';
 export * from './transcriptWords';
 export * from './pitchStructure';
 export * from './daterPitchEdit';
+export * from './transcriptSufficiency';

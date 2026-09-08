@@ -443,6 +443,13 @@ export class HybridPitchDraftService implements PitchDraftService {
     return this.local.saveRecording(id, value);
   }
 
+  discardStoredRecording(id: PitchDraftId): Promise<PitchDraft> {
+    // Local bookkeeping only: the server object was already deleted by
+    // /api/transcribe when it refused the take (T001), and the pitch_assets row
+    // keeps pointing at that same path, which the next upload refills.
+    return this.local.discardStoredRecording(id);
+  }
+
   purgeInvitationContact(id: PitchDraftId): Promise<PitchDraft> {
     return this.local.purgeInvitationContact(id);
   }

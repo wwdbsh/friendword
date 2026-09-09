@@ -5,8 +5,16 @@ import { flushSync } from 'react-dom';
 
 import { MotionSceneV2 } from '@/components/MotionSceneV2';
 import { CaptionLayer, PitchCaptionCard } from '@/components/PitchCaption';
+import { RenderOverlay } from '@/components/RenderOverlay';
 import { collectFontFaceSources, loadRenderFonts } from '@/lib/pitchRender/fontGate';
+import {
+  overlaySignature,
+  renderOverlayFrame,
+  type RenderFrameCursor,
+  type RenderOverlayFrame,
+} from '@/lib/pitchRender/overlay';
 import type { RenderPayload } from '@/lib/pitchRender/payload';
+import { grainDataUri } from '@/lib/pitchRender/photoGrade';
 import { captionFrame, type CaptionFrame } from '@/pitch/captionChrome';
 import { sceneV2Frame, sceneV2PhotoIndexes, type SceneV2Frame } from '@/pitch/sceneV2';
 
@@ -46,6 +54,7 @@ function makeNormalizer(): (property: 'transform' | 'filter' | 'opacity', value:
 function expectedSignature(
   frame: SceneV2Frame,
   caption: CaptionFrame | null,
+  overlay: RenderOverlayFrame | null,
   norm: (property: 'transform' | 'filter' | 'opacity', value: string) => string,
 ): string {
   const media = frame.photo ?? frame.backdrop;
@@ -92,12 +101,32 @@ function expectedSignature(
           'opacity',
           String(caption.motion.opacity),
         )};${norm('transform', caption.transform)}`,
+    // §2.3: the overlay is part of the frame, so seek() must not resolve until
+    // the committed variant, window, active word and envelope frame are this
+    // millisecond's — otherwise a highlight could be captured one window late.
+    overlaySignature(overlay),
   ];
   return parts.join('|');
 }
 
+/**
+ * §2.4: with timed words the overlay owns the subtitles and the T017 segment
+ * band stands down. Stated once, so the signature and the render agree.
+ */
+function overlayCaptionsWin(overlay: { readonly words: unknown } | null | undefined): boolean {
+  return overlay !== null && overlay !== undefined && overlay.words !== null;
+}
+
 /** The same signature, read back from what React actually committed. */
 function domSignature(): string {
+  const root = document.querySelector<HTMLElement>('[data-render-stage]');
+  if (root !== null && root.dataset.renderMode === 'overlayOnly') {
+    // §2.2-4 overlay-only: the scene is not mounted at all, so the frame IS
+    // the chrome and the signature is the chrome's alone.
+    return `overlayOnly|${overlayDomSignature(
+      document.querySelector<HTMLElement>('[data-render-overlay]'),
+    )}`;
+  }
   const stage = document.querySelector<HTMLElement>('[data-scene-v2]');
   if (stage === null) {
     return 'stage=missing';
@@ -117,6 +146,7 @@ function domSignature(): string {
   const leak = document.querySelector<HTMLElement>('[data-scene-light-leak]');
   const progress = document.querySelector<HTMLElement>('[data-scene-progress]');
   const caption = document.querySelector<HTMLElement>('[data-caption-card]');
+  const overlay = document.querySelector<HTMLElement>('[data-render-overlay]');
   const parts = [
     `shot=${stage.dataset.motionShot ?? '?'}/${stage.dataset.motionShotLevel ?? '?'}`,
     media,
@@ -139,8 +169,28 @@ function domSignature(): string {
       : `caption=${caption.dataset.captionSegment ?? '?'};${caption.textContent ?? ''};${
           caption.style.opacity
         };${caption.style.transform}`,
+    overlayDomSignature(overlay),
   ];
   return parts.join('|');
+}
+
+/** The overlay half of the signature, read back off the committed DOM. */
+function overlayDomSignature(overlay: HTMLElement | null): string {
+  if (overlay === null) {
+    return 'overlay=none';
+  }
+  const wave = overlay.querySelector<HTMLElement>('[data-overlay-waveform]');
+  const word = overlay.querySelector<HTMLElement>('[data-overlay-caption]');
+  const chromeOnly = overlay.dataset.overlayChromeOnly === 'true' ? '/chrome' : '';
+  const wordPart =
+    word === null
+      ? 'word=none'
+      : `word=${word.dataset.overlayCaption ?? '?'}/${word.dataset.overlayActiveWord ?? '?'}`;
+  const wavePart =
+    wave === null
+      ? 'wave=none'
+      : `wave=${wave.dataset.overlayWaveform ?? '?'}/${wave.dataset.overlayLevel ?? '?'}`;
+  return `overlay=${overlay.dataset.overlayVariant ?? '?'}/${overlay.dataset.overlayWindow ?? '?'}${chromeOnly}|${wordPart}|${wavePart}`;
 }
 
 function nextPaint(): Promise<void> {
@@ -153,6 +203,9 @@ export function RenderStage() {
   const [payload, setPayload] = useState<RenderPayload | null>(null);
   const [atMs, setAtMs] = useState(0);
   const [mode, setMode] = useState<'scene' | 'endCard'>('scene');
+  // Where the capture is in the OUTPUT file. Null until the first seek and for
+  // the legacy (no-overlay) path, which draws exactly what it always drew.
+  const [cursor, setCursor] = useState<RenderFrameCursor | null>(null);
   const payloadRef = useRef<RenderPayload | null>(null);
   // Never populated: the capture stage has no audio element. With
   // isPlaying=false MotionSceneV2 never reads this clock.
@@ -211,7 +264,7 @@ export function RenderStage() {
       await nextPaint();
     };
 
-    const seek = async (tMs: number): Promise<string> => {
+    const seek = async (tMs: number, at?: RenderFrameCursor): Promise<string> => {
       const current = payloadRef.current;
       if (current === null) {
         throw new Error('seek before loadPayload');
@@ -223,9 +276,11 @@ export function RenderStage() {
       if (indexes === null) {
         throw new Error('payload photos do not cover the scene assetIds');
       }
+      const nextCursor = at ?? { outputFrame: 0, totalFrames: 1, windowIndex: 0 };
       flushSync(() => {
         setMode('scene');
         setAtMs(tMs);
+        setCursor(nextCursor);
       });
       // MotionSceneV2 syncs the prop into its own frame state in a passive
       // effect (one commit late). An empty flushSync forces React to run the
@@ -234,16 +289,27 @@ export function RenderStage() {
       // this is what keeps 1,800-frame captures inside the time budget.
       flushSync(() => undefined);
       // The export honours the approved motion, not this machine's OS setting.
-      const expected = expectedSignature(
-        sceneV2Frame(current.scene, indexes, tMs, {
-          words: current.words,
-          text: current.text,
-          reducedMotion: false,
-        }),
-        // Same millisecond, same pure call the render below made.
-        captionFrame(current.captions, tMs, { words: current.words, reducedMotion: false }),
-        norm,
-      );
+      const overlay = current.overlay ?? null;
+      const overlayNow = overlay === null ? null : renderOverlayFrame(overlay, tMs, nextCursor);
+      const expected =
+        nextCursor.overlayOnly === true
+          ? `overlayOnly|${overlaySignature(overlayNow)}`
+          : expectedSignature(
+              sceneV2Frame(current.scene, indexes, tMs, {
+                words: current.words,
+                text: current.text,
+                reducedMotion: false,
+              }),
+              // Same millisecond, same pure call the render below made.
+              overlayCaptionsWin(overlay)
+                ? null
+                : captionFrame(current.captions, tMs, {
+                    words: current.words,
+                    reducedMotion: false,
+                  }),
+              overlayNow,
+              norm,
+            );
       for (let attempt = 0; attempt < 120; attempt += 1) {
         if (domSignature() === expected) {
           // No paint wait: CDP's captureScreenshot composites the committed
@@ -263,6 +329,14 @@ export function RenderStage() {
         throw new Error('showEndCard before loadPayload');
       }
       flushSync(() => setMode('endCard'));
+      // The QR is an <img> of a generated data: URI. Decoding it BEFORE the
+      // capture is the same first-frame gate the photos get (P3): a card
+      // captured with an undecoded QR is an un-scannable file nobody can
+      // recall.
+      const qr = document.querySelector<HTMLImageElement>('[data-render-end-card-qr]');
+      if (qr !== null) {
+        await qr.decode();
+      }
       await nextPaint();
     };
 
@@ -291,32 +365,70 @@ export function RenderStage() {
   // millisecond and we write them as inline style — the same shape the v2 scene
   // layers already use. Null in the end-card mode: the appended card carries no
   // caption.
+  const overlay = payload?.overlay ?? null;
+  const overlayFrame =
+    overlay === null || payload === null || mode !== 'scene' || cursor === null
+      ? null
+      : renderOverlayFrame(overlay, atMs, cursor);
+  // §2.4: word captions replace the segment band when the transcript carries
+  // timings. Both at once would stack two subtitle blocks on one frame.
   const caption =
-    payload === null || mode !== 'scene'
+    payload === null || mode !== 'scene' || overlayCaptionsWin(overlay)
       ? null
       : captionFrame(payload.captions, atMs, { words: payload.words, reducedMotion: false });
+  const grade = overlay?.grade ?? null;
 
   return (
-    <div className={styles.stage} data-render-stage data-render-mode={mode}>
-      {payload !== null && photoIndexes !== null && mode === 'scene' && (
-        <MotionSceneV2
-          scene={payload.scene}
-          photoIndexes={photoIndexes}
-          photos={payload.photos.map((photo) => ({
-            assetId: photo.assetId,
-            src: photo.src,
-            // Decorative in a capture context; the reel carries no DOM.
-            alt: '',
-          }))}
-          words={payload.words}
-          text={payload.text}
-          reducedMotion={false}
-          elapsedMs={atMs}
-          isPlaying={false}
-          clock={silentClockRef}
-          imageMode="plain"
-        />
-      )}
+    <div
+      className={
+        cursor?.overlayOnly === true ? `${styles.stage} ${styles.chromeOnly}` : styles.stage
+      }
+      data-render-stage
+      data-render-mode={cursor?.overlayOnly === true ? 'overlayOnly' : mode}
+    >
+      {payload !== null &&
+        photoIndexes !== null &&
+        mode === 'scene' &&
+        cursor?.overlayOnly !== true && (
+          <div
+            className={styles.graded}
+            data-render-graded
+            // §2.7: a per-channel curve over what the camera recorded. No
+            // geometry, no pixel synthesis, constant for the whole render.
+            style={grade === null ? undefined : { filter: grade.filter }}
+          >
+            <MotionSceneV2
+              scene={payload.scene}
+              photoIndexes={photoIndexes}
+              photos={payload.photos.map((photo) => ({
+                assetId: photo.assetId,
+                src: photo.src,
+                // Decorative in a capture context; the reel carries no DOM.
+                alt: '',
+              }))}
+              words={payload.words}
+              text={payload.text}
+              reducedMotion={false}
+              elapsedMs={atMs}
+              isPlaying={false}
+              clock={silentClockRef}
+              imageMode="plain"
+            />
+            {grade !== null && grade.vignetteOpacity > 0 && (
+              <div className={styles.vignette} style={{ opacity: grade.vignetteOpacity }} />
+            )}
+            {grade !== null && (
+              <div
+                className={styles.grain}
+                style={{
+                  opacity: grade.grainOpacity,
+                  backgroundImage: `url("${grainDataUri(grade.grainSeed)}")`,
+                }}
+              />
+            )}
+          </div>
+        )}
+      {overlayFrame !== null && <RenderOverlay frame={overlayFrame} />}
       {caption !== null && (
         <CaptionLayer>
           <PitchCaptionCard
@@ -330,7 +442,25 @@ export function RenderStage() {
       {payload !== null && mode === 'endCard' && (
         <div className={styles.endCard} data-render-end-card>
           <p className={styles.endCardBrand}>{payload.endCard.brand}</p>
+          {payload.endCard.approvedBy !== undefined && payload.endCard.approvedBy !== null && (
+            <p className={styles.endCardBadge} data-render-end-card-badge>
+              {payload.endCard.approvedBy}
+            </p>
+          )}
+          {payload.endCard.qrDataUri !== undefined && (
+            /* Generated locally from the campaign URL; the page fetches
+               nothing (P3). eslint-disable-next-line @next/next/no-img-element */
+            <img
+              className={styles.endCardQr}
+              data-render-end-card-qr
+              src={payload.endCard.qrDataUri}
+              alt=""
+            />
+          )}
           <p className={styles.endCardUrl}>{payload.endCard.urlText}</p>
+          {payload.endCard.cta !== undefined && (
+            <p className={styles.endCardCta}>{payload.endCard.cta}</p>
+          )}
         </div>
       )}
       <div className={styles.fontWarmup} aria-hidden="true">

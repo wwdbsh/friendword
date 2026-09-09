@@ -32,6 +32,8 @@ export const DIAGNOSTIC_LIMITS = {
 export type RenderStage =
   | 'input-synthesis'
   | 'scene-prepare'
+  /** §2.2-2: cut, fade and (optionally) mix the derivative audio track. */
+  | 'audio-build'
   | 'browser-launch'
   | 'page-goto'
   | 'harness-ready'

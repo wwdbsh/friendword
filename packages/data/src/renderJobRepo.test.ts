@@ -20,6 +20,8 @@ import {
   RenderJobRepo,
   claimMediaRenderJob,
   completeMediaRenderJob,
+  fetchRenderJobChoice,
+  recordRenderJobCut,
 } from './renderJobRepo';
 
 const USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -397,6 +399,149 @@ describe('render worker surface', () => {
         reason: 'renderer crashed',
       }),
     ).rejects.toBeInstanceOf(DataLayerError);
+  });
+});
+
+// ── 0063: the worker's two direct reads/writes of its own job row ──────────
+//
+// These are the ONE deliberate exception to invariant 1 below. claim_media_
+// render_job predates 0063 and returns the lease fields only; rather than
+// change a lease RPC's return shape, the worker reads the two columns it needs
+// and writes back what it rendered. The table is service-role only, so this is
+// not a new exposure — and the member surface still touches no table at all,
+// which is what the last describe here proves.
+
+type TableCall = {
+  readonly table: string;
+  readonly op: 'select' | 'update';
+  readonly values?: Record<string, unknown>;
+  readonly filters: [string, unknown][];
+};
+
+function fakeTableClient(
+  row: unknown,
+  error: { message: string } | null = null,
+  /** Rows the UPDATE ... RETURNING reports; [] means the lease no longer holds. */
+  updatedRows: readonly { id: string }[] = [{ id: JOB_ID }],
+) {
+  const calls: TableCall[] = [];
+  const from = (table: string) => {
+    const call: TableCall = { table, op: 'select', filters: [] };
+    let updating = false;
+    const builder: Record<string, unknown> = {
+      select: () => builder,
+      update: (values: Record<string, unknown>) => {
+        updating = true;
+        calls.push({ table, op: 'update', values, filters: call.filters });
+        return builder;
+      },
+      eq: (column: string, value: unknown) => {
+        call.filters.push([column, value]);
+        return builder;
+      },
+      maybeSingle: async () => {
+        calls.push(call);
+        return { data: row, error };
+      },
+      then: (onF: (v: unknown) => unknown) =>
+        Promise.resolve({ data: updating ? updatedRows : null, error }).then(onF),
+    };
+    return builder;
+  };
+  return { client: { from } as unknown as ServiceSupabaseClient, calls };
+}
+
+describe('the worker reads its own job row for the variant (0063)', () => {
+  it('maps the recorded variant and options', async () => {
+    const { client, calls } = fakeTableClient({ variant: 'highlight', options: { music: true } });
+    expect(await fetchRenderJobChoice(client, JOB_ID)).toEqual({
+      variant: 'highlight',
+      options: { music: true },
+    });
+    expect(calls[0]?.table).toBe('media_render_jobs');
+    expect(calls[0]?.filters).toEqual([['id', JOB_ID]]);
+  });
+
+  it('reads a NULL-carrying or missing row as FULL, never as a cut', async () => {
+    // Not a pre-0063 fallback — a database without the columns raises 42703 and
+    // is reported below. This is the NULL row: nothing can write one today, and
+    // if one appeared the answer is the render this pipeline always made.
+    const { client } = fakeTableClient({});
+    expect(await fetchRenderJobChoice(client, JOB_ID)).toEqual({ variant: 'full', options: {} });
+    const missing = fakeTableClient(null);
+    expect(await fetchRenderJobChoice(missing.client, JOB_ID)).toEqual({
+      variant: 'full',
+      options: {},
+    });
+  });
+
+  it('reports a read failure rather than guessing', async () => {
+    const { client } = fakeTableClient(null, { message: 'boom' });
+    await expect(fetchRenderJobChoice(client, JOB_ID)).rejects.toBeInstanceOf(DataLayerError);
+  });
+});
+
+describe('the worker records what it actually rendered (0063)', () => {
+  it('writes the effective variant, the plan and its hash under the lease', async () => {
+    const { client, calls } = fakeTableClient(null);
+    await recordRenderJobCut(client, JOB_ID, LEASE_TOKEN, {
+      effectiveVariant: 'highlight',
+      cutPlan: { version: 1 },
+      cutHash: 'a'.repeat(64),
+    });
+    const update = calls.find((call) => call.op === 'update');
+    expect(update?.table).toBe('media_render_jobs');
+    expect(update?.values).toEqual({
+      effective_variant: 'highlight',
+      cut_plan: { version: 1 },
+      cut_hash: 'a'.repeat(64),
+    });
+    // The lease is part of the predicate: a worker whose lease lapsed must not
+    // overwrite the plan of whoever picked the job up next.
+    expect(update?.filters).toEqual([
+      ['id', JOB_ID],
+      ['lease_token', LEASE_TOKEN],
+    ]);
+  });
+
+  it('records a fallback as full with no plan', async () => {
+    const { client, calls } = fakeTableClient(null);
+    await recordRenderJobCut(client, JOB_ID, LEASE_TOKEN, {
+      effectiveVariant: 'full',
+      cutPlan: null,
+      cutHash: null,
+    });
+    expect(calls.find((call) => call.op === 'update')?.values).toEqual({
+      effective_variant: 'full',
+      cut_plan: null,
+      cut_hash: null,
+    });
+  });
+
+  it('throws when the lease no longer holds and nothing was updated', async () => {
+    // Zero rows means another worker owns the job. Succeeding silently would
+    // leave effective_variant reading as NULL — which the product interprets as
+    // "rendered before 0063".
+    const { client } = fakeTableClient(null, null, []);
+    await expect(
+      recordRenderJobCut(client, JOB_ID, LEASE_TOKEN, {
+        effectiveVariant: 'highlight',
+        cutPlan: { version: 1 },
+        cutHash: 'a'.repeat(64),
+      }),
+    ).rejects.toBeInstanceOf(DataLayerError);
+  });
+
+  it('refuses a malformed job id or lease token before writing', async () => {
+    const { client, calls } = fakeTableClient(null);
+    await expect(
+      recordRenderJobCut(client, 'not-a-uuid', LEASE_TOKEN, {
+        effectiveVariant: 'full',
+        cutPlan: null,
+        cutHash: null,
+      }),
+    ).rejects.toThrow();
+    expect(calls).toEqual([]);
   });
 });
 

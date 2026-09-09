@@ -181,4 +181,70 @@ describe.runIf(MEASURE)('worst case: 60s scene, 1800 frames', () => {
       clearInterval(sampler);
     }
   });
+
+  // §7 budget check for the DERIVATIVE path: the same 60s scene, but with the
+  // music bed, the overlay and word captions on — the most expensive thing the
+  // export card can ask for, since a highlight renders a third of the frames.
+  it('measures the worst DERIVATIVE case: 60s full + music + overlay + captions', async () => {
+    const { scene, photos, words, text, captions } = worstCaseScene();
+    const workDir = path.join(os.tmpdir(), 'friendword-render-measure-music');
+    mkdirSync(workDir, { recursive: true });
+
+    const startedAt = Date.now();
+    const { mp4, stats } = await renderScene(
+      scene,
+      { photos, audio: audioM4a(60) },
+      {
+        baseUrl: BASE_URL,
+        renderKey: 'measure-60s-music',
+        campaignSlug: 'demo-blair',
+        shareOrigin: 'https://friendword-e2e.example',
+        words,
+        text,
+        captions,
+        variant: 'full',
+        music: true,
+        musicSeed: 'd'.repeat(64),
+        daterName: 'Blair',
+        overlayStage: {
+          introducerLabel: 'MAYA INTRODUCES',
+          daterName: 'Blair',
+          relationshipChip: 'Friends for 3–10 years',
+        },
+        timedWords: captions.flatMap((caption) =>
+          caption.text.split(' ').map((word, wordIndex) => ({
+            segmentIndex: caption.segmentIndex,
+            wordIndex,
+            text: word,
+            startMs: caption.startMs + wordIndex * 300,
+            endMs: caption.startMs + wordIndex * 300 + 280,
+          })),
+        ),
+        workDir,
+        keepWorkFiles: true,
+        timeBudgetMs: 570_000,
+      },
+    );
+
+    console.log(
+      `[render measure derivative] ${JSON.stringify(
+        {
+          sceneFrames: stats.sceneFrames,
+          endCardFrames: stats.endCardFrames,
+          captureMs: stats.captureMs,
+          encodeTailMs: stats.encodeTailMs,
+          totalMs: stats.totalMs,
+          wallMs: Date.now() - startedAt,
+          audioDurationMs: stats.audioDurationMs,
+          outputMb: Number((stats.outputBytes / 1e6).toFixed(1)),
+        },
+        null,
+        2,
+      )}`,
+    );
+    expect(stats.sceneFrames).toBe(1_800);
+    expect(mp4.byteLength).toBeGreaterThan(1e6);
+    // §7: the route's ceiling is 480s of render budget.
+    expect(stats.totalMs).toBeLessThan(480_000);
+  });
 });

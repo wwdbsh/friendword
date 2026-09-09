@@ -3,6 +3,8 @@ import type { PitchSceneV2 } from '@friendword/contracts';
 import type { CaptionSegment } from '@/pitch/captionChrome';
 import type { SceneTextFields, SceneWord } from '@/pitch/sceneV2';
 
+import type { RenderFrameCursor, RenderOverlay } from './overlay';
+
 // The wire shape the render engine injects into the capture page
 // (app/internal/render/[revisionId]). Client-safe on purpose: the page imports
 // these types, so nothing in this module may touch Node APIs.
@@ -23,6 +25,16 @@ export type RenderEndCard = {
   readonly brand: string;
   /** host + /p/slug, built by endCardUrlText() from the configured origin. */
   readonly urlText: string;
+  /**
+   * §2.5, highlight variant only. "Approved by {name}", where the name is the
+   * Dater's CONFIRMED display name (publicDisplayName) — still not a free-text
+   * slot: no other string can reach this field.
+   */
+  readonly approvedBy?: string | null;
+  /** The one fixed call to action. A platform constant, same on every reel. */
+  readonly cta?: string;
+  /** SVG data: URI of the campaign URL. Generated, never fetched (P3). */
+  readonly qrDataUri?: string;
 };
 
 export type RenderPayload = {
@@ -39,6 +51,13 @@ export type RenderPayload = {
    */
   readonly captions: readonly CaptionSegment[];
   readonly endCard: RenderEndCard;
+  /**
+   * §2.3/§2.4 render-only overlay: stage chrome, the measured waveform, the
+   * word captions and the photo grade. Null on the legacy path
+   * (RENDER_HIGHLIGHT_ENABLED=false, or full variant with music off), where the
+   * capture page draws exactly what it drew before.
+   */
+  readonly overlay?: RenderOverlay | null;
 };
 
 /** What the capture page exposes on `window` for the Node driver. */
@@ -49,8 +68,13 @@ export type RenderHarnessApi = {
    * Steps the interpreter to `tMs` and resolves once the DOM provably shows the
    * frame for that millisecond (the committed frame's signature matches the
    * interpreter's expected signature). Returns the signature for diagnostics.
+   *
+   * `tMs` is always a timestamp on the APPROVED scene's own timeline. For a
+   * highlight the driver walks only the cut windows' timestamps; `cursor` says
+   * where the frame lands in the OUTPUT file, which is what the waveform
+   * playhead and the frame signature need.
    */
-  readonly seek: (tMs: number) => Promise<string>;
+  readonly seek: (tMs: number, cursor?: RenderFrameCursor) => Promise<string>;
   /** Swaps the stage to the appended end card and resolves after paint. */
   readonly showEndCard: () => Promise<void>;
 };

@@ -20,7 +20,7 @@ import {
   type BrowserExit,
   type LaunchProbe,
 } from '@/lib/pitchRender/diagnostics';
-import { resolveShareOrigin } from '@/lib/pitchRender/endCard';
+import { resolveShareOrigin } from '@/lib/pitchRender/shareOrigin';
 import { startMemorySampler } from '@/lib/pitchRender/peakMemory';
 import { renderScene, type RenderPhotoAsset } from '@/lib/pitchRender/renderScene';
 import { renderRunSecret, renderSecretMatches } from '@/lib/pitchRender/secret';

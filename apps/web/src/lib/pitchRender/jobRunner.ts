@@ -3,15 +3,30 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 import {
+  buildHighlightPlan,
+  buildTimedCaptionWords,
+  type HighlightPlan,
+  type TimedCaptionWord,
+} from '@friendword/contracts';
+import {
   claimMediaRenderJob,
   completeMediaRenderJob,
+  fetchRenderJobChoice,
   indexTranscriptWords,
+  publicDisplayName,
+  recordRenderJobCut,
   type ClaimedRenderJob,
+  type Json,
+  type PitchRenderVariant,
   type ServiceSupabaseClient,
 } from '@friendword/data';
 
 import type { CaptionSegment } from '@/pitch/captionChrome';
+import { relationshipChipLabel } from '@/pitch/view';
 import { sceneV2ReferencesText, type SceneTextFields, type SceneWord } from '@/pitch/sceneV2';
+
+import type { RenderOverlayStage } from './overlay';
+import { stageIntroducerLabel } from './overlay';
 
 import { renderScene } from './renderScene';
 import {
@@ -52,6 +67,29 @@ import { assertRenderableScene } from './validate';
 
 const DEFAULT_MAX_JOBS = 2;
 const MAX_FAILURE_REASON_CHARS = 300;
+
+/**
+ * The name printed when a display name is not publicly showable — the same
+ * fallback the published page and the OG card already use, so the MP4 never
+ * says something about a person their own page does not.
+ */
+const NAME_FALLBACK = 'A friend';
+
+/**
+ * §0 rollback, and the rollout switch.
+ *
+ * Default OFF: until the kit UI ships (T005) nobody can CHOOSE a variant, so a
+ * worker that defaulted to on would start shipping cut MP4s for jobs whose
+ * requesters were never offered the choice. Deploy order is therefore
+ * migration -> this code (inert) -> kit UI -> flip the flag. Off, every job
+ * takes the pre-2026-09-09 path: the full approved timeline, the original
+ * audio copied bit for bit, no overlay, the 1.5s end card.
+ *
+ * Only the exact string 'true' (or '1') enables it — a typo must fail closed.
+ */
+export function highlightRenderEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.RENDER_HIGHLIGHT_ENABLED === 'true' || env.RENDER_HIGHLIGHT_ENABLED === '1';
+}
 
 // The pass clock — lease length, claim window, hard budget, completion margin
 // and the refuse-to-start floor — now lives in ./timeBudget, where each value
@@ -165,10 +203,37 @@ export async function processRenderJob(
       text: inputs.text,
       captions: inputs.captions,
       timeBudgetMs,
+      variant: inputs.variant,
+      cutWindows: inputs.plan?.windows ?? null,
+      music: inputs.music,
+      overlayStage: inputs.overlayStage,
+      timedWords: inputs.timedWords,
+      daterName: inputs.daterName,
+      // §2.6: the cut identifies the bed; without a cut the scene does.
+      musicSeed: inputs.plan?.hash ?? job.sceneHash,
     });
 
     const outputStoragePath = renderOutputStoragePath(job.pitchDraftId, job.revisionId);
     await uploadRenderOutput(client, outputStoragePath, mp4);
+
+    // §2.1 note 5: what the worker actually rendered, recorded on the job row
+    // before the completion that publishes it. Written on EVERY success — a
+    // NULL effective_variant may only ever mean "completed before 0063", which
+    // stays true only because this line never skips.
+    try {
+      await recordRenderJobCut(client, job.jobId, job.leaseToken, {
+        effectiveVariant: stats.effectiveVariant,
+        cutPlan: stats.effectiveVariant === 'highlight' ? highlightPlanJson(inputs.plan) : null,
+        cutHash: stats.effectiveVariant === 'highlight' ? (inputs.plan?.hash ?? null) : null,
+      });
+    } catch {
+      // Most often a lapsed lease: another worker owns this job now. Reporting
+      // success here would publish an MP4 whose effective_variant was never
+      // written, and the product reads a NULL there as "rendered before 0063".
+      throw new RenderJobError(
+        'the render job lease no longer holds; the cut record was not written',
+      );
+    }
 
     // The container's real timeline: approved scene frames plus the appended
     // end card, at the encoder's frame rate.
@@ -218,7 +283,31 @@ type RenderInputs = {
   readonly words: readonly SceneWord[];
   readonly text: SceneTextFields | null;
   readonly captions: readonly CaptionSegment[];
+  readonly variant: PitchRenderVariant;
+  readonly music: boolean;
+  /** Null when the transcript could not support a cut (§1 rule 5). */
+  readonly plan: HighlightPlan | null;
+  readonly overlayStage: RenderOverlayStage | null;
+  readonly timedWords: readonly TimedCaptionWord[] | null;
+  readonly daterName: string;
 };
+
+/** The plan as JSONB — a plain object, so PostgREST stores it as written. */
+function highlightPlanJson(plan: HighlightPlan | null): Json | null {
+  if (plan === null) {
+    return null;
+  }
+  return {
+    version: plan.version,
+    windows: plan.windows.map((window) => ({
+      startMs: window.startMs,
+      endMs: window.endMs,
+      reason: window.reason,
+    })),
+    totalMs: plan.totalMs,
+    hash: plan.hash,
+  };
+}
 
 async function loadRenderInputs(
   client: ServiceSupabaseClient,
@@ -294,6 +383,49 @@ async function loadRenderInputs(
   const words = sceneWordsFromTranscript(revision.transcript);
   const captions = captionsFromTranscript(revision.transcript);
 
+  // ── §2.1/§2.2: which MP4 this job asked for, and what it can actually be ──
+  //
+  // The rollback flag wins over the row: with RENDER_HIGHLIGHT_ENABLED=false
+  // every job is the render this pipeline shipped before, whatever the export
+  // card recorded (§0 rollback, §6).
+  const enabled = highlightRenderEnabled();
+  const choice = enabled
+    ? await fetchRenderJobChoice(client, job.jobId)
+    : { variant: 'full' as const, options: {} };
+  const variant: PitchRenderVariant = enabled ? choice.variant : 'full';
+  const music = enabled && choice.options.music === true;
+
+  const people = await fetchRenderPeople(client, job.campaignId, job.pitchDraftId);
+
+  // §1: the cut plan, from the FROZEN transcript and the reviewed structure —
+  // the same two documents the captions come from. Null (fewer than two
+  // segments, or no transcript) means the highlight is impossible and the
+  // engine renders full; §2.2-1.
+  const plan =
+    variant === 'highlight'
+      ? buildHighlightPlan({
+          segments: transcriptSegmentsForPlan(revision.transcript),
+          structure: text,
+          daterDisplayName: people.daterName,
+          // Rule 4: prefer cutting where the scene already cuts, so a window
+          // edge never lands mid-Ken-Burns.
+          shotBoundariesMs: scene.shots.map((shot) => shot.startMs),
+        })
+      : null;
+
+  // §2.4: word captions when the transcript carries timings (production has
+  // them on everything recorded since 2026-08-09), segment captions otherwise.
+  const timedWords = buildTimedCaptionWords(indexedWordsFromTranscript(revision.transcript));
+
+  const overlayStage: RenderOverlayStage | null =
+    variant === 'highlight' || music
+      ? {
+          introducerLabel: stageIntroducerLabel(people.introducerName),
+          daterName: people.daterName,
+          relationshipChip: people.relationshipChip,
+        }
+      : null;
+
   return {
     sceneJson,
     assets: { photos, audio: { mimeType: voiceMimeType, bytes: voiceBytes } },
@@ -301,6 +433,12 @@ async function loadRenderInputs(
     words,
     text,
     captions,
+    variant,
+    music,
+    plan,
+    overlayStage,
+    timedWords,
+    daterName: people.daterName,
   };
 }
 
@@ -367,6 +505,74 @@ async function fetchCampaignSlug(
     throw new RenderJobError('could not read the campaign');
   }
   return data?.slug ?? null;
+}
+
+/** The two names and the relationship chip the stage chrome prints (§2.3). */
+type RenderPeople = {
+  readonly daterName: string;
+  readonly introducerName: string;
+  readonly relationshipChip: string | null;
+};
+
+const campaignOwnerSchema = z.object({ owner_user_id: z.string().uuid() });
+const draftPeopleSchema = z.object({
+  created_by_user_id: z.string().uuid(),
+  relationship_type: z.string().nullable(),
+  relationship_duration: z.string().nullable(),
+});
+const profileRowsSchema = z.array(
+  z.object({
+    user_id: z.string().uuid(),
+    display_name: z.string(),
+    display_name_confirmed: z.boolean(),
+  }),
+);
+
+/**
+ * Names for the burned-in stage chrome.
+ *
+ * Both go through `publicDisplayName`, the same gate the published page and the
+ * OG card use: a display name the bootstrap invented from an email local part
+ * is NOT a name to burn into a file that will be posted publicly, and an
+ * unconfirmed one becomes the page's own 'A friend'. A downloaded MP4 cannot be
+ * recalled, so this is the one place a fallback matters most.
+ */
+async function fetchRenderPeople(
+  client: ServiceSupabaseClient,
+  campaignId: string,
+  pitchDraftId: string,
+): Promise<RenderPeople> {
+  const [{ data: campaign }, { data: draft }] = await Promise.all([
+    client.from('campaigns').select('owner_user_id').eq('id', campaignId).maybeSingle(),
+    client
+      .from('pitch_drafts')
+      .select('created_by_user_id,relationship_type,relationship_duration')
+      .eq('id', pitchDraftId)
+      .maybeSingle(),
+  ]);
+  const owner = campaignOwnerSchema.safeParse(campaign);
+  const people = draftPeopleSchema.safeParse(draft);
+  if (!owner.success || !people.success) {
+    // Not fatal: the reel is still the approved scene, it just gets no names.
+    return { daterName: NAME_FALLBACK, introducerName: NAME_FALLBACK, relationshipChip: null };
+  }
+  const { data: profiles } = await client
+    .from('profiles')
+    .select('user_id,display_name,display_name_confirmed')
+    .in('user_id', [owner.data.owner_user_id, people.data.created_by_user_id]);
+  const parsed = profileRowsSchema.safeParse(profiles ?? []);
+  const find = (userId: string): string =>
+    (parsed.success
+      ? publicDisplayName(parsed.data.find((row) => row.user_id === userId))
+      : null) ?? NAME_FALLBACK;
+  return {
+    daterName: find(owner.data.owner_user_id),
+    introducerName: find(people.data.created_by_user_id),
+    relationshipChip: relationshipChipLabel(
+      people.data.relationship_type,
+      people.data.relationship_duration,
+    ),
+  };
 }
 
 const assetRowsSchema = z.array(
@@ -447,6 +653,55 @@ function sceneWordsFromTranscript(transcript: unknown): readonly SceneWord[] {
     wordIndex: word.wordIndex,
     text: word.text,
   }));
+}
+
+/**
+ * The segments the cut plan selects over: whole sentences, in provider order,
+ * with the provider's own seconds. Same list the caption band reads, so a
+ * window boundary is always a boundary the Dater saw.
+ */
+function transcriptSegmentsForPlan(
+  transcript: unknown,
+): readonly { readonly start: number; readonly end: number; readonly text: string }[] {
+  const parsed = transcriptCaptionsSchema.safeParse(transcript);
+  if (!parsed.success) {
+    return [];
+  }
+  const segments: { start: number; end: number; text: string }[] = [];
+  for (const segment of parsed.data.segments) {
+    if (segment === null) {
+      continue;
+    }
+    segments.push({ start: segment.start, end: segment.end, text: segment.text });
+  }
+  return segments;
+}
+
+/** Structurally `IndexedTranscriptWord`, and what buildTimedCaptionWords eats. */
+type IndexedWordForCaptions = {
+  readonly segmentIndex: number;
+  readonly wordIndex: number;
+  readonly startMs: number;
+  readonly endMs: number;
+  readonly text: string;
+};
+
+/**
+ * Word timings through the SINGLE mapping (`indexTranscriptWords`, T002
+ * decision): the MP4's word captions must light up the same words the approved
+ * wordPop effects reference, so a second numbering rule is not allowed to exist.
+ */
+function indexedWordsFromTranscript(transcript: unknown): readonly IndexedWordForCaptions[] {
+  const parsed = transcriptSegmentsSchema.safeParse(transcript);
+  if (!parsed.success) {
+    return [];
+  }
+  return indexTranscriptWords(
+    transcript,
+    parsed.data.segments.map((segment) => ({
+      startMs: Math.max(0, Math.round(segment.start * 1000)),
+    })),
+  );
 }
 
 const transcriptCaptionsSchema = z

@@ -1,7 +1,7 @@
 import { after, NextResponse } from 'next/server';
 
 import { triggerNotificationSend } from '@/lib/notifications/trigger';
-import { resolveShareOrigin } from '@/lib/pitchRender/endCard';
+import { resolveShareOrigin } from '@/lib/pitchRender/shareOrigin';
 import { runRenderPass } from '@/lib/pitchRender/jobRunner';
 import { renderRunSecret, renderSecretMatches } from '@/lib/pitchRender/secret';
 import { triggerRenderRun } from '@/lib/pitchRender/trigger';

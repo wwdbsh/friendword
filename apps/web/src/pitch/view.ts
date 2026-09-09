@@ -199,15 +199,29 @@ export function toPitchPlayerView(pitch: PitchView): PitchPlayerView {
 }
 
 export function relationshipLabel(pitch: PublishedPitch): string {
-  const kind =
-    pitch.relationshipType === null
-      ? 'Friends'
-      : (RELATIONSHIP_LABELS[pitch.relationshipType] ?? 'Friends');
-  const duration =
-    pitch.relationshipDuration === null
-      ? null
-      : (DURATION_LABELS[pitch.relationshipDuration] ?? null);
+  return relationshipChipLabel(pitch.relationshipType, pitch.relationshipDuration) ?? 'Friends';
+}
 
+/**
+ * The relationship chip from the two stored codes, or null when the draft
+ * recorded neither.
+ *
+ * Extracted from relationshipLabel so the MP4's stage chrome (§2.3) prints
+ * EXACTLY the phrase the published page prints, from the same two maps. It
+ * returns null rather than 'Friends' where the page defaults, because a chip
+ * with no data behind it is better left off a burned-in frame than guessed.
+ */
+export function relationshipChipLabel(
+  relationshipType: string | null,
+  relationshipDuration: string | null,
+): string | null {
+  if (relationshipType === null && relationshipDuration === null) {
+    return null;
+  }
+  const kind =
+    relationshipType === null ? 'Friends' : (RELATIONSHIP_LABELS[relationshipType] ?? 'Friends');
+  const duration =
+    relationshipDuration === null ? null : (DURATION_LABELS[relationshipDuration] ?? null);
   return duration === null ? kind : `${kind} ${duration}`;
 }
 

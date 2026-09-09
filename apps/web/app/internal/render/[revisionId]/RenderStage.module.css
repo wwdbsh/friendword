@@ -39,6 +39,19 @@
   text-align: center;
 }
 
+/* §2.5: the highlight's card is cream paper — it is the CTA frame, and it has
+   to read as the product's own surface rather than as more video. The legacy
+   card (no QR) keeps the ink stage it has always had. */
+.endCard:has([data-render-end-card-qr]) {
+  background: var(--color-background);
+  color: var(--color-ink);
+}
+
+.endCard:has([data-render-end-card-qr]) .endCardCta,
+.endCard:has([data-render-end-card-qr]) .endCardBrand {
+  color: var(--color-ink);
+}
+
 .endCardBrand {
   margin: 0;
   font-family: var(--font-display), sans-serif;
@@ -61,4 +74,60 @@
   top: 0;
   left: -9999px;
   visibility: hidden;
+}
+
+/* §2.7 photo grade. The filter wraps the approved scene layer; the crop ladder
+   and every timing inside it are untouched, and no pixel is synthesized. */
+.graded {
+  position: absolute;
+  inset: 0;
+}
+
+.vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgb(0 0 0 / 0%) 45%, rgb(0 0 0 / 100%) 100%);
+  pointer-events: none;
+}
+
+.grain {
+  position: absolute;
+  inset: 0;
+  background-repeat: repeat;
+  background-size: 180px 180px;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+
+/* §2.2-4 overlay-only mode: the selfie opening is composited by ffmpeg, so the
+   capture page contributes the chrome over a TRANSPARENT frame. */
+.chromeOnly {
+  background: transparent;
+}
+
+.endCardBadge {
+  margin: 0;
+  padding: 10px 24px;
+  border-radius: 999px;
+  background: var(--color-hype);
+  color: var(--color-ink);
+  font-family: var(--font-body), sans-serif;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+}
+
+.endCardQr {
+  width: 360px;
+  height: 360px;
+  border-radius: 24px;
+  background: var(--color-background);
+  image-rendering: pixelated;
+}
+
+.endCardCta {
+  margin: 0;
+  color: var(--color-stage-text);
+  font-family: var(--font-body), sans-serif;
+  font-size: var(--font-size-xl);
+  font-weight: 600;
 }

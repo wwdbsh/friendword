@@ -24,6 +24,8 @@ const LEASE_TOKEN = '22222222-2222-4222-8222-222222222222';
 const CAMPAIGN_ID = '33333333-3333-4333-8333-333333333333';
 const DRAFT_ID = '44444444-4444-4444-8444-444444444444';
 const REVISION_ID = '55555555-5555-4555-8555-555555555555';
+const OWNER_ID = '66666666-6666-4666-8666-666666666666';
+const INTRODUCER_ID = '77777777-7777-4777-8777-777777777777';
 
 /**
  * The canonical text the DB would hand over via scene_definition::text. The
@@ -43,6 +45,8 @@ function canonicalSceneText(): string {
 type FakeWorld = {
   readonly client: ServiceSupabaseClient;
   readonly completions: { jobId: string; leaseToken: string; params: Record<string, unknown> }[];
+  /** Direct writes to media_render_jobs — the 0063 cut record (§2.1 note 5). */
+  readonly cutUpdates: Record<string, unknown>[];
   readonly uploads: {
     objectName: string;
     contentType: string | undefined;
@@ -56,8 +60,17 @@ function makeFakeClient(input: {
   readonly sceneCanonical: string | null;
   readonly voiceBytes: Uint8Array;
   readonly uploadError?: boolean;
+  /** What request_pitch_render recorded on the job row (0063). */
+  readonly variant?: 'full' | 'highlight';
+  readonly music?: boolean;
+  /** A transcript with enough sentences for a cut plan, when a test needs one. */
+  readonly transcript?: unknown;
+  readonly structure?: unknown;
+  /** The cut-record UPDATE matches no row: another worker owns the job. */
+  readonly leaseLapsed?: boolean;
 }): FakeWorld {
   const completions: FakeWorld['completions'] = [];
+  const cutUpdates: FakeWorld['cutUpdates'] = [];
   const uploads: FakeWorld['uploads'] = [];
   const downloads: string[] = [];
   let claimed = false;
@@ -67,8 +80,8 @@ function makeFakeClient(input: {
     id: REVISION_ID,
     pitch_draft_id: DRAFT_ID,
     voice_asset_path: `pitch-media/${DRAFT_ID}/voice.m4a`,
-    structure: null,
-    transcript: null,
+    structure: input.structure ?? null,
+    transcript: input.transcript ?? null,
     scene_canonical: input.sceneCanonical,
   };
   const assetRows = scene.assetIds.map((assetId, index) => ({
@@ -82,21 +95,56 @@ function makeFakeClient(input: {
       return revisionRow;
     }
     if (table === 'campaigns') {
-      return { slug: 'unit-fixture' };
+      return { slug: 'unit-fixture', owner_user_id: OWNER_ID };
     }
     if (table === 'pitch_assets') {
       return assetRows;
+    }
+    if (table === 'media_render_jobs') {
+      return {
+        variant: input.variant ?? 'full',
+        options: input.music === true ? { music: true } : {},
+      };
+    }
+    if (table === 'pitch_drafts') {
+      return {
+        created_by_user_id: INTRODUCER_ID,
+        relationship_type: 'friend',
+        relationship_duration: 'y3to10',
+      };
+    }
+    if (table === 'profiles') {
+      return [
+        { user_id: OWNER_ID, display_name: 'Blair', display_name_confirmed: true },
+        { user_id: INTRODUCER_ID, display_name: 'Maya', display_name_confirmed: true },
+      ];
     }
     return null;
   }
 
   function makeBuilder(table: string): Record<string, unknown> {
+    // An UPDATE ... RETURNING reports the rows it matched; the worker refuses
+    // to continue when that is empty (a lapsed lease).
+    let updating = false;
     const builder: Record<string, unknown> = {
       select: () => builder,
       eq: () => builder,
+      in: () => builder,
+      update: (values: Record<string, unknown>) => {
+        cutUpdates.push(values);
+        updating = true;
+        return builder;
+      },
       maybeSingle: () => Promise.resolve({ data: tableResult(table), error: null }),
       then: (onF: (v: unknown) => unknown, onR?: (e: unknown) => unknown) =>
-        Promise.resolve({ data: tableResult(table), error: null }).then(onF, onR),
+        Promise.resolve({
+          data: updating
+            ? input.leaseLapsed === true
+              ? []
+              : [{ id: JOB_ID }]
+            : tableResult(table),
+          error: null,
+        }).then(onF, onR),
     };
     return builder;
   }
@@ -159,7 +207,7 @@ function makeFakeClient(input: {
     },
   } as unknown as ServiceSupabaseClient;
 
-  return { client, completions, uploads, downloads };
+  return { client, completions, uploads, downloads, cutUpdates };
 }
 
 function job(overrides: Partial<ClaimedRenderJob> = {}): ClaimedRenderJob {
@@ -187,6 +235,16 @@ function fakeRender(calls: { args: Parameters<typeof renderScene> }[]): typeof r
         sceneFrames: 450,
         endCardFrames: 45,
         fps: 30,
+        // The engine reports what it ACTUALLY rendered; the worker copies that
+        // to the job row rather than echoing what was requested (§2.2-1).
+        variant: args[2].variant ?? 'full',
+        effectiveVariant:
+          args[2].variant === 'highlight' && (args[2].cutWindows?.length ?? 0) > 0
+            ? 'highlight'
+            : 'full',
+        cutTotalMs: 24_000,
+        audioDurationMs: 24_000,
+        endCardMs: 1_500,
         captureMs: 10,
         encodeTailMs: 5,
         totalMs: 20,
@@ -351,5 +409,207 @@ describe('runRenderPass — contract pins', () => {
     expect(renders).toHaveLength(0);
     expect(summary.jobs[0]?.outcome).toBe('failed');
     expect(String(world.completions[0]?.params.reason)).toContain('no motion scene');
+  });
+});
+
+// ── §2.1/§2.2: the variant, the cut plan and the record of what was rendered ──
+
+/** A 60s transcript with twelve sentences and word timings — enough for a cut. */
+function richTranscript(): unknown {
+  const segments = Array.from({ length: 12 }, (_unused, index) => ({
+    start: index * 5,
+    end: (index + 1) * 5,
+    text:
+      index === 2
+        ? 'Blair drove four hours for a birthday dinner and never mentioned it.'
+        : `Sentence ${index} about someone worth knowing, said plainly and warmly.`,
+  }));
+  const words = segments.flatMap((segment, segmentIndex) =>
+    segment.text.split(' ').map((word, wordIndex) => ({
+      word,
+      start: segment.start + wordIndex * 0.3,
+      end: segment.start + wordIndex * 0.3 + 0.25,
+      // The indexer numbers words from their position in provider order.
+      segmentIndex,
+    })),
+  );
+  return { segments, words };
+}
+
+const RICH_STRUCTURE = {
+  hook: 'The friend who never cancels',
+  relationship_context: 'Roommates for three years',
+  three_specific_qualities: ['Loyal', 'Curious', 'Funny'],
+  evidence_or_anecdote: 'Blair drove four hours for a birthday dinner',
+  good_match_for: 'Someone who loves slow mornings',
+};
+
+async function withEnvValue<T>(value: string | undefined, run: () => Promise<T>): Promise<T> {
+  const saved = process.env.RENDER_HIGHLIGHT_ENABLED;
+  if (value === undefined) {
+    delete process.env.RENDER_HIGHLIGHT_ENABLED;
+  } else {
+    process.env.RENDER_HIGHLIGHT_ENABLED = value;
+  }
+  try {
+    return await run();
+  } finally {
+    if (saved === undefined) {
+      delete process.env.RENDER_HIGHLIGHT_ENABLED;
+    } else {
+      process.env.RENDER_HIGHLIGHT_ENABLED = saved;
+    }
+  }
+}
+
+function withEnv(value: string | undefined, run: () => Promise<void>): Promise<void> {
+  const saved = process.env.RENDER_HIGHLIGHT_ENABLED;
+  if (value === undefined) {
+    delete process.env.RENDER_HIGHLIGHT_ENABLED;
+  } else {
+    process.env.RENDER_HIGHLIGHT_ENABLED = value;
+  }
+  return run().finally(() => {
+    if (saved === undefined) {
+      delete process.env.RENDER_HIGHLIGHT_ENABLED;
+    } else {
+      process.env.RENDER_HIGHLIGHT_ENABLED = saved;
+    }
+  });
+}
+
+describe('the render variant, end to end through the worker', () => {
+  it('cuts a highlight from the frozen transcript and records the plan', async () => {
+    const world = makeFakeClient({
+      job: job(),
+      sceneCanonical: canonicalSceneText(),
+      voiceBytes: new Uint8Array([1]),
+      variant: 'highlight',
+      music: true,
+      transcript: richTranscript(),
+      structure: RICH_STRUCTURE,
+    });
+    const renders: { args: Parameters<typeof renderScene> }[] = [];
+
+    await withEnv('true', async () => {
+      await runRenderPass(world.client, passOptions(fakeRender(renders)));
+    });
+
+    const options = renders[0]?.args[2];
+    expect(options?.variant).toBe('highlight');
+    expect(options?.music).toBe(true);
+    // §1: whole sentences, in order, 15-30s of them.
+    const windows = options?.cutWindows ?? [];
+    expect(windows.length).toBeGreaterThan(0);
+    const total = windows.reduce((sum, w) => sum + (w.endMs - w.startMs), 0);
+    expect(total).toBeGreaterThanOrEqual(15_000);
+    expect(total).toBeLessThanOrEqual(30_000);
+    // §2.3: the stage names both people through publicDisplayName.
+    expect(options?.overlayStage).toEqual({
+      introducerLabel: 'MAYA INTRODUCES',
+      daterName: 'Blair',
+      relationshipChip: 'Friends for 3–10 years',
+    });
+    // §2.4: word captions, from the single transcript word index.
+    expect((options?.timedWords ?? []).length).toBeGreaterThan(0);
+    // §2.6: the cut identifies the bed.
+    expect(options?.musicSeed).toMatch(/^[0-9a-f]{64}$/);
+
+    // §2.1 note 5: the job row records what was actually rendered.
+    expect(world.cutUpdates).toHaveLength(1);
+    expect(world.cutUpdates[0]?.effective_variant).toBe('highlight');
+    expect(world.cutUpdates[0]?.cut_hash).toBe(options?.musicSeed);
+    expect(world.cutUpdates[0]?.cut_plan).toMatchObject({ version: 1 });
+  });
+
+  it('falls back to full — and says so — when the transcript cannot be cut', async () => {
+    const world = makeFakeClient({
+      job: job(),
+      sceneCanonical: canonicalSceneText(),
+      voiceBytes: new Uint8Array([1]),
+      variant: 'highlight',
+      transcript: { segments: [{ start: 0, end: 5, text: 'One sentence only.' }] },
+    });
+    const renders: { args: Parameters<typeof renderScene> }[] = [];
+
+    await withEnv('true', async () => {
+      await runRenderPass(world.client, passOptions(fakeRender(renders)));
+    });
+
+    expect(renders[0]?.args[2].cutWindows).toBeNull();
+    expect(world.cutUpdates[0]).toEqual({
+      effective_variant: 'full',
+      cut_plan: null,
+      cut_hash: null,
+    });
+  });
+
+  it('fails the job rather than leaving the cut record unwritten', async () => {
+    // A lapsed lease means another worker owns this job; reporting success
+    // would publish an MP4 whose effective_variant says nothing was recorded.
+    const world = makeFakeClient({
+      job: job(),
+      sceneCanonical: canonicalSceneText(),
+      voiceBytes: new Uint8Array([1]),
+      variant: 'highlight',
+      transcript: richTranscript(),
+      structure: RICH_STRUCTURE,
+      leaseLapsed: true,
+    });
+    const renders: { args: Parameters<typeof renderScene> }[] = [];
+
+    const summary = await withEnvValue('true', () =>
+      runRenderPass(world.client, passOptions(fakeRender(renders))),
+    );
+
+    expect(summary.jobs[0]?.outcome).toBe('failed');
+    expect(String(world.completions[0]?.params.reason)).toContain('lease no longer holds');
+  });
+
+  it('§0 rollback: the flag is OFF unless it says true, and off is the old way', async () => {
+    const world = makeFakeClient({
+      job: job(),
+      sceneCanonical: canonicalSceneText(),
+      voiceBytes: new Uint8Array([1]),
+      // The export card recorded a highlight WITH music; the flag overrules it.
+      variant: 'highlight',
+      music: true,
+      transcript: richTranscript(),
+      structure: RICH_STRUCTURE,
+    });
+    const renders: { args: Parameters<typeof renderScene> }[] = [];
+
+    // Unset is off — the rollout state until T005 ships the export card — and
+    // so is any value that is not exactly 'true'/'1'. Each pass needs its own
+    // world: the fake queue hands out its one job exactly once.
+    for (const value of [undefined, 'false', 'yes'] as const) {
+      const attempt = makeFakeClient({
+        job: job(),
+        sceneCanonical: canonicalSceneText(),
+        voiceBytes: new Uint8Array([1]),
+        variant: 'highlight',
+        music: true,
+        transcript: richTranscript(),
+        structure: RICH_STRUCTURE,
+      });
+      const attemptRenders: { args: Parameters<typeof renderScene> }[] = [];
+      await withEnv(value, async () => {
+        await runRenderPass(attempt.client, passOptions(fakeRender(attemptRenders)));
+      });
+      expect(attemptRenders[0]?.args[2].variant).toBe('full');
+      expect(attemptRenders[0]?.args[2].music).toBe(false);
+    }
+
+    await withEnv('false', async () => {
+      await runRenderPass(world.client, passOptions(fakeRender(renders)));
+    });
+
+    const options = renders[0]?.args[2];
+    expect(options?.variant).toBe('full');
+    expect(options?.music).toBe(false);
+    expect(options?.cutWindows).toBeNull();
+    // No overlay: the capture page then renders exactly the tree it always did.
+    expect(options?.overlayStage).toBeNull();
+    expect(world.cutUpdates[0]?.effective_variant).toBe('full');
   });
 });

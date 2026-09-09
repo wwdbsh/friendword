@@ -674,6 +674,29 @@ export type Database = {
         Update: Record<string, never>;
         Relationships: [];
       };
+      // 0054 + 0063. Service-role only: enqueue, claim and completion all go
+      // through RPCs, and the only direct access is the render worker reading
+      // its own job's variant and writing back what it actually rendered.
+      media_render_jobs: {
+        Row: {
+          readonly id: string;
+          readonly revision_id: string;
+          readonly variant: 'full' | 'highlight';
+          readonly options: Json;
+          readonly cut_plan: Json | null;
+          readonly cut_hash: string | null;
+          readonly effective_variant: 'full' | 'highlight' | null;
+          readonly lease_token: string | null;
+        };
+        // Enqueue is request_pitch_render's alone (0054's idempotency).
+        Insert: Record<string, never>;
+        Update: {
+          readonly cut_plan?: Json | null;
+          readonly cut_hash?: string | null;
+          readonly effective_variant?: 'full' | 'highlight' | null;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {

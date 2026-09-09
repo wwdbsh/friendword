@@ -31,12 +31,27 @@ export function audioFileExtension(mimeType: string): string {
   }
 }
 
+/** §2.2-7: the derivative track is delivered at a fixed, modest AAC bitrate. */
+export const DERIVATIVE_AUDIO_BITRATE = '128k';
+
 /**
- * P5: the Introducer's original voice, untouched. AAC streams are copied
- * bit-for-bit; anything else is codec-transcoded to AAC and nothing more — no
- * loudnorm, no tempo, no fades, no filter that touches the waveform.
+ * The web page is the ORIGINAL, the MP4 is a DERIVATIVE (decision 2026-09-09,
+ * REEL_V3_DESIGN §0 verdict 3).
+ *
+ * On the LEGACY path — full variant, music off, or RENDER_HIGHLIGHT_ENABLED=0 —
+ * nothing has touched the waveform, and this behaves exactly as P5 always
+ * demanded: an AAC stream is copied bit-for-bit, anything else is
+ * codec-transcoded and nothing more. No loudnorm, no tempo, no fades.
+ *
+ * On the highlight/music path `audio.ts` has already produced a new WAV (cut,
+ * faded at the cuts, and optionally mixed with the generated bed), so a copy is
+ * impossible and the codec has to encode. The published PAGE still streams the
+ * Introducer's recording as stored; nothing on that path passes through here.
  */
-export function audioCodecArgs(mimeType: string): readonly string[] {
+export function audioCodecArgs(mimeType: string, audioTouched = false): readonly string[] {
+  if (audioTouched) {
+    return ['-c:a', 'aac', '-b:a', DERIVATIVE_AUDIO_BITRATE];
+  }
   const base = mimeType.split(';')[0]?.trim().toLowerCase() ?? '';
   return AAC_MIME_TYPES.has(base) ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '160k'];
 }
@@ -47,6 +62,13 @@ export type EncoderArgsInput = {
   readonly audioPath: string | null;
   readonly audioMimeType: string | null;
   readonly outputPath: string;
+  /**
+   * True once audio.ts has cut, faded or mixed the track. Two consequences,
+   * both deliberate: the audio is re-encoded rather than copied, and the muxer
+   * runs bitexact so two runs of the same derivative produce the same bytes
+   * (§0 verdict 6). False leaves the argv byte-identical to the legacy one.
+   */
+  readonly audioTouched?: boolean;
 };
 
 /**
@@ -57,6 +79,7 @@ export type EncoderArgsInput = {
  */
 export function buildEncoderArgs(input: EncoderArgsInput): readonly string[] {
   const { fps, audioPath, audioMimeType, outputPath } = input;
+  const audioTouched = input.audioTouched === true;
   return [
     '-y',
     '-hide_banner',
@@ -99,7 +122,12 @@ export function buildEncoderArgs(input: EncoderArgsInput): readonly string[] {
     'bt709',
     '-r',
     String(fps),
-    ...(audioPath === null || audioMimeType === null ? [] : audioCodecArgs(audioMimeType)),
+    ...(audioPath === null || audioMimeType === null
+      ? []
+      : audioCodecArgs(audioMimeType, audioTouched)),
+    // Reproducibility for the derivative only: adding these to the legacy path
+    // would change bytes that a released render already has.
+    ...(audioTouched ? ['-fflags', '+bitexact', '-flags', '+bitexact'] : []),
     '-movflags',
     '+faststart',
     outputPath,

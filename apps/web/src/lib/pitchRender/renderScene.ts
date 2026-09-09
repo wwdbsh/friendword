@@ -5,14 +5,19 @@ import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 import type { Page } from 'puppeteer-core';
 
+import type { TimedCaptionWord } from '@friendword/contracts';
+
 import type { CaptionSegment } from '@/pitch/captionChrome';
 import type { SceneTextFields, SceneWord } from '@/pitch/sceneV2';
 
+import { buildRenderAudio, type CutWindow, type RenderAudioResult } from './audio';
 import { launchRenderBrowser } from './browser';
 import type { RenderDiagnostics, RenderStage } from './diagnostics';
 import { audioFileExtension, buildEncoderArgs, startEncoder, type FrameSink } from './encode';
-import { END_CARD_MS, buildEndCard } from './endCard';
+import { buildEndCard, endCardMsForVariant, type RenderVariant } from './endCard';
+import type { RenderFrameCursor, RenderOverlayStage } from './overlay';
 import type { RenderPayload, RenderPayloadPhoto } from './payload';
+import { photoGradeForTemplate } from './photoGrade';
 import { assertRenderableScene } from './validate';
 
 // The pitch renderer: an approved PitchScene v2 in, a 1080x1920 MP4 out.
@@ -53,6 +58,36 @@ export type RenderSceneOptions = {
   readonly text?: SceneTextFields | null;
   /** Subtitle band (T017); renderer chrome, never part of the approved scene. */
   readonly captions?: readonly CaptionSegment[];
+  /**
+   * Which MP4 this job asked for (§2.1). 'full' with `music` off is the LEGACY
+   * path: same frames, same encoder argv, same bit-for-bit audio copy as before
+   * this feature existed.
+   */
+  readonly variant?: RenderVariant;
+  /**
+   * The cut plan's windows, on the approved scene's own timeline. Required for
+   * a highlight; an empty or missing plan falls back to the full render and is
+   * reported as `effectiveVariant: 'full'` (§2.2-1).
+   */
+  readonly cutWindows?: readonly CutWindow[] | null;
+  /** §2.6 backing bed. Off leaves the voice alone. */
+  readonly music?: boolean;
+  /** §2.3 stage chrome text. Absent draws no chrome. */
+  readonly overlayStage?: RenderOverlayStage | null;
+  /** §2.4 word captions; null falls back to the segment caption band. */
+  readonly timedWords?: readonly TimedCaptionWord[] | null;
+  /** The Dater's public display name for the end card badge (§2.5). */
+  readonly daterName?: string | null;
+  /** Music seed (§2.6): the cut hash when there is one, else the scene hash. */
+  readonly musicSeed?: string | null;
+  /**
+   * T004 hook — the selfie opening. Frames extracted from the APPROVED,
+   * snapshot-included selfie proxy, ready to pipe ahead of the scene. The
+   * extraction, the consent toggle and the audio offset that goes with them are
+   * T004's; this build accepts the field so that task adds a producer rather
+   * than a new parameter, and refuses to silently render a misaligned file.
+   */
+  readonly openingFrames?: readonly Uint8Array[] | null;
   readonly executablePath?: string;
   readonly workDir?: string;
   /** Abort mid-capture once exceeded, leaving headroom under maxDuration. */
@@ -73,6 +108,14 @@ export type RenderStats = {
   readonly sceneFrames: number;
   readonly endCardFrames: number;
   readonly fps: number;
+  /** What was asked for, and what was actually rendered (§2.2-1). */
+  readonly variant: RenderVariant;
+  readonly effectiveVariant: RenderVariant;
+  /** Sum of the rendered windows, ms of the approved timeline. */
+  readonly cutTotalMs: number;
+  /** The audio track's own length, end-card bed tail included. */
+  readonly audioDurationMs: number;
+  readonly endCardMs: number;
   readonly captureMs: number;
   readonly encodeTailMs: number;
   readonly totalMs: number;
@@ -95,7 +138,15 @@ export function workFilePaths(
   workDir: string,
   renderKey: string,
   audioMimeType: string | null,
-): { readonly audioPath: string | null; readonly outputPath: string } {
+): {
+  readonly audioPath: string | null;
+  readonly outputPath: string;
+  readonly derivative: {
+    readonly cutWav: string;
+    readonly bedWav: string;
+    readonly mixWav: string;
+  };
+} {
   if (!RENDER_KEY_PATTERN.test(renderKey)) {
     throw new Error('renderKey must be 1-120 chars of [A-Za-z0-9._-]');
   }
@@ -105,7 +156,49 @@ export function workFilePaths(
         ? null
         : path.join(workDir, `${renderKey}.audio.${audioFileExtension(audioMimeType)}`),
     outputPath: path.join(workDir, `${renderKey}.mp4`),
+    // Derived from the same renderKey, so a retry reuses the same paths and
+    // leaves nothing behind under another name (P7).
+    derivative: {
+      cutWav: path.join(workDir, `${renderKey}.cut.wav`),
+      bedWav: path.join(workDir, `${renderKey}.bed.wav`),
+      mixWav: path.join(workDir, `${renderKey}.mix.wav`),
+    },
   };
+}
+
+/** One captured frame: which source millisecond, and where it lands in the file. */
+export type CaptureFrame = {
+  readonly tMs: number;
+  readonly cursor: RenderFrameCursor;
+};
+
+/**
+ * The capture list: every frame of the output, in order, each carrying the
+ * millisecond of the APPROVED timeline it shows.
+ *
+ * Frame counts round UP per window. The audio is the exact window sum, so
+ * rounding down anywhere would end the video before the sound — the one
+ * invariant §2.2-6 states outright.
+ */
+export function planCaptureFrames(
+  windows: readonly CutWindow[],
+  fps: number,
+): readonly CaptureFrame[] {
+  const perWindow = windows.map((window) =>
+    Math.max(1, Math.ceil(((window.endMs - window.startMs) * fps) / 1000)),
+  );
+  const totalFrames = perWindow.reduce((sum, count) => sum + count, 0);
+  const frames: CaptureFrame[] = [];
+  windows.forEach((window, windowIndex) => {
+    const count = perWindow[windowIndex] ?? 0;
+    for (let index = 0; index < count; index += 1) {
+      frames.push({
+        tMs: window.startMs + (index * 1000) / fps,
+        cursor: { outputFrame: frames.length, totalFrames, windowIndex },
+      });
+    }
+  });
+  return frames;
 }
 
 function toDataUri(photo: RenderPhotoAsset): RenderPayloadPhoto {
@@ -119,15 +212,15 @@ async function captureFrames(
   page: Page,
   sink: FrameSink,
   input: {
-    readonly sceneFrames: number;
+    readonly plan: readonly CaptureFrame[];
     readonly endCardFrames: number;
-    readonly fps: number;
     readonly jpegQuality: number;
     readonly deadline: number;
     readonly onFrame: ((frameIndex: number, totalFrames: number) => void) | undefined;
   },
 ): Promise<number> {
-  const { sceneFrames, endCardFrames, fps, jpegQuality, deadline, onFrame } = input;
+  const { plan, endCardFrames, jpegQuality, deadline, onFrame } = input;
+  const sceneFrames = plan.length;
   const totalFrames = sceneFrames + endCardFrames;
   let bytesPiped = 0;
   // No `clip`: the viewport IS the 1080x1920 frame (browser.ts), and measured
@@ -145,15 +238,24 @@ async function captureFrames(
         `render time budget exceeded at frame ${frame}/${totalFrames}; aborting before the platform kills the function`,
       );
     }
-    // The interpreter's own clock, not wall time: frame N is the picture at
-    // exactly N/fps seconds, and seek() resolves only once the DOM shows it.
-    const tMs = (frame * 1000) / fps;
-    await page.evaluate(async (t) => {
-      if (window.__friendwordRender === undefined) {
-        throw new Error('render harness missing');
-      }
-      await window.__friendwordRender.seek(t);
-    }, tMs);
+    // The interpreter's own clock, not wall time: this frame is the picture at
+    // exactly the planned millisecond of the APPROVED timeline (for a highlight
+    // the plan skips the milliseconds the cut left out), and seek() resolves
+    // only once the DOM provably shows it.
+    const step = plan[frame];
+    if (step === undefined) {
+      throw new Error(`capture plan is missing frame ${frame}`);
+    }
+    await page.evaluate(
+      async (t, cursor) => {
+        if (window.__friendwordRender === undefined) {
+          throw new Error('render harness missing');
+        }
+        await window.__friendwordRender.seek(t, cursor);
+      },
+      step.tMs,
+      step.cursor,
+    );
     const shot = await shoot();
     bytesPiped += shot.byteLength;
     await sink.write(shot);
@@ -204,21 +306,80 @@ export async function renderScene(
     throw new Error('ffmpeg-static did not resolve a binary for this platform');
   }
 
+  if (
+    options.openingFrames !== undefined &&
+    options.openingFrames !== null &&
+    options.openingFrames.length > 0
+  ) {
+    // The hook exists so T004 adds a producer, not a parameter. Until it also
+    // offsets the audio by the opening's length, piping these would ship a file
+    // whose voice starts before the picture it belongs to — refuse instead.
+    throw new Error('selfie opening frames are not composited yet (T004)');
+  }
+
   const fps = scene.canvas.fps;
-  const sceneFrames = Math.round((scene.durationMs / 1000) * fps);
-  const endCardFrames = Math.round((END_CARD_MS / 1000) * fps);
+  const requestedVariant: RenderVariant = options.variant ?? 'full';
+  const music = options.music === true;
+  const windows =
+    options.cutWindows === undefined || options.cutWindows === null
+      ? []
+      : options.cutWindows.filter((window) => window.endMs > window.startMs);
+  // §2.2-1: a highlight with no usable plan is rendered full, and says so.
+  const effectiveVariant: RenderVariant =
+    requestedVariant === 'highlight' && windows.length > 0 ? 'highlight' : 'full';
+  const renderWindows: readonly CutWindow[] =
+    effectiveVariant === 'highlight' ? windows : [{ startMs: 0, endMs: scene.durationMs }];
+  const plan = planCaptureFrames(renderWindows, fps);
+  const sceneFrames = plan.length;
+  const cutTotalMs = renderWindows.reduce(
+    (total, window) => total + (window.endMs - window.startMs),
+    0,
+  );
+  const endCardMs = endCardMsForVariant(effectiveVariant);
+  // The derivative path (§0 verdict 3): anything that cuts or mixes the
+  // waveform. Full + music off stays exactly the render it has always been.
+  const derivative = effectiveVariant === 'highlight' || music;
   const deadline = startedAt + (options.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS);
 
   const workDir = options.workDir ?? path.join(os.tmpdir(), 'friendword-pitch-render');
   await mkdir(workDir, { recursive: true });
-  const { audioPath, outputPath } = workFilePaths(
-    workDir,
-    options.renderKey,
-    assets.audio?.mimeType ?? null,
-  );
-  if (audioPath !== null && assets.audio !== null) {
-    await writeFile(audioPath, assets.audio.bytes);
+  const {
+    audioPath: sourceAudioPath,
+    outputPath,
+    derivative: derivativePaths,
+  } = workFilePaths(workDir, options.renderKey, assets.audio?.mimeType ?? null);
+  if (sourceAudioPath !== null && assets.audio !== null) {
+    await writeFile(sourceAudioPath, assets.audio.bytes);
   }
+
+  let audio: RenderAudioResult | null = null;
+  if (derivative && sourceAudioPath !== null && assets.audio !== null) {
+    stage('audio-build');
+    audio = await buildRenderAudio({
+      ffmpegPath,
+      sourcePath: sourceAudioPath,
+      windows: effectiveVariant === 'highlight' ? renderWindows : null,
+      music,
+      template: scene.template,
+      seed: options.musicSeed ?? options.renderKey,
+      endCardMs,
+      fps,
+      frameCount: sceneFrames,
+      paths: derivativePaths,
+    });
+  }
+  const audioPath = audio === null ? sourceAudioPath : audio.path;
+  const audioMimeType = audio === null ? (assets.audio?.mimeType ?? null) : 'audio/wav';
+  const audioDurationMs = audio === null ? 0 : audio.durationMs;
+
+  // §2.2-6, asserted rather than assumed: the picture must outlast the sound,
+  // bed tail included. Frames are ceilinged per window, so this only ever adds
+  // frames to the still end card — it can never truncate approved motion.
+  const sceneMs = (sceneFrames * 1000) / fps;
+  const endCardFrames = Math.max(
+    Math.round((endCardMs / 1000) * fps),
+    Math.ceil(((audioDurationMs - sceneMs) * fps) / 1000),
+  );
 
   const payload: RenderPayload = {
     scene,
@@ -232,7 +393,26 @@ export async function renderScene(
     words: options.words ?? [],
     text: options.text ?? null,
     captions: options.captions ?? [],
-    endCard: buildEndCard(options.shareOrigin, options.campaignSlug),
+    endCard: buildEndCard(options.shareOrigin, options.campaignSlug, {
+      variant: effectiveVariant,
+      daterName: options.daterName ?? null,
+    }),
+    // Legacy path draws no overlay at all: the capture page then renders
+    // exactly the tree it rendered before this feature existed.
+    overlay: derivative
+      ? {
+          variant: effectiveVariant,
+          stage: options.overlayStage ?? {
+            introducerLabel: '',
+            daterName: options.daterName ?? '',
+            relationshipChip: null,
+          },
+          envelope: audio?.envelope ?? [],
+          words: options.timedWords ?? null,
+          windows: renderWindows,
+          grade: photoGradeForTemplate(scene.template),
+        }
+      : null,
   };
 
   stage('browser-launch');
@@ -263,8 +443,9 @@ export async function renderScene(
       buildEncoderArgs({
         fps,
         audioPath,
-        audioMimeType: assets.audio?.mimeType ?? null,
+        audioMimeType,
         outputPath,
+        audioTouched: audio !== null && audio.touched,
       }),
     );
 
@@ -273,9 +454,8 @@ export async function renderScene(
     stage('capture');
     try {
       bytesPiped = await captureFrames(page, encoder.sink, {
-        sceneFrames,
+        plan,
         endCardFrames,
-        fps,
         jpegQuality: options.jpegQuality ?? DEFAULT_JPEG_QUALITY,
         deadline,
         onFrame: options.onFrame,
@@ -302,6 +482,11 @@ export async function renderScene(
       sceneFrames,
       endCardFrames,
       fps,
+      variant: requestedVariant,
+      effectiveVariant,
+      cutTotalMs,
+      audioDurationMs,
+      endCardMs,
       captureMs,
       encodeTailMs,
       totalMs: Date.now() - startedAt,
@@ -313,8 +498,11 @@ export async function renderScene(
   } finally {
     await browser.close();
     if (options.keepWorkFiles !== true) {
-      if (audioPath !== null) {
-        await rm(audioPath, { force: true });
+      if (sourceAudioPath !== null) {
+        await rm(sourceAudioPath, { force: true });
+      }
+      for (const file of Object.values(derivativePaths)) {
+        await rm(file, { force: true });
       }
       await rm(outputPath, { force: true });
     }

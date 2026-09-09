@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Session } from '@supabase/supabase-js';
 
 import type { BrowserSupabaseClient, ServiceSupabaseClient } from './client';
+import type { Json } from './database.types';
 import { DataLayerError, UnauthenticatedError } from './errors';
 
 const uuidSchema = z.string().uuid();
@@ -90,6 +91,28 @@ export type ClaimedRenderJob = {
   readonly sceneHash: string;
   readonly attempts: number;
   readonly leaseExpiresAt: string;
+};
+
+/**
+ * The choice frozen on the job row (0063), read by the WORKER.
+ *
+ * `claim_media_render_job` predates 0063 and still returns the lease fields
+ * only. Rather than change a lease RPC's return shape — every claim path and
+ * its tests depend on it — the worker reads the two columns it needs directly;
+ * the table is service-role only, so this is not a new exposure.
+ */
+export type ClaimedRenderJobChoice = {
+  readonly variant: PitchRenderVariant;
+  readonly options: PitchRenderOptions;
+};
+
+/** What the worker decided once it saw the transcript (0063, §2.2-1). */
+export type RenderJobCutRecord = {
+  readonly effectiveVariant: PitchRenderVariant;
+  /** The HighlightPlan as stored; null when the render fell back to full. */
+  readonly cutPlan: Json | null;
+  /** sha256 of the plan's windows; null on fallback. */
+  readonly cutHash: string | null;
 };
 
 export type RenderCompletion =
@@ -283,6 +306,92 @@ export async function claimMediaRenderJob(
     attempts: row.attempts,
     leaseExpiresAt: row.lease_expires_at,
   };
+}
+
+const jobChoiceRowSchema = z.object({
+  variant: variantSchema.nullish(),
+  options: optionsSchema.nullish(),
+});
+
+/**
+ * The variant and options the requester chose for this job.
+ *
+ * 0063 is deployed, so the columns are there; a database without them would
+ * raise 42703 here rather than fall through to a default, and that is the
+ * correct outcome — a worker cannot honour a choice it cannot read. The
+ * `full` fallback below is only for a row that carries NULLs (nothing can
+ * write one today: the column is NOT NULL DEFAULT), and it points at the
+ * render this pipeline has always produced rather than at a cut nobody asked
+ * for.
+ */
+export async function fetchRenderJobChoice(
+  client: ServiceSupabaseClient,
+  jobId: string,
+): Promise<ClaimedRenderJobChoice> {
+  const { data, error } = await client
+    .from('media_render_jobs')
+    .select('variant,options')
+    .eq('id', uuidSchema.parse(jobId))
+    .maybeSingle();
+  if (error !== null) {
+    throw new DataLayerError('render.jobChoice', error);
+  }
+  const parsed = jobChoiceRowSchema.safeParse(data ?? {});
+  if (!parsed.success) {
+    return { variant: 'full', options: {} };
+  }
+  return {
+    variant: parsed.data.variant ?? 'full',
+    options: parsed.data.options ?? {},
+  };
+}
+
+/**
+ * Records what the worker actually rendered, under the held lease.
+ *
+ * `effective_variant` is written on EVERY completion, success or fallback: rows
+ * that completed before 0063 carry the column NULL while having been full
+ * renders, so "NULL means full, for old rows only" stays true precisely because
+ * this worker never leaves it NULL again (§2.1 note 5).
+ *
+ * The lease token is part of the predicate: a worker whose lease lapsed must
+ * not overwrite the plan of whoever picked the job up next.
+ */
+export async function recordRenderJobCut(
+  client: ServiceSupabaseClient,
+  jobId: string,
+  leaseToken: string,
+  record: RenderJobCutRecord,
+): Promise<void> {
+  // Both identifiers are validated BEFORE the query is built: a malformed one
+  // must not reach the builder at all, so the failure is a refusal here rather
+  // than a half-constructed statement.
+  const id = uuidSchema.parse(jobId);
+  const lease = uuidSchema.parse(leaseToken);
+  const { data, error } = await client
+    .from('media_render_jobs')
+    .update({
+      effective_variant: record.effectiveVariant,
+      cut_plan: record.cutPlan,
+      cut_hash: record.cutHash,
+    })
+    .eq('id', id)
+    .eq('lease_token', lease)
+    // The updated rows come back so a no-op is detectable: matching zero rows
+    // means the lease lapsed and another worker owns the job, and silently
+    // succeeding there would leave effective_variant reading as whatever the
+    // other worker wrote — or NULL, which the product reads as "rendered
+    // before 0063".
+    .select('id');
+  if (error !== null) {
+    throw new DataLayerError('render.recordCut', error);
+  }
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new DataLayerError(
+      'render.recordCut',
+      new Error('render job lease no longer holds; the cut record was not written'),
+    );
+  }
 }
 
 /**

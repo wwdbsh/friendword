@@ -7,7 +7,7 @@ import {
   NOTIFICATION_LEASE_SECONDS,
 } from '@/lib/notifications/timeBudget';
 import { triggerNotificationSend } from '@/lib/notifications/trigger';
-import { resolveShareOrigin } from '@/lib/pitchRender/endCard';
+import { resolveShareOrigin } from '@/lib/pitchRender/shareOrigin';
 import { getSupabaseServiceClient } from '@/lib/supabaseServer';
 
 export const dynamic = 'force-dynamic';

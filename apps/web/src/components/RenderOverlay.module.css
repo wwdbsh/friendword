@@ -1,0 +1,92 @@
+/* §2.3/§2.4 overlay geometry. Every position that matters is an inline style
+   handed over by OVERLAY_GEOMETRY (and asserted in wordCaption.render.test.ts);
+   this file carries only appearance. */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.stage {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+/* Wide-tracked body face rather than a mono family: the render font gate loads
+   exactly the two self-hosted families, and a third stack would silently fall
+   back to whatever the headless shell has (T013). */
+.label {
+  margin: 0;
+  color: var(--color-stage-text);
+  font-family: var(--font-body), sans-serif;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-shadow: 0 2px 10px rgb(34 27 21 / 70%);
+}
+
+.name {
+  margin: 0;
+  color: var(--color-stage-text);
+  font-family: var(--font-display), sans-serif;
+  font-size: 76px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  text-shadow: 0 3px 14px rgb(34 27 21 / 70%);
+}
+
+.chip {
+  margin: 0;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: var(--color-hype);
+  color: var(--color-ink);
+  font-family: var(--font-body), sans-serif;
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.waveform {
+  position: absolute;
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.bar {
+  flex: 1 1 0;
+  min-height: 4px;
+  border-radius: 4px;
+}
+
+.caption {
+  position: absolute;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: baseline;
+}
+
+.word {
+  display: inline-block;
+  color: #fff;
+  font-family: var(--font-display), sans-serif;
+  font-size: 44px;
+  font-weight: 700;
+  /* Ink outline rather than a drop shadow: it stays legible over any photo. */
+  -webkit-text-stroke: 3px var(--color-ink);
+  paint-order: stroke fill;
+}
+
+.wordActive {
+  padding: 2px 10px;
+  border-radius: 10px;
+  background: var(--color-hype);
+  color: var(--color-ink);
+  -webkit-text-stroke: 0;
+}

@@ -655,7 +655,7 @@ describe('the render variant, end to end through the worker', () => {
     expect(String(world.completions[0]?.params.reason)).toContain('lease no longer holds');
   });
 
-  it('§0 rollback: the flag is OFF unless it says true, and off is the old way', async () => {
+  it('§0 rollback: only false/0 turns the flag off, and off is the old way', async () => {
     const world = makeFakeClient({
       job: job(),
       sceneCanonical: canonicalSceneText(),
@@ -668,10 +668,11 @@ describe('the render variant, end to end through the worker', () => {
     });
     const renders: { args: Parameters<typeof renderScene> }[] = [];
 
-    // Unset is off — the rollout state until T005 ships the export card — and
-    // so is any value that is not exactly 'true'/'1'. Each pass needs its own
-    // world: the fake queue hands out its one job exactly once.
-    for (const value of [undefined, 'false', 'yes'] as const) {
+    // Since T005 the default is ON: unset — the shape of every environment
+    // that never sets the variable — renders what the job row asked for, and
+    // so does any value that is not one of the two rollback strings. Each pass
+    // needs its own world: the fake queue hands out its one job exactly once.
+    for (const value of [undefined, 'true', 'yes'] as const) {
       const attempt = makeFakeClient({
         job: job(),
         sceneCanonical: canonicalSceneText(),
@@ -685,9 +686,26 @@ describe('the render variant, end to end through the worker', () => {
       await withEnv(value, async () => {
         await runRenderPass(attempt.client, passOptions(fakeRender(attemptRenders)));
       });
-      expect(attemptRenders[0]?.args[2].variant).toBe('full');
-      expect(attemptRenders[0]?.args[2].music).toBe(false);
+      expect(attemptRenders[0]?.args[2].variant).toBe('highlight');
+      expect(attemptRenders[0]?.args[2].music).toBe(true);
     }
+
+    // The rollback itself: '0' is accepted alongside 'false'.
+    const zeroWorld = makeFakeClient({
+      job: job(),
+      sceneCanonical: canonicalSceneText(),
+      voiceBytes: new Uint8Array([1]),
+      variant: 'highlight',
+      music: true,
+      transcript: richTranscript(),
+      structure: RICH_STRUCTURE,
+    });
+    const zeroRenders: { args: Parameters<typeof renderScene> }[] = [];
+    await withEnv('0', async () => {
+      await runRenderPass(zeroWorld.client, passOptions(fakeRender(zeroRenders)));
+    });
+    expect(zeroRenders[0]?.args[2].variant).toBe('full');
+    expect(zeroRenders[0]?.args[2].music).toBe(false);
 
     await withEnv('false', async () => {
       await runRenderPass(world.client, passOptions(fakeRender(renders)));

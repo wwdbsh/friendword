@@ -85,6 +85,12 @@ async function mockFinishedRender(page: Page): Promise<void> {
           free_render_used: true,
           pass_active: false,
           updated_at: '2026-08-12T00:00:00Z',
+          // 0063: what the worker actually rendered. The saved file is named
+          // for it, so a later export of the other cut cannot overwrite this
+          // one in the same downloads folder.
+          variant: 'highlight',
+          effective_variant: 'highlight',
+          options: { music: true },
         },
       ],
     }),
@@ -119,7 +125,7 @@ test('saves the whole MP4 from this origin without leaving the kit page', async 
     downloadButton.click(),
   ]);
 
-  expect(download.suggestedFilename()).toBe('friendword-pitch.mp4');
+  expect(download.suggestedFilename()).toBe('friendword-pitch-highlight.mp4');
 
   const savedPath = await download.path();
   expect(savedPath).not.toBeNull();

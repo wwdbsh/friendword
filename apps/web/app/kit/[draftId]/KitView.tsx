@@ -61,6 +61,9 @@ function isMissingDraft(error: unknown): boolean {
  * public URL, and no caption claims identity verification — that gate is
  * not live yet.
  */
+/** T005 §4 share tip, shown under the caption pack. */
+const SHARE_TIP_COPY = 'Add a trending sound on TikTok/Reels when you upload.';
+
 function captions(headline: string | null, slug: string | null): readonly string[] {
   const origin = typeof window === 'undefined' ? '' : window.location.origin;
   // ?src=creator-kit ties public views back to the kit (H-4 attribution).
@@ -325,6 +328,12 @@ export function KitView({ draftId }: { readonly draftId: string }) {
                   </button>
                 </div>
               ))}
+              {/* T005 §4: the one distribution tip the kit can state without
+                  claiming a result — adding a sound is something the poster
+                  does on the platform, and our MP4 carries only approved
+                  audio (plus the optional generated bed), so it never
+                  conflicts with a trending track chosen at upload. */}
+              <p className={styles.finePrint}>{SHARE_TIP_COPY}</p>
             </section>
           </>
         )}

@@ -8,10 +8,11 @@ import {
   trackEvent,
   type BrowserSupabaseClient,
   type PitchRenderState,
+  type PitchRenderVariant,
 } from '@friendword/data';
 
 import { EmailSignIn } from '@/components/EmailSignIn';
-import { RENDER_DOWNLOAD_FILENAME } from '@/lib/renderDownload';
+import { renderDownloadFilename } from '@/lib/renderDownload';
 
 import styles from '@/styles/flowCard.module.css';
 
@@ -34,6 +35,23 @@ const PASS_COVERS_COPY =
   'This campaign’s free export is used — your active Campaign Pass covers exporting again.';
 const FREE_USED_COPY =
   'This campaign’s free export is used. Exporting a new version needs an active Campaign Pass.';
+// T005 §4. The choice is made BEFORE the render because 0054 keeps ONE job per
+// approved revision: the request is idempotent and a second one hands back the
+// stored job rather than re-pointing it, so "pick before you export" is the
+// literal truth of the server contract, not a UI preference.
+const CHOICE_TITLE = 'Pick the cut before you export.';
+function choiceIntro(daterName: string | null): string {
+  // The Dater's public display name is not readable from this page (profiles
+  // are select-own under RLS), so the sentence keeps its shape with the same
+  // neutral stand-in the rest of the kit uses when a name is not showable.
+  return `One MP4 per approved version — pick before you export. Highlight uses only what ${daterName ?? 'your friend'} approved: same words, shorter cut.`;
+}
+const HIGHLIGHT_LABEL = 'Highlight (15–30s)';
+const FULL_LABEL = 'Full';
+const MUSIC_LABEL = 'Add a music bed';
+const RECORDED_CHOICE_PREFIX = 'This export was requested as';
+const MUSIC_ON_COPY = 'music on';
+const MUSIC_OFF_COPY = 'no music';
 const RENDERING_COPY = 'Rendering your MP4…';
 const RENDERING_DETAIL_COPY =
   'The export runs on our side. You can leave this page; it keeps running and its result shows here.';
@@ -66,6 +84,28 @@ const DOWNLOAD_ERROR_COPY = 'The download didn’t complete. Please try again.';
 const DOWNLOAD_SIGNED_OUT_COPY =
   'Your session expired, so we couldn’t fetch the file. Sign in again and the download will work — your export is safe.';
 const STATE_ERROR_COPY = 'The export status could not load. Refresh to try again.';
+
+/**
+ * Which cut this campaign's job is on record as (0063).
+ *
+ * `effective_variant` is what the worker actually rendered and therefore wins
+ * whenever it exists. When it is null the row has not been through a
+ * 0063-aware worker: a FINISHED job like that predates the highlight pipeline
+ * entirely and its MP4 is the full timeline, whatever `variant` says — the
+ * column was added with DEFAULT 'highlight', so every pre-0063 row reads
+ * 'highlight' and believing it would mislabel files that already exist.
+ * A job still in flight (or reset to failed) has no rendered file yet, so its
+ * requested `variant` is the honest answer.
+ */
+export function recordedRenderVariant(state: PitchRenderState): PitchRenderVariant {
+  if (state.effectiveVariant !== null) {
+    return state.effectiveVariant;
+  }
+  if (state.jobStatus === 'done') {
+    return 'full';
+  }
+  return state.variant ?? 'full';
+}
 
 /** Marks the one download failure that retrying cannot fix (M-16). */
 class DownloadSignedOutError extends Error {
@@ -140,14 +180,22 @@ export function PitchExportCard({
   draftId,
   campaignId,
   campaignSlug,
+  daterName = null,
 }: {
   readonly client: BrowserSupabaseClient;
   readonly draftId: string;
   readonly campaignId: string;
   readonly campaignSlug: string | null;
+  /** The Dater's public display name when the page has one (publicDisplayName). */
+  readonly daterName?: string | null;
 }) {
   const [view, setView] = useState<ExportView | 'loading' | 'error'>('loading');
   const [requesting, setRequesting] = useState(false);
+  // The pre-render choice (T005 §4). Defaults are the contract's: highlight,
+  // music on. Both are inert once a job exists — the recorded choice is then
+  // read back from the server state instead.
+  const [variant, setVariant] = useState<PitchRenderVariant>('highlight');
+  const [music, setMusic] = useState(true);
   const [downloading, setDownloading] = useState(false);
   // "In progress" is information, not an error, and NEVER a payment prompt
   // (E2): nothing was consumed, waiting is free, so it renders as a status
@@ -237,13 +285,16 @@ export function PitchExportCard({
     };
   }, [rendering, load, kickRenderWorker]);
 
-  async function handleExport() {
+  async function handleExport(choice: {
+    readonly variant: PitchRenderVariant;
+    readonly options: { readonly music: boolean };
+  }) {
     setRequesting(true);
     setActionError(null);
     setWaitNotice(null);
     setPassNeeded(false);
     try {
-      await new RenderJobRepo(client).requestRender(campaignId);
+      await new RenderJobRepo(client).requestRender(campaignId, choice);
       // The job is durable in the queue; now give the worker its first push.
       void kickRenderWorker();
       await load();
@@ -273,7 +324,7 @@ export function PitchExportCard({
     }
   }
 
-  async function handleDownload(revisionId: string) {
+  async function handleDownload(revisionId: string, downloadVariant: PitchRenderVariant) {
     setDownloading(true);
     setActionError(null);
     setDownloadSignedOut(false);
@@ -323,7 +374,7 @@ export function PitchExportCard({
       const anchor = document.createElement('a');
       anchor.href = objectUrl;
       anchor.rel = 'noopener';
-      anchor.download = RENDER_DOWNLOAD_FILENAME;
+      anchor.download = renderDownloadFilename(downloadVariant);
       document.body.append(anchor);
       anchor.click();
       anchor.remove();
@@ -361,6 +412,18 @@ export function PitchExportCard({
     ready.approvedRevisionId !== null &&
     doneRevisionId !== ready.approvedRevisionId;
 
+  // Once a job exists the choice belongs to that job for its life (§0 verdict
+  // 2): the card reads it back instead of offering a switch, and the retry
+  // buttons re-send exactly what is on record rather than silently changing it.
+  const recorded =
+    renderState !== null && jobStatus !== null
+      ? {
+          variant: recordedRenderVariant(renderState),
+          options: { music: renderState.options?.music === true },
+        }
+      : null;
+  const chosen = recorded ?? { variant, options: { music } };
+
   return (
     <section className={styles.card} data-pitch-export>
       <span className={styles.badge}>Reel export</span>
@@ -379,16 +442,58 @@ export function PitchExportCard({
           <p className={styles.finePrint}>{entitlementLine(renderState)}</p>
 
           {jobStatus === null && (
-            <button
-              className={styles.primary}
-              type="button"
-              disabled={requesting}
-              onClick={() => {
-                void handleExport();
-              }}
-            >
-              {requesting ? 'Requesting…' : 'Export the MP4'}
-            </button>
+            <div data-render-choice>
+              <h3 className={styles.subTitle}>{CHOICE_TITLE}</h3>
+              <p className={styles.muted}>{choiceIntro(daterName)}</p>
+              <div className={styles.chipRow} role="group" aria-label="Cut">
+                {(
+                  [
+                    ['highlight', HIGHLIGHT_LABEL],
+                    ['full', FULL_LABEL],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    className={`${styles.chip} ${variant === value ? styles.chipActive : ''}`}
+                    type="button"
+                    aria-pressed={variant === value}
+                    data-render-variant={value}
+                    disabled={requesting}
+                    onClick={() => setVariant(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <label className={styles.confirmationRow}>
+                <input
+                  type="checkbox"
+                  checked={music}
+                  data-render-music
+                  disabled={requesting}
+                  onChange={(event) => setMusic(event.target.checked)}
+                />
+                {MUSIC_LABEL}
+              </label>
+              <button
+                className={styles.primary}
+                type="button"
+                disabled={requesting}
+                onClick={() => {
+                  void handleExport(chosen);
+                }}
+              >
+                {requesting ? 'Requesting…' : 'Export the MP4'}
+              </button>
+            </div>
+          )}
+
+          {recorded !== null && (
+            <p className={styles.finePrint} data-render-choice-recorded>
+              {`${RECORDED_CHOICE_PREFIX} ${
+                recorded.variant === 'highlight' ? HIGHLIGHT_LABEL : FULL_LABEL
+              }, ${recorded.options.music ? MUSIC_ON_COPY : MUSIC_OFF_COPY}.`}
+            </p>
           )}
 
           {rendering && (
@@ -407,7 +512,7 @@ export function PitchExportCard({
                 type="button"
                 disabled={downloading}
                 onClick={() => {
-                  void handleDownload(doneRevisionId);
+                  void handleDownload(doneRevisionId, chosen.variant);
                 }}
               >
                 {downloading ? 'Preparing…' : 'Download the MP4'}
@@ -426,7 +531,7 @@ export function PitchExportCard({
                   type="button"
                   disabled={downloading}
                   onClick={() => {
-                    void handleDownload(doneRevisionId);
+                    void handleDownload(doneRevisionId, chosen.variant);
                   }}
                 >
                   {downloading ? 'Preparing…' : 'Download the earlier version'}
@@ -436,7 +541,7 @@ export function PitchExportCard({
                   type="button"
                   disabled={requesting}
                   onClick={() => {
-                    void handleExport();
+                    void handleExport(chosen);
                   }}
                 >
                   {requesting ? 'Requesting…' : 'Export the current version'}
@@ -454,7 +559,7 @@ export function PitchExportCard({
                 type="button"
                 disabled={requesting}
                 onClick={() => {
-                  void handleExport();
+                  void handleExport(chosen);
                 }}
               >
                 {requesting ? 'Requesting…' : 'Try the export again'}

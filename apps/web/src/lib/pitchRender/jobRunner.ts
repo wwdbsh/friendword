@@ -84,17 +84,24 @@ const NAME_FALLBACK = 'A friend';
 /**
  * §0 rollback, and the rollout switch.
  *
- * Default OFF: until the kit UI ships (T005) nobody can CHOOSE a variant, so a
- * worker that defaulted to on would start shipping cut MP4s for jobs whose
- * requesters were never offered the choice. Deploy order is therefore
- * migration -> this code (inert) -> kit UI -> flip the flag. Off, every job
- * takes the pre-2026-09-09 path: the full approved timeline, the original
- * audio copied bit for bit, no overlay, the 1.5s end card.
+ * Default ON since T005: the kit UI now makes the choice BEFORE the render and
+ * records it on the job row, so a job that says 'highlight' says it because
+ * somebody picked it (or took the default they were shown). The reason for the
+ * old fail-closed default — jobs whose requesters were never offered the
+ * choice — is gone with that card.
  *
- * Only the exact string 'true' (or '1') enables it — a typo must fail closed.
+ * Deploy order stays migration -> worker code -> kit UI -> (now) this default;
+ * the ROLLBACK is what the flag is for: set RENDER_HIGHLIGHT_ENABLED=false (or
+ * '0') and every job takes the pre-2026-09-09 path again — the full approved
+ * timeline, the original audio copied bit for bit, no overlay, the 1.5s end
+ * card — whatever the export card recorded on the row. The columns stay and
+ * the MP4s are derivatives, so nothing else has to be undone.
+ *
+ * Only those two exact strings disable it: an unset or misspelled value must
+ * NOT silently roll production back to the old renderer.
  */
 export function highlightRenderEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.RENDER_HIGHLIGHT_ENABLED === 'true' || env.RENDER_HIGHLIGHT_ENABLED === '1';
+  return env.RENDER_HIGHLIGHT_ENABLED !== 'false' && env.RENDER_HIGHLIGHT_ENABLED !== '0';
 }
 
 // The pass clock — lease length, claim window, hard budget, completion margin

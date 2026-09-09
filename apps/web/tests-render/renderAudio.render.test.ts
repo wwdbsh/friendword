@@ -171,6 +171,7 @@ describe('the built audio track (measured with the bundled ffmpeg)', () => {
     cutWav: path.join(WORK, 'cut.wav'),
     bedWav: path.join(WORK, 'bed.wav'),
     mixWav: path.join(WORK, 'mix.wav'),
+    openWav: path.join(WORK, 'open.wav'),
   };
 
   it('cuts to the windows and measures an envelope over the output frames', async () => {
@@ -199,6 +200,67 @@ describe('the built audio track (measured with the bundled ffmpeg)', () => {
     expect(Math.max(...result.envelope)).toBe(1);
     const samples = await readWavSamples(paths.cutWav);
     expect(samples.length).toBeGreaterThan(10_000);
+  });
+
+  // §2.2-4: the selfie opening is SILENT, so the whole track moves back by it.
+  it('pushes the voice back by exactly the silent opening, in whole frames', async () => {
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(sourcePath, voice.bytes);
+    const common = {
+      ffmpegPath: ffmpeg,
+      sourcePath,
+      windows: [{ startMs: 0, endMs: 4_000 }],
+      music: false,
+      template: 'warm' as const,
+      seed: 'cut-hash',
+      endCardMs: 3_000,
+      fps: 30,
+      frameCount: 120,
+      paths,
+    };
+    const plain = await buildRenderAudio(common);
+    const OPENING_FRAMES = 75; // 2.5s at 30fps
+    const opened = await buildRenderAudio({ ...common, openingFrames: OPENING_FRAMES });
+
+    // The lead is whole frames of the OUTPUT clock, so the picture (which is
+    // that same frame count) can never end before the sound — §2.2-6.
+    const leadMs = (OPENING_FRAMES * 1000) / 30;
+    expect(opened.durationMs - plain.durationMs).toBeGreaterThanOrEqual(leadMs - 2);
+    expect(opened.durationMs - plain.durationMs).toBeLessThanOrEqual(leadMs + 2);
+    // The voice itself is untouched: only where it starts moved.
+    expect(opened.voiceMs).toBe(plain.voiceMs);
+
+    // The opening's own frames are silence, and the voice envelope follows it
+    // unchanged — the waveform must not flicker at the join.
+    expect(opened.envelope).toHaveLength(OPENING_FRAMES + plain.envelope.length);
+    expect(opened.envelope.slice(0, OPENING_FRAMES).every((level) => level === 0)).toBe(true);
+    expect(opened.envelope.slice(OPENING_FRAMES)).toEqual(plain.envelope);
+
+    // …and the leading samples really are digital silence, not a fade.
+    const samples = await readWavSamples(opened.path);
+    const leadSamples = Math.round((leadMs * 48_000) / 1000);
+    expect(samples.length).toBeGreaterThan(leadSamples);
+    expect(samples.slice(0, leadSamples).every((sample) => sample === 0)).toBe(true);
+  });
+
+  it('is byte-identical with no opening asked for', async () => {
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(sourcePath, voice.bytes);
+    const result = await buildRenderAudio({
+      ffmpegPath: ffmpeg,
+      sourcePath,
+      windows: [{ startMs: 0, endMs: 4_000 }],
+      music: false,
+      template: 'warm',
+      seed: 'cut-hash',
+      endCardMs: 3_000,
+      fps: 30,
+      frameCount: 120,
+      openingFrames: 0,
+      paths,
+    });
+    // The pre-T004 path returns the cut itself, never a re-muxed copy of it.
+    expect(result.path).toBe(paths.cutWav);
   });
 
   it('places the bed at least 18 dB under the voice before ducking', async () => {

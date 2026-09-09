@@ -9,6 +9,7 @@ import type {
 import type { PitchSceneSegment, PitchSceneTemplate } from '@friendword/contracts';
 
 import type { ObservedClipIngest } from './clipIngest';
+import { takeMediaNotices } from './mediaNotices';
 import type { MediaValidationOutcome } from './mediaValidation';
 import type { PitchSceneBuilder } from './pitchSceneInput';
 import {
@@ -19,6 +20,7 @@ import {
 import {
   CLIP_CEILING_REACHED_MESSAGE,
   CLIP_NEEDS_CAMPAIGN_PASS_MESSAGE,
+  SELFIE_CLIP_SKIPPED_MESSAGE,
   FLAGGED_CLIP_BLOCKS_SUBMIT_MESSAGE,
   hasPendingMediaValidation,
   HybridPitchDraftService,
@@ -70,6 +72,17 @@ const MOV_CLIP: PitchClip = {
   mimeType: 'video/quicktime',
 };
 
+/** The optional 3-second opener the introducer records in the app (§3). */
+const SELFIE_CLIP: PitchClip = {
+  uri: 'file:///selfie.mp4',
+  width: 1080,
+  height: 1920,
+  durationMillis: 4_000,
+  byteSize: 2_400_000,
+  mimeType: 'video/mp4',
+  role: 'selfie',
+};
+
 /** Every observable step, in the order it happened, so ordering is testable. */
 type Step =
   | { readonly kind: 'put'; readonly objectName: string; readonly contentType: string | undefined }
@@ -86,6 +99,7 @@ type Harness = {
     readonly objectName: string;
     readonly sortOrder: number;
     readonly width: number | null;
+    readonly assetRole: 'selfie' | undefined;
   }>;
   readonly sceneInputs: ReadonlyArray<{
     readonly photoAssetIds: readonly string[];
@@ -125,6 +139,7 @@ async function createHarness(options: {
     objectName: string;
     sortOrder: number;
     width: number | null;
+    assetRole: 'selfie' | undefined;
   }> = [];
   const sceneInputs: Array<{
     photoAssetIds: readonly string[];
@@ -184,7 +199,7 @@ async function createHarness(options: {
       signedUrl: `https://storage.test/upload/${fileName}`,
       token: 'signed-token',
     }),
-    registerAsset: async (draftId, assetType, fileName, sortOrder, dimensions) => {
+    registerAsset: async (draftId, assetType, fileName, sortOrder, dimensions, assetRole) => {
       steps.push({ kind: 'register', assetType, objectName: fileName });
       const refusal =
         options.registerFails?.(
@@ -199,6 +214,7 @@ async function createHarness(options: {
         objectName: fileName,
         sortOrder: sortOrder ?? 0,
         width: dimensions?.width ?? null,
+        assetRole,
       });
       const row: PitchAssetRow = {
         id: `asset-${fileName}`,
@@ -207,6 +223,7 @@ async function createHarness(options: {
         asset_type: assetType,
         storage_path: `pitch-media/${draftId}/${fileName}`,
         sort_order: sortOrder ?? 0,
+        ...(assetRole === undefined ? {} : { asset_role: assetRole }),
         created_at: SERVER_ROW.created_at,
         updated_at: SERVER_ROW.updated_at,
       };
@@ -359,6 +376,35 @@ describe('pitch clip upload', () => {
     );
   });
 
+  it('registers the recorded selfie clip with asset_role and leaves picked clips without one', async () => {
+    // §3: the opener reaches the MP4 only as a pitch_assets row the render
+    // worker can find by role. A picked clip that also carried the role would
+    // put someone else's video at the front of the reel.
+    const harness = await createHarness({
+      clips: [MOV_CLIP, { ...SELFIE_CLIP }],
+    });
+
+    await harness.service.uploadDraftMedia(harness.id);
+
+    const videos = harness.registrations.filter((entry) => entry.assetType === 'video');
+    expect(videos).toHaveLength(2);
+    expect(videos[0]?.assetRole).toBeUndefined();
+    expect(videos[1]?.assetRole).toBe('selfie');
+  });
+
+  it('plans the selfie clip with its role and its own label', async () => {
+    const harness = await createHarness({ clips: [SELFIE_CLIP] });
+    const plans = planDraftMedia(await harness.currentDraft());
+
+    expect(plans[2]).toEqual(
+      expect.objectContaining({ kind: 'video', assetRole: 'selfie', label: 'Your selfie clip' }),
+    );
+    // Voice and photo are never a role: the column's CHECK only allows one on a
+    // video row, and the worker reads any role at all as "this is the opener".
+    expect(plans[0]?.assetRole).toBeNull();
+    expect(plans[1]?.assetRole).toBeNull();
+  });
+
   it('does not treat a stored clip as an unfinished validation', async () => {
     const harness = await createHarness({ clips: [MOV_CLIP] });
 
@@ -503,6 +549,43 @@ describe('server refusals a clip can produce', () => {
     expect(draft.recording?.upload?.validated).toBe(true);
     // The retry has nothing left to refuse, so the pitch can be sent.
     await expect(harness.service.uploadDraftMedia(harness.id)).resolves.toBeDefined();
+  });
+
+  it('drops the refused selfie and lets the submission finish anyway', async () => {
+    // The selfie opener is optional end to end (§3). The server's clip budget
+    // refuses it INSIDE the registration, after its bytes are uploaded, so a
+    // throw here would fail a pitch the introducer had already recorded,
+    // written and consented to — for a three-second extra they never had to
+    // add.
+    const harness = await createHarness({
+      clips: [SELFIE_CLIP],
+      registerFails: (assetType) =>
+        assetType === 'video' ? new Error('a second video clip requires a Campaign Pass') : null,
+    });
+    takeMediaNotices();
+
+    await expect(harness.service.uploadDraftMedia(harness.id)).resolves.toBeDefined();
+
+    const draft = await harness.currentDraft();
+    expect(draft.clips).toEqual([]);
+    expect(draft.photos[0]?.upload?.validated).toBe(true);
+    expect(draft.recording?.upload?.validated).toBe(true);
+    // Dropped, not hidden: the review screen reads this on its way in.
+    expect(takeMediaNotices()).toEqual([SELFIE_CLIP_SKIPPED_MESSAGE]);
+  });
+
+  it('still refuses a picked clip the entitlement rejected, selfie or not', async () => {
+    // The introducer chose that video. Dropping it silently would send a pitch
+    // they did not agree to, so only the role that is optional is forgiven.
+    const harness = await createHarness({
+      clips: [MOV_CLIP],
+      registerFails: (assetType) =>
+        assetType === 'video' ? new Error('a second video clip requires a Campaign Pass') : null,
+    });
+
+    await expect(harness.service.uploadDraftMedia(harness.id)).rejects.toThrow(
+      CLIP_NEEDS_CAMPAIGN_PASS_MESSAGE,
+    );
   });
 
   it('reports the absolute ceiling separately from the entitlement', async () => {

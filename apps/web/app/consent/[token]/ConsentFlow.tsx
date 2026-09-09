@@ -39,6 +39,7 @@ import { requestDaterPitchModeration } from '@/lib/moderateText';
 import {
   consentEditsDirty,
   DEFAULT_PITCH_SCENE_TEMPLATE,
+  sameIds,
   sameStructure,
   sceneMatchesPhotos,
   sceneTemplate,
@@ -155,16 +156,22 @@ type ReviewContext = {
   readonly voiceUrl: string | null;
   readonly photos: readonly { readonly assetId: string; readonly url: string }[];
   /**
-   * Phase 3a visibility: the short clips attached to this pitch, each with its
-   * ingest state and — once every automated check passed — a poster and a
-   * SILENT preview. Read-only on this surface: including/excluding a clip and
-   * face blurring are Phase 3b, so nothing here feeds the revision save.
+   * The short clips attached to this pitch, each with its ingest state and —
+   * once every automated check passed — a poster and a SILENT preview.
    * `card` is null while the state read is unanswered (offline, not yet
    * processed), which the UI reports as "not confirmed yet", never as a pass.
+   *
+   * T004: no longer read-only. Each clip carries an explicit include/exclude
+   * toggle whose answer decides whether the asset survives into the revision
+   * snapshot (`revisionAssetIds` below), and therefore whether the render
+   * worker may ever open it. `role` is `pitch_assets.asset_role` (migration
+   * 0063) — 'selfie' is the one role that exists, and it only changes the
+   * sentence the Dater is asked, never the permission model.
    */
   readonly clips: readonly {
     readonly assetId: string;
     readonly card: ClipIngestCard | null;
+    readonly role: 'selfie' | null;
   }[];
 };
 
@@ -324,8 +331,19 @@ async function loadClipCards(
     return {
       assetId: asset.id,
       card: objectName === undefined ? null : (cards.get(objectName) ?? null),
+      role: selfieRole(asset),
     };
   });
+}
+
+/**
+ * `pitch_assets.asset_role` (migration 0063). Optional on the row type because
+ * a pre-0063 read carries no such column, and anything that is not the one
+ * known role is null: an unrecognised label must never silently inherit the
+ * selfie sentence, which promises the Dater a specific thing about the footage.
+ */
+function selfieRole(asset: { readonly asset_role?: 'selfie' | null }): 'selfie' | null {
+  return asset.asset_role === 'selfie' ? 'selfie' : null;
 }
 
 /**
@@ -429,21 +447,130 @@ function orderedIncludedPhotoIds(
     .filter((assetId) => includedAssetIds.includes(assetId));
 }
 
+/**
+ * The asset ids this save writes onto the new revision — which is exactly what
+ * `create_dater_revision` turns into `snapshot_video_asset_ids` (migration
+ * 0050:2573) and therefore the only thing the render worker is allowed to open.
+ *
+ * T004: a video rides into the snapshot ONLY on an explicit "include". It used
+ * to be auto-retained with no question asked at all.
+ *
+ * "Not excluded" is NOT good enough here, and the reason is a timing one: an
+ * ingest can go pending → succeeded AFTER approval, so a clip whose card was
+ * still processing when the Dater looked at it would later pass the worker's
+ * `succeeded` gate carrying no answer at all. The compulsory question below
+ * covers every video in the snapshot, whatever its ingest state, and this
+ * function trusts nothing but the answer.
+ *
+ * The destructive direction is handled by the GATE, not by a default: no save
+ * happens at all while a clip is unanswered, so an unrelated photo edit can
+ * never drop a clip by omission.
+ *
+ * The voice recording and anything else that is neither a photo nor a clip
+ * still rides along untouched — the Introducer's original voice is the pitch,
+ * not a choice on this screen.
+ */
 function revisionAssetIds(
   review: ConsentReview,
   includedPhotoAssetIds: readonly string[],
+  includedClipAssetIds: readonly string[],
 ): readonly string[] {
   const selectedPhotos = new Set(includedPhotoAssetIds);
+  const selectedClips = new Set(includedClipAssetIds);
   const assetsById = new Map(review.assets.map((asset) => [asset.id, asset]));
   const retainedRevisionAssets = review.revision.asset_ids.filter((assetId) => {
     const asset = assetsById.get(assetId);
-    return asset?.asset_type !== 'photo' || selectedPhotos.has(assetId);
+    if (asset?.asset_type === 'photo') {
+      return selectedPhotos.has(assetId);
+    }
+    if (asset?.asset_type === 'video') {
+      return selectedClips.has(assetId);
+    }
+    return true;
   });
   const retainedIds = new Set(retainedRevisionAssets);
   return [
     ...retainedRevisionAssets,
     ...includedPhotoAssetIds.filter((assetId) => !retainedIds.has(assetId)),
   ];
+}
+
+/**
+ * The include question, per clip (T004 / REEL_V3_DESIGN §0 verdict 4).
+ *
+ * A clip the Introducer recorded of THEMSELVES is the opening of the video, so
+ * the selfie sentence names that consequence outright. Every other clip gets a
+ * neutral sentence: the surface must not describe footage it cannot classify.
+ */
+export function clipIncludeQuestion(role: 'selfie' | null, index: number): string {
+  return role === 'selfie'
+    ? 'Your friend’s selfie clip — include it as the opening of the video?'
+    : `Video clip ${String(index + 1)} — include it in your video?`;
+}
+
+/** The Dater's answer to that question. Absent means they have not answered. */
+type ClipAnswer = 'include' | 'exclude';
+
+export const CLIP_INCLUDE_LABEL = 'Include as the opening';
+export const CLIP_EXCLUDE_LABEL = 'Leave it out';
+export const CLIP_UNSAVED_COPY =
+  'Save your answer about your friend’s clip before approving — approving cannot record a decision the save has not written yet.';
+export const CLIP_UNANSWERED_COPY =
+  'Decide about your friend’s selfie clip first — it is the one thing on this page nobody has answered for you.';
+
+/**
+ * The clip ids this save writes. ONLY an explicit "include" — no answer, or an
+ * answer this build does not know, is an exclusion.
+ */
+export function clipIdsForSave(
+  clips: readonly { readonly assetId: string }[],
+  answers: ReadonlyMap<string, ClipAnswer>,
+): readonly string[] {
+  return clips.map((clip) => clip.assetId).filter((assetId) => answers.get(assetId) === 'include');
+}
+
+/**
+ * The clips still waiting for an answer — EVERY video in the snapshot, whatever
+ * its ingest state.
+ *
+ * Gating this on `state === 'succeeded'` was a hole: `request_consent` freezes
+ * every draft asset into `consent_revisions.asset_ids` (0050:2240-2260), a card
+ * can be null simply because the state read did not answer, and an ingest can
+ * reach 'succeeded' after approval. Any of those would have handed the render
+ * worker a clip the Dater was never asked about.
+ */
+function unansweredClipIds(
+  clips: readonly { readonly assetId: string }[],
+  answers: ReadonlyMap<string, ClipAnswer>,
+): readonly string[] {
+  return clips
+    .filter((clip) => answers.get(clip.assetId) === undefined)
+    .map((clip) => clip.assetId);
+}
+
+/**
+ * One stable string per clip decision, for the dirty comparison.
+ *
+ * The comparison is answer-versus-SAVED-ANSWER, never answer-versus-snapshot:
+ * an "include" that happens to match the snapshot the Introducer submitted is
+ * still a decision nobody has recorded, and approving on it would publish a
+ * video on the strength of a click that never reached the database.
+ */
+function clipAnswerKeys(answers: ReadonlyMap<string, ClipAnswer>): readonly string[] {
+  return [...answers].map(([assetId, answer]) => `${assetId}:${answer}`);
+}
+
+/** The clip state line, for a card that has no decision to offer yet. */
+function clipPendingDecisionCopy(card: ClipIngestCard | null): string | null {
+  switch (card?.state) {
+    case 'succeeded':
+      return null;
+    case 'flagged':
+    case 'failed':
+      return 'It cannot be published either way — say so here so your answer is on the record.';
+    default:
+      return 'Still processing — you can still decide.';
+  }
 }
 
 /** m:ss for a clip length the probe measured. */
@@ -553,6 +680,21 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   const [confirmingName, setConfirmingName] = useState(false);
   const [displayNameError, setDisplayNameError] = useState<string | null>(null);
   const [includedAssetIds, setIncludedAssetIds] = useState<readonly string[]>([]);
+  /**
+   * T004: every clip needs an ANSWER, and there is no default. Neither option is
+   * preselected and both the save and the approve gate stay shut until each
+   * answerable clip has one — a video of somebody is not a thing to publish by
+   * inattention, and it is not a thing to destroy by inattention either.
+   */
+  const [clipAnswers, setClipAnswers] = useState<ReadonlyMap<string, ClipAnswer>>(new Map());
+  /**
+   * The answers a revision save has actually PERSISTED. Anything else on screen
+   * is an unsaved decision, and unsaved decisions hold the approve gate — see
+   * `clipAnswerKeys`.
+   */
+  const [savedClipAnswers, setSavedClipAnswers] = useState<ReadonlyMap<string, ClipAnswer>>(
+    new Map(),
+  );
   const [editHeadline, setEditHeadline] = useState('');
   const [editBody, setEditBody] = useState('');
   // The five published fields. Null on a legacy snapshot the editor can't
@@ -627,6 +769,8 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         setAiDisclosureRevision(disclosureRevision);
         setDaterAiConsent('pending');
         setIncludedAssetIds(context.photos.map((photo) => photo.assetId));
+        setClipAnswers(new Map());
+        setSavedClipAnswers(new Map());
         setEditHeadline(review.revision.headline);
         setEditBody(review.revision.body);
         setEditStructure(review.editableStructure);
@@ -734,6 +878,17 @@ export function ConsentFlow({ token }: { readonly token: string }) {
     }
 
     const { preview, review } = state;
+    // T004 B1b, defence in depth behind the disabled button: publishing must not
+    // be reachable while a clip decision is unanswered or unsaved. The DB would
+    // happily approve the revision as it stands — which is exactly the version
+    // that carries no record of the Dater's answer.
+    if (
+      unansweredClipIds(state.clips, clipAnswers).length > 0 ||
+      !sameIds([...clipAnswerKeys(clipAnswers)], [...clipAnswerKeys(savedClipAnswers)])
+    ) {
+      setEditError(CLIP_UNSAVED_COPY);
+      return;
+    }
     const validationMessage = audienceError(minimumAge, maximumAge);
     if (validationMessage !== null) {
       setPreferenceError(validationMessage);
@@ -947,7 +1102,11 @@ export function ConsentFlow({ token }: { readonly token: string }) {
         draftId: review.revision.pitch_draft_id,
         headline,
         body,
-        includedAssetIds: revisionAssetIds(review, includedAssetIds),
+        includedAssetIds: revisionAssetIds(
+          review,
+          includedAssetIds,
+          clipIdsForSave(state.clips, clipAnswers),
+        ),
         ...(editedStructure === undefined ? {} : { structure: editedStructure }),
         ...(claimsChanged ? { retainedHardClaims: retained } : {}),
         ...(newScene === null ? {} : { newScene }),
@@ -956,6 +1115,22 @@ export function ConsentFlow({ token }: { readonly token: string }) {
       const context = await loadReviewContext(client, repo, state.preview, latestReview);
       setState({ step: 'review', ...context });
       setIncludedAssetIds(context.photos.map((photo) => photo.assetId));
+      // The save just wrote the snapshot, so the answers it carried are now
+      // recorded. Both maps move together: what is on screen is what the
+      // database holds, and the approve gate opens.
+      const persisted = new Map(
+        context.clips.map(
+          (clip) =>
+            [
+              clip.assetId,
+              (clipIdsForSave(state.clips, clipAnswers).includes(clip.assetId)
+                ? 'include'
+                : 'exclude') satisfies ClipAnswer,
+            ] as const,
+        ),
+      );
+      setClipAnswers(persisted);
+      setSavedClipAnswers(persisted);
       setEditHeadline(latestReview.revision.headline);
       setEditBody(latestReview.revision.body);
       setEditStructure(latestReview.editableStructure);
@@ -1226,6 +1401,12 @@ export function ConsentFlow({ token }: { readonly token: string }) {
   // away from it is an unsaved edit like any other, so the approve gate closes
   // until the save rebuilds the scene.
   const savedTemplate = sceneTemplate(state.step === 'review' ? state.review.scene : null);
+  // The clip answer lives in the snapshot too, so a toggle that has not been
+  // saved must hold the approve gate exactly like an unsaved photo does —
+  // otherwise "excluded" on screen could publish as included underneath.
+  const currentClips = state.step === 'review' ? state.clips : [];
+  // Nothing saves and nothing publishes while a clip is unanswered.
+  const clipsUnanswered = unansweredClipIds(currentClips, clipAnswers).length > 0;
   const editsDirty =
     state.step === 'review' &&
     consentEditsDirty({
@@ -1238,6 +1419,8 @@ export function ConsentFlow({ token }: { readonly token: string }) {
       claimsDirty,
       includedAssetIds,
       revisionPhotoIds: currentRevisionPhotoIds,
+      clipAnswerKeys: clipAnswerKeys(clipAnswers),
+      savedClipAnswerKeys: clipAnswerKeys(savedClipAnswers),
       template,
       savedTemplate,
     });
@@ -1877,47 +2060,96 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                 <div className={styles.photoBlock} data-consent-clips>
                   <h3 className={styles.photoHeading}>Video clips your friend attached</h3>
                   <div className={styles.clipGrid}>
-                    {state.clips.map((clip, index) => (
-                      <div key={clip.assetId} className={styles.clipCard}>
-                        {clip.card?.state === 'succeeded' && clip.card.proxyUrl !== null ? (
-                          // The SILENT proxy is the only playable form a clip
-                          // has here — the pipeline strips the audio track
-                          // entirely, so there is no sound to mute.
-                          <video
-                            className={styles.clipMedia}
-                            src={clip.card.proxyUrl}
-                            poster={clip.card.posterUrl ?? undefined}
-                            controls
-                            muted
-                            playsInline
-                            preload="metadata"
-                            aria-label={`Silent preview of clip ${index + 1}`}
-                          />
-                        ) : clip.card?.state === 'succeeded' && clip.card.posterUrl !== null ? (
-                          <img
-                            className={styles.clipMedia}
-                            src={clip.card.posterUrl}
-                            alt={`Poster frame of clip ${index + 1}`}
-                          />
-                        ) : (
-                          <div className={styles.clipPlaceholder} aria-hidden="true" />
-                        )}
-                        <div className={styles.clipMeta}>
-                          <span className={styles.clipState}>{clipStateLabel(clip.card)}</span>
-                          {clip.card?.durationMs != null && (
-                            <span className={styles.clipDuration}>
-                              {formatClipDuration(clip.card.durationMs)}
-                            </span>
+                    {state.clips.map((clip, index) => {
+                      const answer = clipAnswers.get(clip.assetId);
+                      // EVERY clip is asked about, whatever its ingest state:
+                      // a card can be null because the state read did not
+                      // answer, and a pending ingest can reach 'succeeded'
+                      // after approval — both would otherwise reach the render
+                      // worker with no decision behind them.
+                      const pendingCopy = clipPendingDecisionCopy(clip.card);
+                      const groupName = `consent-clip-${clip.assetId}`;
+                      return (
+                        <div
+                          key={clip.assetId}
+                          className={styles.clipCard}
+                          data-consent-clip-role={clip.role ?? 'none'}
+                        >
+                          {clip.card?.state === 'succeeded' && clip.card.proxyUrl !== null ? (
+                            // The SILENT proxy is the only playable form a clip
+                            // has here — the pipeline strips the audio track
+                            // entirely, so there is no sound to mute.
+                            <video
+                              className={styles.clipMedia}
+                              src={clip.card.proxyUrl}
+                              poster={clip.card.posterUrl ?? undefined}
+                              controls
+                              muted
+                              playsInline
+                              preload="metadata"
+                              aria-label={`Silent preview of clip ${index + 1}`}
+                            />
+                          ) : clip.card?.state === 'succeeded' && clip.card.posterUrl !== null ? (
+                            <img
+                              className={styles.clipMedia}
+                              src={clip.card.posterUrl}
+                              alt={`Poster frame of clip ${index + 1}`}
+                            />
+                          ) : (
+                            <div className={styles.clipPlaceholder} aria-hidden="true" />
                           )}
+                          <div className={styles.clipMeta}>
+                            <span className={styles.clipState}>{clipStateLabel(clip.card)}</span>
+                            {clip.card?.durationMs != null && (
+                              <span className={styles.clipDuration}>
+                                {formatClipDuration(clip.card.durationMs)}
+                              </span>
+                            )}
+                          </div>
+                          <p className={styles.muted}>{clipStateDetail(clip.card)}</p>
+                          {/* Two options, neither preselected: the Dater has to
+                              say which, and until they do nothing saves and
+                              nothing publishes. A default either way would mean
+                              publishing — or destroying — a video by silence. */}
+                          <fieldset
+                            className={styles.clipInclude}
+                            data-consent-clip-answer={answer ?? 'unanswered'}
+                          >
+                            <legend>{clipIncludeQuestion(clip.role, index)}</legend>
+                            {pendingCopy !== null && <p className={styles.muted}>{pendingCopy}</p>}
+                            {(
+                              [
+                                ['include', CLIP_INCLUDE_LABEL],
+                                ['exclude', CLIP_EXCLUDE_LABEL],
+                              ] as const
+                            ).map(([value, label]) => (
+                              <label key={value} className={styles.clipChoice}>
+                                <input
+                                  type="radio"
+                                  name={groupName}
+                                  value={value}
+                                  checked={answer === value}
+                                  onChange={() => {
+                                    setEditStatus(null);
+                                    setEditError(null);
+                                    setClipAnswers((current) =>
+                                      new Map(current).set(clip.assetId, value),
+                                    );
+                                  }}
+                                />
+                                <span>{label}</span>
+                              </label>
+                            ))}
+                          </fieldset>
                         </div>
-                        <p className={styles.muted}>{clipStateDetail(clip.card)}</p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                   <p className={styles.muted}>
                     Clips are silent on Friendword — only your friend’s voice note carries sound.
-                    Nothing from a clip publishes unless its automated safety review passes, and
-                    choosing where clips appear on your page is coming next.
+                    Nothing from a clip publishes unless its automated safety review passes and you
+                    choose to include it. Choosing “{CLIP_EXCLUDE_LABEL}” and saving removes the
+                    clip from this pitch for good.
                   </p>
                 </div>
               )}
@@ -1981,10 +2213,15 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                   {editError}
                 </p>
               )}
+              {clipsUnanswered && (
+                <p className={styles.muted} role="status">
+                  {CLIP_UNANSWERED_COPY}
+                </p>
+              )}
               <button
                 className={styles.secondary}
                 type="button"
-                disabled={!editsDirty || savingEdits || uploadingPhoto}
+                disabled={!editsDirty || savingEdits || uploadingPhoto || clipsUnanswered}
                 onClick={() => {
                   void handleSaveEdits();
                 }}
@@ -2549,6 +2786,12 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                 </p>
               )}
 
+              {clipsUnanswered && (
+                <p className={styles.muted} role="status">
+                  {CLIP_UNANSWERED_COPY}
+                </p>
+              )}
+
               <button
                 className={styles.primary}
                 type="button"
@@ -2557,6 +2800,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                   savingEdits ||
                   uploadingPhoto ||
                   editsDirty ||
+                  clipsUnanswered ||
                   currentAudienceError !== null ||
                   currentProfileError !== null ||
                   includedAssetIds.length === 0 ||

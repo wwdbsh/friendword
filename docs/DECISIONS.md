@@ -718,3 +718,10 @@
 - **이유**: 인자 이름 변경은 모든 호출자를 깨고, 두 번째 매핑 규칙은 승인된 wordPop과 다른 단어를 강조할 수 있다.
 - **검토 대안**: 오버로드 추가(PGRST 모호성), 리비전 id 인자(호출자 전면 수정).
 - **영향**: 배포 순서 — 0063 push 후 웹 배포(구 번들의 1-인자 호출은 DEFAULT로 호환). 데이터 — 컬럼 추가만, 무료 1회 규칙 불변.
+
+## 2026-09-09: 셀피 클립은 기존 클립 인제스트를 타고, Dater가 동의 화면에서 명시적으로 "포함/제외"를 답해야 한다 (T004 / Issue #100)
+
+- **결정**: 셀피는 새 미디어 종류가 아니라 `role='selfie'`인 `PitchClip`이다 — 서명 업로드 → `pitch_assets`(`asset_role='selfie'`, video 전용·INSERT 시에만) → probe/proxy/poster/프레임 모더레이션까지 기존 클립 경로를 그대로 지난다. 캡처는 무음(`microphonePermission:false`)이며 워커는 프레임만 쓴다. 동의 화면의 각 클립 카드는 라디오 "Include as the opening / Leave it out"을 **기본 선택 없이** 보여주고, 답하지 않은 클립이 있으면 저장·승인이 막힌다. 인제스트 상태와 무관하게 리비전의 모든 비디오 자산이 답변 대상이며, 저장·승인 시 "Include"로 답한 클립만 리비전에 남는다(무응답=제외). 답변은 저장된 답변과 비교해 dirty를 판정하므로 스냅샷과 같은 "포함" 답도 저장 전에는 승인이 막힌다(감사 가능). 사진만 고치는 저장으로 클립이 사라지는 일은 없다 — 답하지 않으면 저장 자체가 막히기 때문이다. 워커는 스냅샷 포함 ∩ `asset_role='selfie'` ∩ 인제스트 `succeeded` ∩ 하이라이트 플랜 ∩ 플래그일 때만 프록시 첫 2.5초를 ffmpeg로 추출해 오프닝으로 붙이고, 음성·베드는 프레임 단위로 뒤로 민다. 셀피는 초안당 무료 클립 1개 한도를 **소비**한다(이미 클립을 고른 Introducer는 Campaign Pass 안내를 받음 — 기존 거절 문구 그대로).
+- **이유**: 아키텍트 블로커 4(클립 개별 승인 UI 부재)·6(헤드리스 `<video>` 비결정론). "기본 제외 + 저장 시 스냅샷에서 제거"는 사진 편집 한 번으로 클립이 영구 소실되는 함정이라 명시 선택으로 바꿨고, 독립 리뷰 블로커(처리 중 클립이 답변 대상에서 빠져 승인 없이 스냅샷에 남음·"포함" 답이 저장되지 않음·프록시 실패가 렌더 전체를 실패시킴·셀피가 무료 클립 한도를 소진해 제출을 막음)를 반영해 전 비디오 답변 필수, 저장 전 승인 차단, 워커는 오프닝 없이 계속, 셀피는 슬롯 없으면 제안하지 않고 거절돼도 제출을 막지 않도록 고쳤다. 클립 한도 규칙을 바꾸려면 RPC 변경이 필요해 이번 범위에서는 유지한다.
+- **검토 대안**: scene v3 오프닝 샷(빌더·플레이어·재승인 비용), 기본 포함(승인 없는 노출), 셀피 한도 예외(RPC 변경).
+- **영향**: 앱 — `expo-camera` 추가로 네이티브 리빌드·다음 TestFlight 필요. 시뮬레이터에는 카메라가 없어 촬영은 "카메라가 중단됨 → Try again/Delete" 경로로만 검증됨(권한 요청·거부·프리뷰·실패·삭제 스크린샷 확보). 빌드 — Expo 57 프리빌드 `ExpoCamera`/`ExpoCameraBarcodeScanning` xcframework가 프리빌드 `ExpoModulesCore` 57.0.3에 없는 심볼(`AnyModule._decorate`, `BaseModule.willDestroy`)을 참조해 실행 즉시 dyld abort → `package.json` `expo.autolinking.ios.buildFromSource`로 두 모듈을 소스 빌드하고 `expo-camera`를 57.0.3에 고정. 운영 — Metro가 "Unable to resolve expo-router/entry"를 내면 pnpm 링커 문제가 아니라 캐시이므로 `expo start --clear`; 저장소는 pnpm 11 기본(isolated)을 유지한다(hoisted로 바꾸면 웹 UI 테스트가 React 중복으로 깨짐).

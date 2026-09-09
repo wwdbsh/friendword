@@ -5,3 +5,4 @@ export { PitchReviewEditor } from './PitchReviewEditor';
 export { RecordingStep } from './RecordingStep';
 export { RelationshipStep } from './RelationshipStep';
 export { ReviewStep } from './ReviewStep';
+export { SelfieClipCard } from './SelfieClipCard';

@@ -67,6 +67,12 @@ export type PitchAssetRow = {
   /** Intrinsic pixel size when the uploader could decode it (migration 0048). */
   readonly width?: number | null;
   readonly height?: number | null;
+  /**
+   * Migration 0063. `'selfie'` marks the optional 3-second front-camera opener
+   * the render worker extracts frames from; NULL for every other asset. Write
+   * only at INSERT — there is no UPDATE grant on pitch_assets.
+   */
+  readonly asset_role?: 'selfie' | null;
   readonly created_at: string;
   readonly updated_at: string;
 };
@@ -657,6 +663,9 @@ export type Database = {
           // the DB CHECK only forbids non-positive values.
           readonly width?: number | null;
           readonly height?: number | null;
+          // Migration 0063. Only ever 'selfie', and only on a video asset (two
+          // CHECKs); omitted rather than sent as null for everything else.
+          readonly asset_role?: 'selfie';
         };
         Update: Record<string, never>;
         Relationships: [];

@@ -12,10 +12,12 @@ import {
 import {
   assertNever,
   handleFlowError,
+  hasSelfieClip,
   PitchFlowStateError,
   requireDraftId,
   requireRecording,
   requireReviewData,
+  withSelfieClip,
 } from '../../src/features/pitch/pitchFlowState';
 import { usePitchSubmission } from '../../src/features/pitch/usePitchSubmission';
 import {
@@ -242,6 +244,25 @@ export default function NewPitchScreen() {
     }
   };
 
+  /**
+   * Adds, replaces or removes the optional selfie opener (§3).
+   *
+   * Persisted the moment it changes rather than at the end of the step: the
+   * clip's bytes are on the device, and a composer that lost them on a
+   * navigation would have nothing to upload. Rejects on failure so the card
+   * can offer a retry — but a rejection here never touches the recording, so
+   * the pitch continues either way.
+   */
+  const applySelfieClip = async (clip: PitchClip | null): Promise<void> => {
+    const activeDraftId = requireDraftId(draftId);
+    const next = withSelfieClip(clips, clip);
+    // The saved list is what the local store actually holds: it carries the
+    // asset keys and upload records `saveClips` assigned, which name bytes on
+    // the server.
+    const saved = await pitchDraftService.saveClips(activeDraftId, next);
+    setClips(saved.clips);
+  };
+
   const saveRecording = async (): Promise<void> => {
     if (savingRef.current) {
       return;
@@ -339,6 +360,8 @@ export default function NewPitchScreen() {
             void saveRecording();
           }}
           onRecordingChange={setRecording}
+          clips={clips}
+          onSelfieClipChange={applySelfieClip}
         />
       );
     case 5: {
@@ -360,6 +383,7 @@ export default function NewPitchScreen() {
             onWriteManually={() => {
               void submission.writeManually();
             }}
+            hasSelfieClip={hasSelfieClip(clips)}
             photos={photos}
             recording={review.recording}
             relationship={review.relationship}

@@ -42,6 +42,8 @@ function saved(overrides: Partial<ConsentEditState> = {}): ConsentEditState {
     claimsDirty: false,
     includedAssetIds: [PHOTO_ONE, PHOTO_TWO],
     revisionPhotoIds: [PHOTO_ONE, PHOTO_TWO],
+    clipAnswerKeys: [],
+    savedClipAnswerKeys: [],
     template: 'warm',
     savedTemplate: 'warm',
     ...overrides,

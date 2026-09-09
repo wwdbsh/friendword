@@ -19,6 +19,7 @@ import {
 } from '@friendword/contracts';
 
 import { clipObjectName, photoMimeType, photoObjectName, putLocalFile } from './mediaFiles';
+import { recordMediaNotice } from './mediaNotices';
 import { requestMediaValidation, type MediaValidationOutcome } from './mediaValidation';
 import {
   mergeClipIngestStates,
@@ -100,6 +101,8 @@ export type PitchDraftRepository = Omit<
     fileName: string,
     sortOrder?: number,
     dimensions?: AssetDimensions,
+    /** `'selfie'` for the recorded opener, absent for every other asset (0063). */
+    assetRole?: 'selfie',
   ): Promise<PitchAssetRow>;
 };
 
@@ -139,6 +142,17 @@ const FLAGGED_CLIP_GATE_MESSAGE = 'remove the flagged video clip before requesti
 export const CLIP_NEEDS_CAMPAIGN_PASS_MESSAGE =
   'Friendword includes one video per pitch; more than that needs a Campaign Pass. ' +
   'This video was not attached — everything else on your pitch was saved.';
+
+/**
+ * Copy for the one clip that must never cost a submission: the optional selfie
+ * opener (docs/REEL_V3_DESIGN.md §3). The card refuses to record one when the
+ * free slot is already spent, so this is the race — an allowance that changed
+ * between the capture and the upload — and the right answer to it is to send
+ * the pitch without the opener and say so afterwards.
+ */
+export const SELFIE_CLIP_SKIPPED_MESSAGE =
+  'Selfie clip skipped — your free clip slot was already used. ' +
+  'Everything else on your pitch was sent.';
 
 export const CLIP_CEILING_REACHED_MESSAGE =
   'A pitch can carry at most three videos, so this one was not attached. ' +
@@ -699,7 +713,9 @@ export class HybridPitchDraftService implements PitchDraftService {
           plan,
           persist,
         );
-        if (outcome !== 'passed' && outcome !== 'ingest_pending') {
+        // `skipped` is settled, not unvalidated: the asset is no longer on the
+        // draft, so there is nothing left for a later attempt to validate.
+        if (outcome !== 'passed' && outcome !== 'ingest_pending' && outcome !== 'skipped') {
           unvalidated += 1;
         }
       }
@@ -1022,6 +1038,16 @@ export class HybridPitchDraftService implements PitchDraftService {
         throw error;
       }
       await this.local.dropUnregisteredClip(id, plan.objectName);
+      // The selfie opener is optional end to end, so its refusal may not be the
+      // thing that stops a pitch the introducer already recorded, wrote and
+      // consented to. It is dropped from the draft — which is what takes it off
+      // the review screen and frees the slot again — and the submit carries on.
+      // A clip the introducer *picked* still throws: they chose that video, and
+      // silently dropping it would publish a pitch they did not agree to.
+      if (plan.assetRole === 'selfie') {
+        recordMediaNotice(SELFIE_CLIP_SKIPPED_MESSAGE);
+        return 'skipped';
+      }
       throw new PitchDraftSubmissionError(refusal);
     }
   }
@@ -1051,6 +1077,7 @@ export class HybridPitchDraftService implements PitchDraftService {
         record.objectName,
         plan.index,
         plan.dimensions ?? undefined,
+        plan.assetRole ?? undefined,
       );
       record = { ...record, registered: true };
       await persist(record);
@@ -1132,7 +1159,7 @@ export class HybridPitchDraftService implements PitchDraftService {
  * What one `syncAsset` call settled on. `ingest_pending` is a clip's stored-and
  * -registered state: not a pass, and not a failure the introducer can act on.
  */
-type AssetSyncOutcome = MediaValidationOutcome | 'ingest_pending';
+type AssetSyncOutcome = MediaValidationOutcome | 'ingest_pending' | 'skipped';
 
 /** The voice object name is fixed: /api/transcribe reads `{draftId}/voice.m4a`. */
 const VOICE_OBJECT_NAME = 'voice.m4a';
@@ -1160,6 +1187,15 @@ export type MediaAssetPlan = {
    * whose size the picker does not have to report.
    */
   readonly byteSize: number | null;
+  /**
+   * `pitch_assets.asset_role` for this asset (0063). Only ever `'selfie'`, and
+   * only on a clip the introducer recorded in the app as the opener; null
+   * everywhere else, which registers the row with the column absent. Derived
+   * from the clip's own `role` rather than from its storage path, because 0063
+   * is explicit that the worker must not learn the role from a user-influenced
+   * path.
+   */
+  readonly assetRole: 'selfie' | null;
 };
 
 /**
@@ -1232,6 +1268,7 @@ export function planDraftMedia(draft: PitchDraft): readonly MediaAssetPlan[] {
         draft.recording.upload ?? (uploadedBeforeRecords ? legacyRecord(VOICE_OBJECT_NAME) : null),
       dimensions: null,
       byteSize: null,
+      assetRole: null,
     });
   }
   draft.photos.forEach((photo, index) => {
@@ -1252,6 +1289,7 @@ export function planDraftMedia(draft: PitchDraft): readonly MediaAssetPlan[] {
           : null),
       dimensions: visualDimensions(photo),
       byteSize: null,
+      assetRole: null,
     });
   });
   // Clips last, so a draft that gains one keeps every photo's plan — and its
@@ -1261,13 +1299,14 @@ export function planDraftMedia(draft: PitchDraft): readonly MediaAssetPlan[] {
     plans.push({
       kind: 'video',
       index,
-      label: `Video ${index + 1}`,
+      label: clip.role === 'selfie' ? 'Your selfie clip' : `Video ${index + 1}`,
       sourceUri: clip.uri,
       contentType: clip.mimeType,
       objectName: clipObjectName(clip, index),
       record: clip.upload ?? null,
       dimensions: visualDimensions(clip),
       byteSize: clip.byteSize,
+      assetRole: clip.role ?? null,
     });
   });
   return plans;

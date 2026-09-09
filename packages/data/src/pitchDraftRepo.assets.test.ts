@@ -166,6 +166,58 @@ describe('PitchDraftRepo.registerAsset', () => {
     expect(Object.keys(insertCalls[0] as Record<string, unknown>)).not.toContain('height');
   });
 
+  it('marks the selfie opener with asset_role when the caller names the role', async () => {
+    const insertCalls: unknown[] = [];
+    installTables({
+      insert: () => ({ data: EXISTING_ROW, error: null }),
+      select: () => ({ data: null, error: null }),
+      selectCalls: [],
+      insertCalls,
+    });
+    const repo = new PitchDraftRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await repo.registerAsset(
+      DRAFT_ID,
+      'video',
+      'photo-abc123.jpg',
+      1,
+      { width: 1080, height: 1920 },
+      'selfie',
+    );
+
+    expect(insertCalls).toEqual([
+      {
+        pitch_draft_id: DRAFT_ID,
+        uploaded_by_user_id: USER_ID,
+        asset_type: 'video',
+        storage_path: STORAGE_PATH,
+        sort_order: 1,
+        width: 1080,
+        height: 1920,
+        asset_role: 'selfie',
+      },
+    ]);
+  });
+
+  it('omits asset_role entirely for every asset that has no role', async () => {
+    // 0063 CHECKs asset_role IS NULL OR asset_role = 'selfie' AND
+    // asset_type = 'video'. The column is NULL by default and there is no
+    // UPDATE grant, so an ordinary clip must leave it absent rather than send
+    // a value the worker would then read as an approved selfie opener.
+    const insertCalls: unknown[] = [];
+    installTables({
+      insert: () => ({ data: EXISTING_ROW, error: null }),
+      select: () => ({ data: null, error: null }),
+      selectCalls: [],
+      insertCalls,
+    });
+    const repo = new PitchDraftRepo(createBrowserClient('https://project.example', 'anon-key'));
+
+    await repo.registerAsset(DRAFT_ID, 'video', 'photo-abc123.jpg', 0);
+
+    expect(Object.keys(insertCalls[0] as Record<string, unknown>)).not.toContain('asset_role');
+  });
+
   it('treats a unique violation as the registration having already landed', async () => {
     // The window this closes: the insert commits but its response is lost, so
     // the caller retries. pitch_assets is UNIQUE (pitch_draft_id, storage_path),

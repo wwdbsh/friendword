@@ -304,6 +304,13 @@ export class PitchDraftRepo {
    * response, an app kill between the insert and its own bookkeeping — retries
    * with the same path, and surfacing that as a failure would leave the draft
    * permanently unsubmittable from that device.
+   *
+   * `assetRole` marks the one video the render worker treats as the selfie
+   * opener (0063, docs/REEL_V3_DESIGN.md §3). Omitted rather than sent as null
+   * when absent: the column is NULL-by-default and there is no UPDATE grant, so
+   * a role is decided once, by the uploader, at INSERT. It is not defaulted or
+   * inferred from the storage path here — 0063's comment is explicit that paths
+   * are user-influenced input and must not be parsed for this.
    */
   async registerAsset(
     draftId: string,
@@ -311,6 +318,7 @@ export class PitchDraftRepo {
     fileName: string,
     sortOrder = 0,
     dimensions?: AssetDimensions,
+    assetRole?: 'selfie',
   ): Promise<PitchAssetRow> {
     const session = await this.getRequiredSession();
     const storagePath = buildPitchMediaPath(draftId, fileName);
@@ -324,6 +332,7 @@ export class PitchDraftRepo {
       // Omitted rather than sent as null when unknown: the CHECK is `> 0`, so a
       // caller with no measurement has to leave the columns absent.
       ...(dimensions === undefined ? {} : { width: dimensions.width, height: dimensions.height }),
+      ...(assetRole === undefined ? {} : { asset_role: assetRole }),
     };
     const { data, error } = await this.client
       .from('pitch_assets')

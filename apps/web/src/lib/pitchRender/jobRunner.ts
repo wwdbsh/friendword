@@ -1,4 +1,9 @@
 import { createHash } from 'node:crypto';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+import ffmpegPath from 'ffmpeg-static';
 
 import { z } from 'zod';
 
@@ -25,6 +30,7 @@ import type { CaptionSegment } from '@/pitch/captionChrome';
 import { relationshipChipLabel } from '@/pitch/view';
 import { sceneV2ReferencesText, type SceneTextFields, type SceneWord } from '@/pitch/sceneV2';
 
+import { extractOpeningFrames } from './openingFrames';
 import type { RenderOverlayStage } from './overlay';
 import { stageIntroducerLabel } from './overlay';
 
@@ -211,6 +217,8 @@ export async function processRenderJob(
       daterName: inputs.daterName,
       // §2.6: the cut identifies the bed; without a cut the scene does.
       musicSeed: inputs.plan?.hash ?? job.sceneHash,
+      // §2.2-4: the selfie opening, or nothing at all.
+      openingFrames: inputs.openingFrames,
     });
 
     const outputStoragePath = renderOutputStoragePath(job.pitchDraftId, job.revisionId);
@@ -290,6 +298,11 @@ type RenderInputs = {
   readonly overlayStage: RenderOverlayStage | null;
   readonly timedWords: readonly TimedCaptionWord[] | null;
   readonly daterName: string;
+  /**
+   * §2.2-4: the stills of the approved selfie clip, or empty. Empty is every
+   * pitch without one, and the render is then byte-identical to today's.
+   */
+  readonly openingFrames: readonly Uint8Array[];
 };
 
 /** The plan as JSONB — a plain object, so PostgREST stores it as written. */
@@ -417,6 +430,29 @@ async function loadRenderInputs(
   // them on everything recorded since 2026-08-09), segment captions otherwise.
   const timedWords = buildTimedCaptionWords(indexedWordsFromTranscript(revision.transcript));
 
+  // ── §2.2-4: the selfie opening ────────────────────────────────────────
+  //
+  // Four gates, all of which must hold, and every one of them is somebody's
+  // decision rather than a heuristic:
+  //   - RENDER_HIGHLIGHT_ENABLED, the rollback switch (`enabled`);
+  //   - the job asked for a highlight AND a cut plan exists, i.e. the render
+  //     will actually BE a highlight (§2.2-1 would otherwise fall back to full,
+  //     which draws no chrome for the opening to sit under);
+  //   - the clip is in the APPROVED SNAPSHOT — the Dater ticked it on the
+  //     consent screen, which is the only way an asset id gets into
+  //     `consent_revisions.asset_ids` (§0 verdict 4a);
+  //   - its ingest SUCCEEDED, which is what makes a proxy exist at all and
+  //     what carries the frame-by-frame moderation verdict.
+  const openingFrames =
+    enabled && variant === 'highlight' && plan !== null
+      ? await extractSelfieOpening(client, {
+          pitchDraftId: job.pitchDraftId,
+          snapshotAssetIds: revision.assetIds,
+          renderKey: job.revisionId,
+          fps: scene.canvas.fps,
+        })
+      : [];
+
   const overlayStage: RenderOverlayStage | null =
     variant === 'highlight' || music
       ? {
@@ -439,6 +475,7 @@ async function loadRenderInputs(
     overlayStage,
     timedWords,
     daterName: people.daterName,
+    openingFrames,
   };
 }
 
@@ -447,6 +484,7 @@ async function loadRenderInputs(
 const revisionRowSchema = z.object({
   id: z.string().uuid(),
   pitch_draft_id: z.string().uuid(),
+  asset_ids: z.array(z.string().uuid()),
   voice_asset_path: z.string().nullable(),
   structure: z.unknown(),
   transcript: z.unknown(),
@@ -456,6 +494,8 @@ const revisionRowSchema = z.object({
 
 type RevisionForRender = {
   readonly pitchDraftId: string;
+  /** The APPROVED snapshot. Nothing outside it may enter the MP4. */
+  readonly assetIds: readonly string[];
   readonly voiceAssetPath: string | null;
   readonly structure: unknown;
   readonly transcript: unknown;
@@ -469,7 +509,7 @@ async function fetchRevision(
   const { data, error } = await client
     .from('consent_revisions')
     .select(
-      'id,pitch_draft_id,voice_asset_path,structure,transcript,scene_canonical:scene_definition::text',
+      'id,pitch_draft_id,asset_ids,voice_asset_path,structure,transcript,scene_canonical:scene_definition::text',
     )
     .eq('id', revisionId)
     .maybeSingle();
@@ -485,6 +525,7 @@ async function fetchRevision(
   }
   return {
     pitchDraftId: parsed.data.pitch_draft_id,
+    assetIds: parsed.data.asset_ids,
     voiceAssetPath: parsed.data.voice_asset_path,
     structure: parsed.data.structure,
     transcript: parsed.data.transcript,
@@ -573,6 +614,108 @@ async function fetchRenderPeople(
       people.data.relationship_duration,
     ),
   };
+}
+
+/**
+ * §2.2-4 — the approved selfie clip's opening stills, or nothing.
+ *
+ * Service role only, by construction: `pitch_video_ingests` is unreadable by
+ * every client role (0050), so the proxy path and the verdict that guards it can
+ * only be seen from here. The bytes are pulled with the SAME storage helper the
+ * voice and the photos use, and the extraction never touches the original —
+ * success deleted it (`original_deleted_at`); the proxy is all there is.
+ *
+ * Any missing piece is an ABSENT opening, never a partial one, and never a
+ * failed render: no selfie asset in the snapshot, no succeeded ingest, no proxy
+ * path, a proxy that will not download, and a proxy ffmpeg cannot decode all
+ * mean "render exactly what this pipeline rendered yesterday". The opening is a
+ * decoration on a derivative; losing it must never cost the Dater the MP4 their
+ * approval paid for. The reason is logged so a systematically broken proxy
+ * pipeline is visible rather than silent.
+ */
+const selfieAssetRowsSchema = z.array(
+  z.object({ id: z.string().uuid(), storage_path: z.string(), sort_order: z.number() }),
+);
+const selfieIngestRowSchema = z.object({ proxy_path: z.string() });
+
+async function extractSelfieOpening(
+  client: ServiceSupabaseClient,
+  input: {
+    readonly pitchDraftId: string;
+    readonly snapshotAssetIds: readonly string[];
+    readonly renderKey: string;
+    readonly fps: number;
+  },
+): Promise<readonly Uint8Array[]> {
+  if (input.snapshotAssetIds.length === 0) {
+    return [];
+  }
+  const { data, error } = await client
+    .from('pitch_assets')
+    .select('id,storage_path,sort_order')
+    .eq('pitch_draft_id', input.pitchDraftId)
+    .eq('asset_type', 'video')
+    .eq('asset_role', 'selfie')
+    .in('id', [...input.snapshotAssetIds])
+    .order('sort_order', { ascending: true })
+    .order('id', { ascending: true });
+  if (error !== null) {
+    throw new RenderJobError('could not read the selfie clip for the opening');
+  }
+  const assets = selfieAssetRowsSchema.safeParse(data ?? []);
+  if (!assets.success) {
+    throw new RenderJobError('selfie asset rows have an unexpected shape');
+  }
+  // One opening, deterministically the first by (sort_order, id). A second
+  // selfie is simply not the opening — never a coin flip between two.
+  const asset = assets.data[0];
+  if (asset === undefined) {
+    return [];
+  }
+
+  const { data: ingestData, error: ingestError } = await client
+    .from('pitch_video_ingests')
+    .select('proxy_path')
+    .eq('asset_id', asset.id)
+    .eq('ingest_status', 'succeeded')
+    .maybeSingle();
+  if (ingestError !== null) {
+    throw new RenderJobError('could not read the selfie clip ingest verdict');
+  }
+  const ingest = selfieIngestRowSchema.safeParse(ingestData);
+  if (!ingest.success) {
+    // Pending, flagged, failed, or a succeeded row without a proxy: no opening.
+    return [];
+  }
+
+  if (ffmpegPath === null) {
+    console.warn('pitch render: no ffmpeg binary for the selfie opening; rendering without it');
+    return [];
+  }
+  const workDir = path.join(os.tmpdir(), 'friendword-pitch-render');
+  const proxyPath = path.join(workDir, `${input.renderKey}.selfie-proxy`);
+  try {
+    await mkdir(workDir, { recursive: true });
+    await writeFile(proxyPath, await downloadPitchMediaObject(client, ingest.data.proxy_path));
+    return await extractOpeningFrames({
+      ffmpegPath,
+      videoPath: proxyPath,
+      fps: input.fps,
+      workDir,
+      prefix: `${input.renderKey}.selfie`,
+    });
+  } catch (error) {
+    // Named, not swallowed: the storage path is safe to print (it is an object
+    // name, not content), and nothing about the person in the clip is.
+    console.warn(
+      `pitch render: the selfie opening could not be prepared, rendering without it: ${
+        error instanceof Error ? error.message : 'unknown error'
+      }`,
+    );
+    return [];
+  } finally {
+    await rm(proxyPath, { force: true });
+  }
 }
 
 const assetRowsSchema = z.array(

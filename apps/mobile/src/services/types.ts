@@ -186,6 +186,12 @@ const PitchClipSchema = z.object({
     .regex(/^[a-z0-9]+$/)
     .optional(),
   mimeType: z.enum(CLIP_MIME_TYPES),
+  // The optional 3-second front-camera opener the introducer recorded in the
+  // app, as opposed to a clip they picked from their library
+  // (docs/REEL_V3_DESIGN.md §3). Carried through to `pitch_assets.asset_role`
+  // at registration so the render worker can find the opener without parsing
+  // storage paths (0063). Absent on every other clip; there is no second role.
+  role: z.literal('selfie').optional(),
   upload: UploadedAssetSchema.optional(),
   // Cached mirror of the server's ingest job state, refreshed by polling. The
   // server is the authority; absence means this device has not heard yet.

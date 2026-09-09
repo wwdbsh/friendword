@@ -44,7 +44,7 @@
 ### 2.1 잡 모델(migration `0063_render_variant.sql`)
 
 - `media_render_jobs` 컬럼 **추가만**: `variant TEXT NOT NULL DEFAULT 'highlight' CHECK (variant IN ('full','highlight'))`, `options JSONB NOT NULL DEFAULT '{}'`(`{music:boolean}`), `cut_plan JSONB`, `cut_hash TEXT`, `effective_variant TEXT`(폴백 기록). UNIQUE·멱등 로직 불변.
-- `request_pitch_render(p_revision_id UUID, p_variant TEXT DEFAULT 'highlight', p_options JSONB DEFAULT '{}')` — **오버로드 금지**: 기존 1-인자 함수를 DROP하고 DEFAULT 있는 단일 함수로 재생성(구 번들의 1-인자 호출도 동작 → 배포 순서 안전). 유효성: variant CHECK, options 키 화이트리스트.
+- `request_pitch_render(target_campaign_id UUID, p_variant TEXT DEFAULT 'highlight', p_options JSONB DEFAULT '{}')` (첫 인자는 기존대로 캠페인 id — 0054가 캠페인에서 승인 리비전을 유도하며 PostgREST는 인자 이름으로 호출하므로 이름 변경 금지; T002 정정) — **오버로드 금지**: 기존 1-인자 함수를 DROP하고 DEFAULT 있는 단일 함수로 재생성(구 번들의 1-인자 호출도 동작 → 배포 순서 안전). 유효성: variant CHECK, options 키 화이트리스트.
 - `get_pitch_render_state`: 반환 컬럼 **끝에** `variant, effective_variant, options` 추가(DROP/CREATE). `renderJobRepo.ts:80-92`·`rpcContract.test.ts`를 먼저 갱신(migration SQL이 권위).
 - `pitch_assets.asset_role TEXT NULL CHECK (asset_role IN ('selfie'))` 추가(T002). 업로드 경로에서 셀피만 설정. 저장 경로 규칙에 의존하지 않는다.
 - ACL: 새 컬럼은 기존 테이블 GRANT를 따르되 `pitch_assets.asset_role`은 업로더만 쓸 수 있음을 RLS 테스트로 확인.

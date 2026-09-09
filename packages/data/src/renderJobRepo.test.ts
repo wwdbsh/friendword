@@ -187,11 +187,107 @@ describe('RenderJobRepo — member surface', () => {
       freeRenderUsed: false,
       passActive: true,
       updatedAt: null,
+      // The response above is a PRE-0063 server: the variant columns simply
+      // are not there, and this bundle must still read the state during the
+      // deploy window rather than fail to parse it.
+      variant: null,
+      effectiveVariant: null,
+      options: null,
     });
     expect(rpcCalls).toEqual([
       { fn: 'get_pitch_render_state', params: { target_campaign_id: CAMPAIGN_ID } },
     ]);
     expect(tableAccesses).toEqual([]);
+  });
+
+  it('maps the 0063 variant columns when the server sends them', async () => {
+    const { client } = fakeClient({
+      results: {
+        get_pitch_render_state: {
+          data: [
+            {
+              job_id: JOB_ID,
+              job_status: 'done',
+              revision_id: REVISION_ID,
+              output_storage_path: 'pitch-media/draft/renders/out.mp4',
+              last_error: null,
+              free_render_used: true,
+              pass_active: false,
+              updated_at: '2026-09-09T00:00:00.000Z',
+              variant: 'highlight',
+              effective_variant: 'full',
+              options: { music: true },
+            },
+          ],
+          error: null,
+        },
+      },
+    });
+
+    const state = await new RenderJobRepo(client).getRenderState(CAMPAIGN_ID);
+    // The requested variant and the rendered one are separate facts: this row
+    // is a highlight request the worker had to fall back to full.
+    expect(state.variant).toBe('highlight');
+    expect(state.effectiveVariant).toBe('full');
+    expect(state.options).toEqual({ music: true });
+  });
+});
+
+describe('choosing a render variant', () => {
+  const queuedRequest = {
+    request_pitch_render: {
+      data: [
+        {
+          job_id: JOB_ID,
+          job_status: 'queued',
+          revision_id: REVISION_ID,
+          output_storage_path: null,
+          already_requested: false,
+        },
+      ],
+      error: null,
+    },
+  };
+
+  it('sends the 1-argument call when the caller expressed no preference', async () => {
+    const { client, rpcCalls } = fakeClient({ results: queuedRequest });
+    await new RenderJobRepo(client).requestRender(CAMPAIGN_ID);
+    expect(rpcCalls).toEqual([
+      { fn: 'request_pitch_render', params: { target_campaign_id: CAMPAIGN_ID } },
+    ]);
+  });
+
+  it('passes the chosen variant and options through', async () => {
+    const { client, rpcCalls } = fakeClient({ results: queuedRequest });
+    await new RenderJobRepo(client).requestRender(CAMPAIGN_ID, {
+      variant: 'full',
+      options: { music: false },
+    });
+    expect(rpcCalls).toEqual([
+      {
+        fn: 'request_pitch_render',
+        params: {
+          target_campaign_id: CAMPAIGN_ID,
+          p_variant: 'full',
+          p_options: { music: false },
+        },
+      },
+    ]);
+  });
+
+  it('defaults a partial choice to the highlight variant with no options', async () => {
+    const { client, rpcCalls } = fakeClient({ results: queuedRequest });
+    await new RenderJobRepo(client).requestRender(CAMPAIGN_ID, { options: { music: true } });
+    expect(rpcCalls).toEqual([
+      {
+        fn: 'request_pitch_render',
+        params: {
+          target_campaign_id: CAMPAIGN_ID,
+          p_variant: 'highlight',
+          p_options: { music: true },
+        },
+      },
+    ]);
   });
 });
 

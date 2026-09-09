@@ -424,6 +424,33 @@
   gap: var(--space-xs);
 }
 
+.clipInclude {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+}
+
+.clipInclude legend {
+  padding: 0;
+  font-weight: 600;
+}
+
+.clipChoice {
+  display: flex;
+  gap: var(--space-xs);
+  align-items: flex-start;
+}
+
+.clipChoice input {
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
 .clipMedia {
   width: 100%;
   aspect-ratio: 9 / 16;

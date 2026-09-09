@@ -22,6 +22,7 @@
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.4",
     "expo-audio": "~57.0.0",
+    "expo-camera": "57.0.3",
     "expo-clipboard": "~57.0.0",
     "expo-constants": "~57.0.3",
     "expo-file-system": "~57.0.0",
@@ -48,5 +49,15 @@
     "@types/react": "~19.2.2",
     "typescript": "~6.0.3",
     "vitest": "^3.0.0"
+  },
+  "expo": {
+    "autolinking": {
+      "ios": {
+        "buildFromSource": [
+          "ExpoCamera",
+          "ExpoCameraBarcodeScanning"
+        ]
+      }
+    }
   }
 }

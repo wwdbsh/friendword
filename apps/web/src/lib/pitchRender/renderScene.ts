@@ -15,6 +15,7 @@ import { launchRenderBrowser } from './browser';
 import type { RenderDiagnostics, RenderStage } from './diagnostics';
 import { audioFileExtension, buildEncoderArgs, startEncoder, type FrameSink } from './encode';
 import { buildEndCard, endCardMsForVariant, type RenderVariant } from './endCard';
+import { compositeOpeningFrames } from './openingFrames';
 import type { RenderFrameCursor, RenderOverlayStage } from './overlay';
 import type { RenderPayload, RenderPayloadPhoto } from './payload';
 import { photoGradeForTemplate } from './photoGrade';
@@ -81,11 +82,16 @@ export type RenderSceneOptions = {
   /** Music seed (§2.6): the cut hash when there is one, else the scene hash. */
   readonly musicSeed?: string | null;
   /**
-   * T004 hook — the selfie opening. Frames extracted from the APPROVED,
-   * snapshot-included selfie proxy, ready to pipe ahead of the scene. The
-   * extraction, the consent toggle and the audio offset that goes with them are
-   * T004's; this build accepts the field so that task adds a producer rather
-   * than a new parameter, and refuses to silently render a misaligned file.
+   * §2.2-4 — the selfie opening's BASE LAYER: one PNG per output frame, already
+   * cover-cropped to 1080x1920, extracted by `openingFrames.ts` from the
+   * APPROVED, snapshot-included selfie proxy. The caller supplies the picture;
+   * this function owns everything that has to stay in step with it — the
+   * transparent chrome captured for the same frames, the ffmpeg composite, the
+   * silent lead the audio is pushed back by, and the frame cursors that carry
+   * the waveform playhead across the join.
+   *
+   * Empty or absent is the render this pipeline shipped before T004, frame for
+   * frame (`renderCapture.e2e` pins that).
    */
   readonly openingFrames?: readonly Uint8Array[] | null;
   readonly executablePath?: string;
@@ -105,6 +111,8 @@ export type RenderSceneOptions = {
 };
 
 export type RenderStats = {
+  /** Frames of selfie opening spliced in front of the scene (§2.2-4). */
+  readonly openingFrames: number;
   readonly sceneFrames: number;
   readonly endCardFrames: number;
   readonly fps: number;
@@ -145,6 +153,12 @@ export function workFilePaths(
     readonly cutWav: string;
     readonly bedWav: string;
     readonly mixWav: string;
+    readonly openWav: string;
+  };
+  readonly opening: {
+    readonly selfiePrefix: string;
+    readonly chromePrefix: string;
+    readonly compositePrefix: string;
   };
 } {
   if (!RENDER_KEY_PATTERN.test(renderKey)) {
@@ -162,8 +176,30 @@ export function workFilePaths(
       cutWav: path.join(workDir, `${renderKey}.cut.wav`),
       bedWav: path.join(workDir, `${renderKey}.bed.wav`),
       mixWav: path.join(workDir, `${renderKey}.mix.wav`),
+      // The same track with the silent selfie lead in front of it.
+      openWav: path.join(workDir, `${renderKey}.open.wav`),
+    },
+    // Numbered sequences, not single files: ffmpeg reads and writes them by
+    // pattern, and the render key keeps two concurrent jobs apart.
+    opening: {
+      selfiePrefix: `${renderKey}.selfie`,
+      chromePrefix: `${renderKey}.chrome`,
+      compositePrefix: `${renderKey}.open`,
     },
   };
+}
+
+/**
+ * The 1-based, five-digit file name ffmpeg's `image2` muxer reads and writes for
+ * a sequence. Stated once so the writer, the reader and the cleanup agree.
+ */
+export function openingSequencePath(
+  workDir: string,
+  prefix: string,
+  index: number,
+  extension: 'png' | 'jpg',
+): string {
+  return path.join(workDir, `${prefix}-${String(index + 1).padStart(5, '0')}.${extension}`);
 }
 
 /** One captured frame: which source millisecond, and where it lands in the file. */
@@ -183,23 +219,53 @@ export type CaptureFrame = {
 export function planCaptureFrames(
   windows: readonly CutWindow[],
   fps: number,
+  openingFrames = 0,
 ): readonly CaptureFrame[] {
   const perWindow = windows.map((window) =>
     Math.max(1, Math.ceil(((window.endMs - window.startMs) * fps) / 1000)),
   );
-  const totalFrames = perWindow.reduce((sum, count) => sum + count, 0);
+  // The opening is part of the OUTPUT, so it counts in `totalFrames` and pushes
+  // every scene frame along — otherwise the waveform playhead would restart the
+  // file at the join and the last bar would light up early.
+  const totalFrames = openingFrames + perWindow.reduce((sum, count) => sum + count, 0);
   const frames: CaptureFrame[] = [];
   windows.forEach((window, windowIndex) => {
     const count = perWindow[windowIndex] ?? 0;
     for (let index = 0; index < count; index += 1) {
       frames.push({
         tMs: window.startMs + (index * 1000) / fps,
-        cursor: { outputFrame: frames.length, totalFrames, windowIndex },
+        cursor: { outputFrame: openingFrames + frames.length, totalFrames, windowIndex },
       });
     }
   });
   return frames;
 }
+
+/**
+ * The chrome captures that sit on the selfie: same count, same order, drawn
+ * over nothing at all (`overlayOnly`).
+ *
+ * `tMs` is -1 on purpose. The opening happens BEFORE the recording starts — the
+ * voice is pushed back by exactly this many frames — so no word has been spoken
+ * yet, and a timestamp before every word timing is what makes `wordCaptionFrame`
+ * say so rather than lighting the first line early.
+ */
+export function planOpeningCaptureFrames(
+  openingFrames: number,
+  totalFrames: number,
+): readonly CaptureFrame[] {
+  const frames: CaptureFrame[] = [];
+  for (let index = 0; index < openingFrames; index += 1) {
+    frames.push({
+      tMs: OPENING_CAPTURE_MS,
+      cursor: { outputFrame: index, totalFrames, windowIndex: 0, overlayOnly: true },
+    });
+  }
+  return frames;
+}
+
+/** Before the first millisecond of the approved timeline. See above. */
+export const OPENING_CAPTURE_MS = -1;
 
 function toDataUri(photo: RenderPhotoAsset): RenderPayloadPhoto {
   return {
@@ -213,15 +279,18 @@ async function captureFrames(
   sink: FrameSink,
   input: {
     readonly plan: readonly CaptureFrame[];
+    /** Already composited (selfie + chrome), in output order. Piped first. */
+    readonly openingFrames: readonly Uint8Array[];
     readonly endCardFrames: number;
     readonly jpegQuality: number;
     readonly deadline: number;
     readonly onFrame: ((frameIndex: number, totalFrames: number) => void) | undefined;
   },
 ): Promise<number> {
-  const { plan, endCardFrames, jpegQuality, deadline, onFrame } = input;
+  const { plan, openingFrames, endCardFrames, jpegQuality, deadline, onFrame } = input;
+  const openingCount = openingFrames.length;
   const sceneFrames = plan.length;
-  const totalFrames = sceneFrames + endCardFrames;
+  const totalFrames = openingCount + sceneFrames + endCardFrames;
   let bytesPiped = 0;
   // No `clip`: the viewport IS the 1080x1920 frame (browser.ts), and measured
   // on 2026-08-03 the clipped capture path costs ~55ms extra per frame.
@@ -232,10 +301,23 @@ async function captureFrames(
       optimizeForSpeed: true,
     });
 
+  // §2.2-4: the selfie opening. Already encoded, so it is written straight
+  // through — the browser contributed only the transparent chrome on top of it,
+  // and that capture has already happened by the time we get here.
+  for (let frame = 0; frame < openingCount; frame += 1) {
+    const opening = openingFrames[frame];
+    if (opening === undefined) {
+      throw new Error(`selfie opening is missing frame ${String(frame)}`);
+    }
+    bytesPiped += opening.byteLength;
+    await sink.write(opening);
+    onFrame?.(frame, totalFrames);
+  }
+
   for (let frame = 0; frame < sceneFrames; frame += 1) {
     if (Date.now() > deadline) {
       throw new Error(
-        `render time budget exceeded at frame ${frame}/${totalFrames}; aborting before the platform kills the function`,
+        `render time budget exceeded at frame ${openingCount + frame}/${totalFrames}; aborting before the platform kills the function`,
       );
     }
     // The interpreter's own clock, not wall time: this frame is the picture at
@@ -259,7 +341,7 @@ async function captureFrames(
     const shot = await shoot();
     bytesPiped += shot.byteLength;
     await sink.write(shot);
-    onFrame?.(frame, totalFrames);
+    onFrame?.(openingCount + frame, totalFrames);
   }
 
   if (endCardFrames > 0) {
@@ -275,7 +357,7 @@ async function captureFrames(
     for (let frame = 0; frame < endCardFrames; frame += 1) {
       bytesPiped += still.byteLength;
       await sink.write(still);
-      onFrame?.(sceneFrames + frame, totalFrames);
+      onFrame?.(openingCount + sceneFrames + frame, totalFrames);
     }
   }
   return bytesPiped;
@@ -306,17 +388,6 @@ export async function renderScene(
     throw new Error('ffmpeg-static did not resolve a binary for this platform');
   }
 
-  if (
-    options.openingFrames !== undefined &&
-    options.openingFrames !== null &&
-    options.openingFrames.length > 0
-  ) {
-    // The hook exists so T004 adds a producer, not a parameter. Until it also
-    // offsets the audio by the opening's length, piping these would ship a file
-    // whose voice starts before the picture it belongs to — refuse instead.
-    throw new Error('selfie opening frames are not composited yet (T004)');
-  }
-
   const fps = scene.canvas.fps;
   const requestedVariant: RenderVariant = options.variant ?? 'full';
   const music = options.music === true;
@@ -329,16 +400,24 @@ export async function renderScene(
     requestedVariant === 'highlight' && windows.length > 0 ? 'highlight' : 'full';
   const renderWindows: readonly CutWindow[] =
     effectiveVariant === 'highlight' ? windows : [{ startMs: 0, endMs: scene.durationMs }];
-  const plan = planCaptureFrames(renderWindows, fps);
+  // The derivative path (§0 verdict 3): anything that cuts or mixes the
+  // waveform. Full + music off stays exactly the render it has always been.
+  const derivative = effectiveVariant === 'highlight' || music;
+  // §2.2-1 again: a highlight with no usable plan falls back to FULL, which
+  // draws no chrome — and an opening with no chrome over it would be raw
+  // footage spliced in front of the approved scene with nothing identifying
+  // it. Drop the opening rather than throw: the fallback is a legitimate
+  // outcome of the render, not a caller error, and the MP4 must still ship.
+  const openingBase = derivative ? (options.openingFrames ?? []) : [];
+  const openingCount = openingBase.length;
+  const plan = planCaptureFrames(renderWindows, fps, openingCount);
   const sceneFrames = plan.length;
   const cutTotalMs = renderWindows.reduce(
     (total, window) => total + (window.endMs - window.startMs),
     0,
   );
   const endCardMs = endCardMsForVariant(effectiveVariant);
-  // The derivative path (§0 verdict 3): anything that cuts or mixes the
-  // waveform. Full + music off stays exactly the render it has always been.
-  const derivative = effectiveVariant === 'highlight' || music;
+  const openingPlan = planOpeningCaptureFrames(openingCount, openingCount + sceneFrames);
   const deadline = startedAt + (options.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS);
 
   const workDir = options.workDir ?? path.join(os.tmpdir(), 'friendword-pitch-render');
@@ -347,6 +426,7 @@ export async function renderScene(
     audioPath: sourceAudioPath,
     outputPath,
     derivative: derivativePaths,
+    opening: openingPaths,
   } = workFilePaths(workDir, options.renderKey, assets.audio?.mimeType ?? null);
   if (sourceAudioPath !== null && assets.audio !== null) {
     await writeFile(sourceAudioPath, assets.audio.bytes);
@@ -365,6 +445,10 @@ export async function renderScene(
       endCardMs,
       fps,
       frameCount: sceneFrames,
+      // §2.2-4: the opening is SILENT. The voice and the bed are both pushed
+      // back by exactly the opening's whole-frame length, so the first word
+      // still lands on the frame it was captured for.
+      openingFrames: openingCount,
       paths: derivativePaths,
     });
   }
@@ -375,7 +459,7 @@ export async function renderScene(
   // §2.2-6, asserted rather than assumed: the picture must outlast the sound,
   // bed tail included. Frames are ceilinged per window, so this only ever adds
   // frames to the still end card — it can never truncate approved motion.
-  const sceneMs = (sceneFrames * 1000) / fps;
+  const sceneMs = ((openingCount + sceneFrames) * 1000) / fps;
   const endCardFrames = Math.max(
     Math.round((endCardMs / 1000) * fps),
     Math.ceil(((audioDurationMs - sceneMs) * fps) / 1000),
@@ -437,6 +521,46 @@ export async function renderScene(
       await window.__friendwordRender.loadPayload(p);
     }, payload);
 
+    // §2.2-4: the chrome for the opening is captured over NOTHING — the scene is
+    // not mounted, the page is transparent — and ffmpeg composites it onto the
+    // extracted stills. That is why the capture page still has no `<video>`.
+    let opening: readonly Uint8Array[] = [];
+    if (openingCount > 0) {
+      stage('capture');
+      const selfiePaths: string[] = [];
+      for (const [index, bytes] of openingBase.entries()) {
+        const file = openingSequencePath(workDir, openingPaths.selfiePrefix, index, 'png');
+        await writeFile(file, bytes);
+        selfiePaths.push(file);
+      }
+      const chromePaths: string[] = [];
+      for (const [index, step] of openingPlan.entries()) {
+        await page.evaluate(
+          async (t, cursor) => {
+            if (window.__friendwordRender === undefined) {
+              throw new Error('render harness missing');
+            }
+            await window.__friendwordRender.seek(t, cursor);
+          },
+          step.tMs,
+          step.cursor,
+        );
+        const file = openingSequencePath(workDir, openingPaths.chromePrefix, index, 'png');
+        // PNG with `omitBackground`: the composite needs the chrome's alpha, and
+        // a JPEG here would paint an opaque rectangle over the selfie.
+        await writeFile(file, await page.screenshot({ type: 'png', omitBackground: true }));
+        chromePaths.push(file);
+      }
+      opening = await compositeOpeningFrames({
+        ffmpegPath,
+        basePaths: selfiePaths,
+        overlayPaths: chromePaths,
+        workDir,
+        prefix: openingPaths.compositePrefix,
+        jpegQuality: options.jpegQuality ?? DEFAULT_JPEG_QUALITY,
+      });
+    }
+
     stage('encode');
     const encoder = startEncoder(
       ffmpegPath,
@@ -455,6 +579,7 @@ export async function renderScene(
     try {
       bytesPiped = await captureFrames(page, encoder.sink, {
         plan,
+        openingFrames: opening,
         endCardFrames,
         jpegQuality: options.jpegQuality ?? DEFAULT_JPEG_QUALITY,
         deadline,
@@ -479,6 +604,7 @@ export async function renderScene(
     stage('output-read');
     const mp4 = await readFile(outputPath);
     const stats: RenderStats = {
+      openingFrames: openingCount,
       sceneFrames,
       endCardFrames,
       fps,
@@ -503,6 +629,15 @@ export async function renderScene(
       }
       for (const file of Object.values(derivativePaths)) {
         await rm(file, { force: true });
+      }
+      // The opening's three sequences. Frames are the one thing this renderer
+      // does stage on disk (P1's exception, §2.2-4), so they are removed by the
+      // same finally that removes the audio and the MP4.
+      for (const prefix of Object.values(openingPaths)) {
+        for (let index = 0; index < openingCount; index += 1) {
+          await rm(openingSequencePath(workDir, prefix, index, 'png'), { force: true });
+          await rm(openingSequencePath(workDir, prefix, index, 'jpg'), { force: true });
+        }
       }
       await rm(outputPath, { force: true });
     }

@@ -127,7 +127,9 @@ export function PhotosStep({
 
         {clips.map((clip, index) => (
           <View key={clip.uri} style={styles.clipRow}>
-            <Text style={styles.clipTitle}>{`Video ${index + 1}`}</Text>
+            <Text style={styles.clipTitle}>
+              {clip.role === 'selfie' ? 'Your selfie clip' : `Video ${index + 1}`}
+            </Text>
             <Text style={styles.clipMeta}>
               {`${(clip.durationMillis / 1000).toFixed(1)}s · ${Math.max(1, Math.round(clip.byteSize / 1_048_576))}MB · ${clipIngestLabel(clip.ingest)}`}
             </Text>
@@ -157,7 +159,7 @@ export function PhotosStep({
         ) : null}
 
         <Text style={styles.count}>
-          {`${photos.length} of ${limits.maxPhotos} photos · ${clips.length} of ${limits.maxClips} video${limits.maxClips === 1 ? '' : 's'}`}
+          {`${photos.length} of ${limits.maxPhotos} photos · ${clips.length} of ${limits.maxClips} video${limits.maxClips === 1 ? '' : 's'}${selfieSuffix(clips)}`}
         </Text>
         {clips.length > 0 ? (
           <Text style={styles.count}>
@@ -223,3 +225,17 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.sm,
   },
 });
+
+/**
+ * Names the selfie in the video counter, so a slot it is holding never reads as
+ * an unexplained paywall. The clip is one of the draft's videos as far as the
+ * server's budget is concerned (0050 `enforce_pitch_video_limits`), and this is
+ * the screen where an introducer discovers they cannot pick another.
+ */
+function selfieSuffix(clips: readonly PitchClip[]): string {
+  const selfies = clips.filter((clip) => clip.role === 'selfie').length;
+  if (selfies === 0) {
+    return '';
+  }
+  return clips.length === selfies ? ' — your selfie clip' : ' — includes your selfie clip';
+}

@@ -29,6 +29,7 @@ import {
 import { sendBackToRecordAgain } from '../../src/features/pitch/rerecordRecovery';
 import { HypeButton, QuietNavAction, TrustCard } from '../../src/components';
 import { pitchDraftService } from '../../src/services/draftServiceInstance';
+import { takeMediaNotices } from '../../src/services/mediaNotices';
 import { getSupabaseClient } from '../../src/services/supabaseClient';
 import {
   isUnconfirmedSubmission,
@@ -51,6 +52,10 @@ const EMPTY_CLIPS: readonly PitchClip[] = [];
 export default function PitchReviewScreen() {
   const router = useRouter();
   const { draftId } = useLocalSearchParams<{ draftId: string }>();
+  // Drained once, on mount: the upload step that queues these ran inside the
+  // prepare that navigated here, so this screen is the first one alive after
+  // the decision. Optional media that was dropped is reported, never thrown.
+  const [mediaNotices] = useState<readonly string[]>(() => takeMediaNotices());
   const [draft, setDraft] = useState<PitchDraft | null>(null);
   const [draftSync, setDraftSync] = useState<DraftSyncState>('confirmed');
   const [review, setReview] = useState<PitchReview | null>(null);
@@ -442,12 +447,19 @@ export default function PitchReviewScreen() {
         errorMessage={errorMessage}
         friendName={friendName}
         notice={
-          <ClipIngestNotice
-            checking={clipIngest.checking}
-            clips={clipIngest.clips}
-            onCheckNow={clipIngest.checkNow}
-            poll={clipIngest.poll}
-          />
+          <>
+            {mediaNotices.map((message) => (
+              <Text accessibilityLiveRegion="polite" key={message} style={styles.mediaNotice}>
+                {message}
+              </Text>
+            ))}
+            <ClipIngestNotice
+              checking={clipIngest.checking}
+              clips={clipIngest.clips}
+              onCheckNow={clipIngest.checkNow}
+              poll={clipIngest.poll}
+            />
+          </>
         }
         onChange={setReview}
         onSubmit={() => {
@@ -494,5 +506,12 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.md,
     lineHeight: fontSizes.md * 1.45,
     marginBottom: spacing.md,
+  },
+  mediaNotice: {
+    color: colors.textSecondary,
+    fontFamily: fonts.body,
+    fontSize: fontSizes.md,
+    lineHeight: fontSizes.md * 1.45,
+    marginBottom: spacing.sm,
   },
 });

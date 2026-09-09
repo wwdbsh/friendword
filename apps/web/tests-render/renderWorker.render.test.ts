@@ -1,5 +1,10 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
+import ffmpegPath from 'ffmpeg-static';
 import { describe, expect, it } from 'vitest';
 
 import type { ClaimedRenderJob, ServiceSupabaseClient } from '@friendword/data';
@@ -68,6 +73,23 @@ function makeFakeClient(input: {
   readonly structure?: unknown;
   /** The cut-record UPDATE matches no row: another worker owns the job. */
   readonly leaseLapsed?: boolean;
+  /**
+   * §2.2-4: a clip the Dater ticked, carried in the approved snapshot and
+   * labelled `asset_role='selfie'` (0063). Absent means "no selfie", which is
+   * the pre-T004 render.
+   */
+  readonly selfie?: {
+    readonly ingestStatus: string;
+    readonly proxyPath: string | null;
+    /** The bytes storage hands back for that proxy — a real, decodable clip. */
+    readonly proxyBytes?: Uint8Array;
+    /** Storage refuses the proxy download entirely. */
+    readonly downloadFails?: boolean;
+    /** False = the clip exists on the draft but the Dater never ticked it. */
+    readonly inSnapshot?: boolean;
+    /** `pitch_assets.asset_role` (0063). Null is an ordinary clip, not an opening. */
+    readonly role?: 'selfie' | null;
+  };
 }): FakeWorld {
   const completions: FakeWorld['completions'] = [];
   const cutUpdates: FakeWorld['cutUpdates'] = [];
@@ -76,29 +98,75 @@ function makeFakeClient(input: {
   let claimed = false;
 
   const scene = qaScene();
+  const SELFIE_ASSET_ID = '77777777-7777-4777-8777-777777777777';
   const revisionRow = {
     id: REVISION_ID,
     pitch_draft_id: DRAFT_ID,
+    // The APPROVED snapshot: the scene's photos, plus the selfie clip when the
+    // Dater ticked one.
+    asset_ids: [
+      ...scene.assetIds,
+      ...(input.selfie !== undefined && input.selfie.inSnapshot !== false ? [SELFIE_ASSET_ID] : []),
+    ],
     voice_asset_path: `pitch-media/${DRAFT_ID}/voice.m4a`,
     structure: input.structure ?? null,
     transcript: input.transcript ?? null,
     scene_canonical: input.sceneCanonical,
   };
-  const assetRows = scene.assetIds.map((assetId, index) => ({
+  const assetRows: Record<string, unknown>[] = scene.assetIds.map((assetId, index) => ({
     id: assetId,
     storage_path: `pitch-media/${DRAFT_ID}/photo-${index}.jpg`,
     asset_type: 'photo',
+    sort_order: index,
+    asset_role: null,
   }));
+  if (input.selfie !== undefined) {
+    assetRows.push({
+      id: SELFIE_ASSET_ID,
+      storage_path: `pitch-media/${DRAFT_ID}/selfie.mp4`,
+      asset_type: 'video',
+      sort_order: 99,
+      asset_role: input.selfie.role === undefined ? 'selfie' : input.selfie.role,
+    });
+  }
 
-  function tableResult(table: string): unknown {
+  function tableResult(
+    table: string,
+    filters: Record<string, unknown>,
+    inFilters: Record<string, readonly unknown[]>,
+  ): unknown {
     if (table === 'consent_revisions') {
       return revisionRow;
+    }
+    if (table === 'pitch_video_ingests') {
+      // Service-role only (0050). A row exists here only for a SUCCEEDED
+      // ingest with a proxy — every other state answers "no opening".
+      if (input.selfie === undefined || input.selfie.proxyPath === null) {
+        return null;
+      }
+      // The DB applies the worker's filters, not the fixture's opinion: drop
+      // the `ingest_status` filter from the query and a flagged clip really
+      // does come back here.
+      if (
+        filters.ingest_status !== undefined &&
+        filters.ingest_status !== input.selfie.ingestStatus
+      ) {
+        return null;
+      }
+      return { proxy_path: input.selfie.proxyPath };
     }
     if (table === 'campaigns') {
       return { slug: 'unit-fixture', owner_user_id: OWNER_ID };
     }
     if (table === 'pitch_assets') {
-      return assetRows;
+      // The worker asks two different questions of this table; the fake honours
+      // the filters rather than handing both the same rows.
+      return assetRows.filter(
+        (row) =>
+          Object.entries(filters).every(([column, value]) =>
+            column === 'pitch_draft_id' ? true : row[column] === value,
+          ) && Object.entries(inFilters).every(([column, values]) => values.includes(row[column])),
+      );
     }
     if (table === 'media_render_jobs') {
       return {
@@ -126,27 +194,42 @@ function makeFakeClient(input: {
     // An UPDATE ... RETURNING reports the rows it matched; the worker refuses
     // to continue when that is empty (a lapsed lease).
     let updating = false;
+    const filters: Record<string, unknown> = {};
+    const inFilters: Record<string, readonly unknown[]> = {};
     const builder: Record<string, unknown> = {
       select: () => builder,
-      eq: () => builder,
-      in: () => builder,
+      eq: (column: string, value: unknown) => {
+        filters[column] = value;
+        return builder;
+      },
+      in: (column: string, values: readonly unknown[]) => {
+        inFilters[column] = [...values];
+        return builder;
+      },
+      order: () => builder,
       update: (values: Record<string, unknown>) => {
         cutUpdates.push(values);
         updating = true;
         return builder;
       },
-      maybeSingle: () => Promise.resolve({ data: tableResult(table), error: null }),
+      maybeSingle: () =>
+        Promise.resolve({ data: firstRow(tableResult(table, filters, inFilters)), error: null }),
       then: (onF: (v: unknown) => unknown, onR?: (e: unknown) => unknown) =>
         Promise.resolve({
           data: updating
             ? input.leaseLapsed === true
               ? []
               : [{ id: JOB_ID }]
-            : tableResult(table),
+            : tableResult(table, filters, inFilters),
           error: null,
         }).then(onF, onR),
     };
     return builder;
+  }
+
+  /** `maybeSingle()` returns a row, never the list a select would resolve to. */
+  function firstRow(result: unknown): unknown {
+    return Array.isArray(result) ? (result[0] ?? null) : result;
   }
 
   const client = {
@@ -187,9 +270,14 @@ function makeFakeClient(input: {
       from: () => ({
         download: (objectName: string) => {
           downloads.push(objectName);
+          if (input.selfie?.downloadFails === true && objectName.endsWith('selfie-proxy.mp4')) {
+            return Promise.resolve({ data: null, error: { message: 'proxy is gone' } });
+          }
           const bytes = objectName.endsWith('voice.m4a')
             ? input.voiceBytes
-            : new TextEncoder().encode(objectName);
+            : objectName.endsWith('selfie-proxy.mp4') && input.selfie?.proxyBytes !== undefined
+              ? input.selfie.proxyBytes
+              : new TextEncoder().encode(objectName);
           return Promise.resolve({ data: new Blob([Buffer.from(bytes)]), error: null });
         },
         upload: (objectName: string, _body: unknown, opts: Record<string, unknown>) => {
@@ -232,6 +320,7 @@ function fakeRender(calls: { args: Parameters<typeof renderScene> }[]): typeof r
     return {
       mp4: MP4_BYTES,
       stats: {
+        openingFrames: 0,
         sceneFrames: 450,
         endCardFrames: 45,
         fps: 30,
@@ -611,5 +700,185 @@ describe('the render variant, end to end through the worker', () => {
     // No overlay: the capture page then renders exactly the tree it always did.
     expect(options?.overlayStage).toBeNull();
     expect(world.cutUpdates[0]?.effective_variant).toBe('full');
+  });
+});
+
+/**
+ * §2.2-4 — the selfie opening, gate by gate.
+ *
+ * The opening exists only when FOUR independent decisions all say yes, and the
+ * whole point of the design is that three of them are somebody's decision
+ * rather than a heuristic: the rollback flag, the highlight the render will
+ * actually be, the Dater's tick (the asset id being in the approved snapshot),
+ * and the ingest's own SUCCEEDED verdict. Each test below removes exactly one.
+ */
+describe('the selfie opening', () => {
+  const ffmpeg = ffmpegPath;
+  if (ffmpeg === null) {
+    it.skip('needs ffmpeg-static', () => undefined);
+    return;
+  }
+  const work = path.join(os.tmpdir(), 'friendword-worker-selfie-test');
+  mkdirSync(work, { recursive: true });
+  const clipPath = path.join(work, 'selfie.mp4');
+  execFileSync(ffmpeg, [
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc=size=180x320:rate=30:duration=1',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
+    clipPath,
+  ]);
+  const proxyBytes = new Uint8Array(readFileSync(clipPath));
+
+  function selfieWorld(
+    selfie:
+      | {
+          readonly ingestStatus: string;
+          readonly proxyPath: string | null;
+          readonly inSnapshot?: boolean;
+          readonly role?: 'selfie' | null;
+          readonly downloadFails?: boolean;
+        }
+      | undefined,
+    variant: 'full' | 'highlight' = 'highlight',
+  ): ReturnType<typeof makeFakeClient> {
+    return makeFakeClient({
+      job: job(),
+      sceneCanonical: canonicalSceneText(),
+      voiceBytes: new Uint8Array([1]),
+      variant,
+      transcript: richTranscript(),
+      structure: RICH_STRUCTURE,
+      ...(selfie === undefined ? {} : { selfie: { ...selfie, proxyBytes } }),
+    });
+  }
+
+  async function openingFramesFor(
+    world: ReturnType<typeof makeFakeClient>,
+    flag: string | undefined = 'true',
+  ): Promise<readonly Uint8Array[]> {
+    const renders: { args: Parameters<typeof renderScene> }[] = [];
+    await withEnv(flag, async () => {
+      await runRenderPass(world.client, passOptions(fakeRender(renders)));
+    });
+    return renders[0]?.args[2].openingFrames ?? [];
+  }
+
+  it('extracts the opening for an approved, succeeded selfie clip', async () => {
+    const frames = await openingFramesFor(
+      selfieWorld({
+        ingestStatus: 'succeeded',
+        proxyPath: `pitch-media/${DRAFT_ID}/selfie-proxy.mp4`,
+      }),
+    );
+    expect(frames.length).toBeGreaterThan(0);
+    // The stills are PNG at the output frame size — the base layer the chrome
+    // is composited onto, never the raw clip.
+    expect([...(frames[0] ?? []).slice(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    expect(Buffer.from(frames[0] ?? new Uint8Array()).readUInt32BE(16)).toBe(1080);
+  });
+
+  it("renders exactly today's file when the pitch has no selfie at all", async () => {
+    expect(await openingFramesFor(selfieWorld(undefined))).toEqual([]);
+  });
+
+  it('refuses a clip whose ingest did not succeed', async () => {
+    for (const ingestStatus of ['pending', 'processing', 'flagged', 'failed']) {
+      expect(
+        await openingFramesFor(
+          selfieWorld({
+            ingestStatus,
+            proxyPath: `pitch-media/${DRAFT_ID}/selfie-proxy.mp4`,
+          }),
+        ),
+      ).toEqual([]);
+    }
+  });
+
+  it('opens on a SELFIE only — an ordinary clip is not the opening', async () => {
+    // §2.2-4 reads the role, never "the first video on the draft". A clip of
+    // someone else, approved and processed, is still not the friend's hello.
+    expect(
+      await openingFramesFor(
+        selfieWorld({
+          ingestStatus: 'succeeded',
+          proxyPath: `pitch-media/${DRAFT_ID}/selfie-proxy.mp4`,
+          role: null,
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('refuses a clip the Dater never ticked, however healthy it is', async () => {
+    // §0 verdict 4a: the ONLY way in is the approved snapshot. The asset is on
+    // the draft and its ingest succeeded — and it still does not render.
+    expect(
+      await openingFramesFor(
+        selfieWorld({
+          ingestStatus: 'succeeded',
+          proxyPath: `pitch-media/${DRAFT_ID}/selfie-proxy.mp4`,
+          inSnapshot: false,
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  // B3: the opening is a decoration on a derivative. Losing it must never cost
+  // the Dater the MP4 their approval paid for — so a broken proxy renders the
+  // pitch WITHOUT the opening rather than failing the job.
+  it('renders without the opening when the proxy cannot be fetched', async () => {
+    const world = selfieWorld({
+      ingestStatus: 'succeeded',
+      proxyPath: `pitch-media/${DRAFT_ID}/selfie-proxy.mp4`,
+      downloadFails: true,
+    });
+    expect(await openingFramesFor(world)).toEqual([]);
+    // The job still SUCCEEDED — that is the whole point.
+    expect(world.completions).toHaveLength(1);
+    expect(world.completions[0]?.params.outcome).toBe('succeeded');
+  });
+
+  it('renders without the opening when the proxy will not decode', async () => {
+    const world = makeFakeClient({
+      job: job(),
+      sceneCanonical: canonicalSceneText(),
+      voiceBytes: new Uint8Array([1]),
+      variant: 'highlight',
+      transcript: richTranscript(),
+      structure: RICH_STRUCTURE,
+      selfie: {
+        ingestStatus: 'succeeded',
+        proxyPath: `pitch-media/${DRAFT_ID}/selfie-proxy.mp4`,
+        // Not a video at all: ffmpeg refuses it.
+        proxyBytes: new TextEncoder().encode('this is not an mp4'),
+      },
+    });
+    expect(await openingFramesFor(world)).toEqual([]);
+    expect(world.completions[0]?.params.outcome).toBe('succeeded');
+  });
+
+  it('refuses a succeeded ingest that carries no proxy', async () => {
+    expect(
+      await openingFramesFor(selfieWorld({ ingestStatus: 'succeeded', proxyPath: null })),
+    ).toEqual([]);
+  });
+
+  it('draws no opening on the full variant, or with the flag off', async () => {
+    const succeeded = {
+      ingestStatus: 'succeeded',
+      proxyPath: `pitch-media/${DRAFT_ID}/selfie-proxy.mp4`,
+    };
+    expect(await openingFramesFor(selfieWorld(succeeded, 'full'))).toEqual([]);
+    expect(await openingFramesFor(selfieWorld(succeeded), 'false')).toEqual([]);
   });
 });

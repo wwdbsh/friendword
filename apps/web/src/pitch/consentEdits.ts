@@ -84,6 +84,18 @@ export type ConsentEditState = {
   readonly claimsDirty: boolean;
   readonly includedAssetIds: readonly string[];
   readonly revisionPhotoIds: readonly string[];
+  /**
+   * T004: the clip decisions on screen, against the decisions a revision save
+   * has actually persisted (`assetId:include` / `assetId:exclude`).
+   *
+   * Compared against the SAVED ANSWER, not against the snapshot. An "include"
+   * that happens to match the snapshot the Introducer submitted still records
+   * nothing, and approving on it would publish a video on the strength of a
+   * click that never reached the database; an "exclude" that has not been saved
+   * would let the worker open a file the screen says is out.
+   */
+  readonly clipAnswerKeys: readonly string[];
+  readonly savedClipAnswerKeys: readonly string[];
   readonly template: PitchSceneTemplate;
   readonly savedTemplate: PitchSceneTemplate;
 };
@@ -98,6 +110,7 @@ export function consentEditsDirty(state: ConsentEditState): boolean {
     textDirty ||
     state.claimsDirty ||
     !sameIds([...state.includedAssetIds], [...state.revisionPhotoIds]) ||
+    !sameIds([...state.clipAnswerKeys], [...state.savedClipAnswerKeys]) ||
     // The template is stored inside the approved scene, so switching it is an
     // unsaved change to the published page exactly like an edited sentence is.
     state.template !== state.savedTemplate

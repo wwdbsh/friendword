@@ -12,9 +12,13 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { HypeButton, StickerCard, TrustCard, useReducedMotion } from '../../components';
-import type { PitchRecording } from '../../services/types';
+import type { PitchClip, PitchRecording } from '../../services/types';
 import { LiveWaveform } from './LiveWaveform';
+import { getClipMaxBytes } from '../../services/clipUploadLimits';
+import { visualPickLimits } from '../../services/pickedVisuals';
+import { findSelfieClip, selfieClipSlotAvailable } from './pitchFlowState';
 import { PitchStepFrame } from './PitchStepFrame';
+import { SelfieClipCard } from './SelfieClipCard';
 import { shouldShowRerecordNotice } from './rerecordRecovery';
 import { usePitchRecorder } from './usePitchRecorder';
 
@@ -30,6 +34,17 @@ type RecordingStepProps = {
   readonly rerecordNotice: string | null;
   readonly recording: PitchRecording | null;
   readonly onRecordingChange: (recording: PitchRecording | null) => void;
+  /**
+   * The draft's clips, which is where the optional selfie opener lives
+   * (docs/REEL_V3_DESIGN.md §3). Passed whole rather than as the selfie alone
+   * because the picked clips are what decide whether there is a video slot left
+   * for one. Nothing on this step depends on it: the continue button reads the
+   * voice take alone.
+   */
+  readonly clips: readonly PitchClip[];
+  readonly onSelfieClipChange: (clip: PitchClip | null) => Promise<void>;
+  /** Test seam, as on PhotosStep: the byte ceiling without reading app config. */
+  readonly clipMaxBytes?: number;
   readonly onBack: () => void;
   readonly onContinue: () => void;
 };
@@ -40,6 +55,9 @@ export function RecordingStep({
   rerecordNotice,
   recording,
   onRecordingChange,
+  clips,
+  onSelfieClipChange,
+  clipMaxBytes,
   onBack,
   onContinue,
 }: RecordingStepProps) {
@@ -76,6 +94,7 @@ export function RecordingStep({
     return () => animation.stop();
   }, [idleScale, recorderState.isRecording, reducedMotion]);
 
+  const clipLimits = visualPickLimits(clipMaxBytes ?? getClipMaxBytes());
   const durationMillis = recorderState.isRecording
     ? recorderState.durationMillis
     : (recording?.durationMillis ?? 0);
@@ -170,6 +189,12 @@ export function RecordingStep({
           </Text>
         ) : null}
       </StickerCard>
+      <SelfieClipCard
+        busy={busy || recorderState.isRecording}
+        onSelfieClipChange={onSelfieClipChange}
+        selfieClip={findSelfieClip(clips)}
+        slotAvailable={selfieClipSlotAvailable(clips, clipLimits.maxClips)}
+      />
     </PitchStepFrame>
   );
 }

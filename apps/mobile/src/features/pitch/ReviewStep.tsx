@@ -16,6 +16,13 @@ import { AiConsentDisclosure, type AiConsentUiState } from './AiConsentDisclosur
 type ReviewStepProps = {
   readonly relationship: PitchRelationship;
   readonly photos: readonly PitchPhoto[];
+  /**
+   * Whether the optional selfie opener is on this draft (§3). Summarised as one
+   * line, with no preview: the introducer already watched it back on the
+   * recording step, and re-rendering the video here would be a second place a
+   * stale container path can fail.
+   */
+  readonly hasSelfieClip: boolean;
   readonly recording: PitchRecording;
   readonly submitting: boolean;
   readonly errorMessage: string | null;
@@ -31,6 +38,7 @@ type ReviewStepProps = {
 export function ReviewStep({
   relationship,
   photos,
+  hasSelfieClip,
   recording,
   submitting,
   errorMessage,
@@ -137,6 +145,7 @@ export function ReviewStep({
         {photos.length === 0 ? (
           <Text style={styles.detail}>No photos picked yet — go back to add up to four.</Text>
         ) : null}
+        {hasSelfieClip ? <Text style={styles.detail}>Selfie clip added</Text> : null}
         <Text style={styles.consentCopy}>
           Nothing goes public until your friend approves or replaces every photo.
         </Text>

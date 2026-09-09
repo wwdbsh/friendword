@@ -121,6 +121,47 @@ async function ffmpeg(ffmpegPath: string, args: readonly string[]): Promise<stri
   }
 }
 
+/**
+ * Pushes a canonical WAV back by `leadMs` of true digital silence (§2.2-4).
+ *
+ * The selfie opening carries no sound of its own, so the voice — and the bed
+ * under it — has to start where the opening ends, or the first word would be
+ * spoken over the friend's face. The lead is generated as samples rather than
+ * as a container delay so the file the encoder reads IS the timeline: nothing
+ * downstream has to know an offset exists.
+ */
+export async function prependSilence(
+  ffmpegPath: string,
+  inputPath: string,
+  leadMs: number,
+  outputPath: string,
+): Promise<void> {
+  await ffmpeg(ffmpegPath, [
+    ...ffmpegBaseArgs(),
+    '-f',
+    'lavfi',
+    '-t',
+    seconds(leadMs),
+    '-i',
+    `anullsrc=r=${String(AUDIO_SAMPLE_RATE)}:cl=mono`,
+    '-i',
+    inputPath,
+    '-filter_complex',
+    '[0:a][1:a]concat=n=2:v=0:a=1[lead]',
+    '-map',
+    '[lead]',
+    '-ac',
+    '1',
+    '-ar',
+    String(AUDIO_SAMPLE_RATE),
+    '-c:a',
+    'pcm_s16le',
+    '-f',
+    'wav',
+    outputPath,
+  ]);
+}
+
 /** Decodes any supported container to canonical 48k mono s16le WAV. */
 export async function decodeToWav(
   ffmpegPath: string,
@@ -314,11 +355,19 @@ export type RenderAudioInput = {
   readonly fps: number;
   /** Output frames, for the envelope's resolution. */
   readonly frameCount: number;
+  /**
+   * §2.2-4: whole frames of silent selfie opening in front of everything. The
+   * lead is stated in FRAMES, not milliseconds, so the audio can never be
+   * longer than the picture by a rounding remainder — the video's own opening
+   * is exactly this many frames too.
+   */
+  readonly openingFrames?: number;
   /** Deterministic work paths, derived from the render key by the caller. */
   readonly paths: {
     readonly cutWav: string;
     readonly bedWav: string;
     readonly mixWav: string;
+    readonly openWav: string;
   };
 };
 
@@ -356,12 +405,13 @@ export async function buildRenderAudio(input: RenderAudioInput): Promise<RenderA
   const envelope = rmsEnvelope(voiceSamples, input.fps, input.frameCount);
 
   if (!input.music) {
+    const lead = await applyOpeningLead(input, input.paths.cutWav, voiceMs);
     return {
-      path: input.paths.cutWav,
+      path: lead.path,
       touched: true,
       voiceMs,
-      durationMs: voiceMs,
-      envelope,
+      durationMs: lead.durationMs,
+      envelope: lead.envelope(envelope),
       voiceRmsDb: await measureRmsDb(input.ffmpegPath, input.paths.cutWav),
       bedGainDb: null,
     };
@@ -396,16 +446,55 @@ export async function buildRenderAudio(input: RenderAudioInput): Promise<RenderA
     bedGainDb,
     bedMs,
   );
-  return {
-    path: input.paths.mixWav,
-    touched: true,
-    voiceMs,
+  const lead = await applyOpeningLead(
+    input,
+    input.paths.mixWav,
     // MEASURED off the mixed file: the bed plays under the end card and fades
     // out on it (§2.2-6), and this is the number the video-outlasts-audio
     // guard is checked against, so it may not be an estimate.
-    durationMs: await wavDurationMs(input.paths.mixWav),
-    envelope,
+    await wavDurationMs(input.paths.mixWav),
+  );
+  return {
+    path: lead.path,
+    touched: true,
+    voiceMs,
+    durationMs: lead.durationMs,
+    envelope: lead.envelope(envelope),
     voiceRmsDb,
     bedGainDb,
+  };
+}
+
+/**
+ * The silent selfie lead, applied to whichever track was just built.
+ *
+ * With no opening this is the identity: the same path, the same measured
+ * duration, the same envelope — so the render this pipeline shipped before T004
+ * is byte-identical, which `renderAudio.render.test.ts` pins.
+ */
+async function applyOpeningLead(
+  input: RenderAudioInput,
+  builtPath: string,
+  builtDurationMs: number,
+): Promise<{
+  readonly path: string;
+  readonly durationMs: number;
+  readonly envelope: (voice: readonly number[]) => readonly number[];
+}> {
+  const openingFrames = Math.max(0, Math.trunc(input.openingFrames ?? 0));
+  if (openingFrames === 0) {
+    return { path: builtPath, durationMs: builtDurationMs, envelope: (voice) => voice };
+  }
+  const leadMs = (openingFrames * 1000) / input.fps;
+  await prependSilence(input.ffmpegPath, builtPath, leadMs, input.paths.openWav);
+  return {
+    path: input.paths.openWav,
+    // MEASURED again, for the same reason the mix is: this file is what the
+    // encoder reads and what §2.2-6 is asserted against.
+    durationMs: await wavDurationMs(input.paths.openWav),
+    // The opening is silent, so its envelope is silence — computed rather than
+    // re-measured, because zero is exactly what an RMS of digital silence is,
+    // and the waveform must not flicker at the join.
+    envelope: (voice) => [...Array.from({ length: openingFrames }, () => 0), ...voice],
   };
 }

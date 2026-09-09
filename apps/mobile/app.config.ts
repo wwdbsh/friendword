@@ -22,6 +22,8 @@ const config: ExpoConfig = {
       ITSAppUsesNonExemptEncryption: false,
       NSMicrophoneUsageDescription:
         'Friendword uses your microphone to record a 30–60 second pitch for your friend.',
+      NSCameraUsageDescription:
+        'Record a short clip of yourself while you introduce your friend. Optional.',
       NSPhotoLibraryUsageDescription:
         'Friendword lets you suggest photos and short videos that your friend can approve or replace.',
     },
@@ -39,6 +41,20 @@ const config: ExpoConfig = {
       'expo-audio',
       {
         microphonePermission: 'Allow Friendword to record your 30–60 second voice pitch.',
+      },
+    ],
+    [
+      // The optional 3-second selfie opener (docs/REEL_V3_DESIGN.md §3). The
+      // clip is recorded muted — the render worker only extracts frames from it
+      // — so this plugin must not claim the microphone: `false` tells
+      // `createPermissionsPlugin` to leave NSMicrophoneUsageDescription alone,
+      // which keeps the voice-recording string above as the only one iOS shows.
+      'expo-camera',
+      {
+        cameraPermission:
+          'Record a short clip of yourself while you introduce your friend. Optional.',
+        microphonePermission: false,
+        recordAudioAndroid: false,
       },
     ],
     [

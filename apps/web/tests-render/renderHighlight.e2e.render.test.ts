@@ -7,6 +7,7 @@ import ffmpegPath from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
 import { describe, expect, it } from 'vitest';
 
+import { extractOpeningFrames } from '@/lib/pitchRender/openingFrames';
 import { renderScene } from '@/lib/pitchRender/renderScene';
 
 import { FIXTURE_TEXT, FIXTURE_WORDS, audioM4a, photoAsset, qaScene } from './fixtures';
@@ -135,5 +136,102 @@ describe.runIf(E2E)('the highlight render is reproducible', () => {
     // The cut is real: 2.2s of voice plus a 3s card, not the 15s scene.
     expect(durations.video).toBeGreaterThan(5);
     expect(durations.video).toBeLessThan(6.5);
+  });
+});
+
+// §2.2-4 — the selfie opening, rendered end to end.
+//
+// The opening is stills from ffmpeg with the capture page's TRANSPARENT chrome
+// composited on top, spliced in front of the highlight, and the whole audio
+// track pushed back behind it. The two things that could go wrong here and
+// nowhere else are (a) an opaque chrome capture hiding the footage, and (b) the
+// voice starting before the picture it belongs to.
+describe.runIf(E2E)('the selfie opening', () => {
+  it('splices the clip in front, silently, and stays deterministic', async () => {
+    if (ffmpegPath === null) {
+      throw new Error('ffmpeg-static missing');
+    }
+    const scene = qaScene();
+    const photos = scene.assetIds.map((assetId, index) => photoAsset(assetId, index));
+    const workRoot = path.join(OUT_DIR, 'selfie');
+    mkdirSync(workRoot, { recursive: true });
+
+    const clip = path.join(workRoot, 'selfie.mp4');
+    execFileSync(ffmpegPath, [
+      '-y',
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc=size=180x320:rate=30:duration=2',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'ultrafast',
+      '-pix_fmt',
+      'yuv420p',
+      clip,
+    ]);
+    const openingFrames = await extractOpeningFrames({
+      ffmpegPath,
+      videoPath: clip,
+      fps: 30,
+      workDir: workRoot,
+      prefix: 'base',
+      // Short on purpose: this asserts the join, not the 2.5s cap (which
+      // openingFrames.render.test.ts owns).
+      maxMs: 500,
+    });
+    expect(openingFrames).toHaveLength(15);
+
+    const hashes: string[] = [];
+    let lastFile = '';
+    for (let run = 0; run < 2; run += 1) {
+      const workDir = path.join(workRoot, `run-${run}`);
+      mkdirSync(workDir, { recursive: true });
+      const { mp4, stats } = await renderScene(
+        scene,
+        { photos, audio: audioM4a(15) },
+        {
+          baseUrl: BASE_URL,
+          renderKey: `selfie-opening-${run}`,
+          campaignSlug: 'demo-blair',
+          shareOrigin: 'https://friendword-e2e.example',
+          words: FIXTURE_WORDS,
+          text: FIXTURE_TEXT,
+          captions: [],
+          variant: 'highlight',
+          cutWindows: WINDOWS,
+          music: true,
+          musicSeed: 'c'.repeat(64),
+          daterName: 'Blair',
+          overlayStage: {
+            introducerLabel: 'MAYA INTRODUCES',
+            daterName: 'Blair',
+            relationshipChip: 'Friends for 3–10 years',
+          },
+          timedWords: TIMED_WORDS,
+          openingFrames,
+          workDir,
+          timeBudgetMs: 240_000,
+        },
+      );
+      expect(stats.openingFrames).toBe(15);
+      // The scene is untouched by the opening: the same 66 frames as the run
+      // above, with the opening in front of them.
+      expect(stats.sceneFrames).toBe(36 + 30);
+      lastFile = path.join(workRoot, `run-${run}.mp4`);
+      writeFileSync(lastFile, mp4);
+      hashes.push(streamMd5(lastFile, 'v'));
+    }
+    expect(new Set(hashes).size).toBe(1);
+
+    const durations = probeDurations(lastFile);
+    // §2.2-6 still holds with the lead in: the picture outlasts the sound.
+    expect(durations.video).toBeGreaterThanOrEqual(durations.audio - 0.001);
+    // …and the file really is half a second longer than the opening-less run.
+    expect(durations.video).toBeGreaterThan(5.4);
   });
 });

@@ -277,6 +277,15 @@ export function RenderStage() {
         throw new Error('payload photos do not cover the scene assetIds');
       }
       const nextCursor = at ?? { outputFrame: 0, totalFrames: 1, windowIndex: 0 };
+      // §2.2-4 overlay-only: the frame has to arrive at ffmpeg with real alpha,
+      // and Puppeteer's `omitBackground` only clears the DEFAULT page colour —
+      // globals.css paints `body` opaque, which would flatten the chrome into a
+      // rectangle and hide the selfie underneath it. Set imperatively rather
+      // than in an effect so it is committed before the screenshot, in the same
+      // synchronous step as the cursor it belongs to.
+      const chromeOnly = nextCursor.overlayOnly === true;
+      document.documentElement.style.background = chromeOnly ? 'transparent' : '';
+      document.body.style.background = chromeOnly ? 'transparent' : '';
       flushSync(() => {
         setMode('scene');
         setAtMs(tMs);

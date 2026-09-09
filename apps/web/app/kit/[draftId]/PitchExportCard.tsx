@@ -412,17 +412,51 @@ export function PitchExportCard({
     ready.approvedRevisionId !== null &&
     doneRevisionId !== ready.approvedRevisionId;
 
-  // Once a job exists the choice belongs to that job for its life (§0 verdict
-  // 2): the card reads it back instead of offering a switch, and the retry
-  // buttons re-send exactly what is on record rather than silently changing it.
+  // Which job the state row is actually about. getRenderState returns the
+  // campaign's LATEST job, which after a re-approval belongs to the PREVIOUS
+  // revision — so "a job exists" is not the same question as "this export is
+  // already decided". Only a job whose revision is the one the server would
+  // render now (0063 §3: request_pitch_render derives it the same way
+  // fetchApprovedRevisionId does) has a choice that binds.
+  const jobIsForApprovedRevision =
+    ready !== null &&
+    renderState !== null &&
+    renderState.revisionId !== null &&
+    ready.approvedRevisionId !== null &&
+    renderState.revisionId === ready.approvedRevisionId;
+
+  // The choice belongs to a job for its life (§0 verdict 2) — but only that
+  // job's. The chooser comes back when there is nothing recorded for the
+  // approved revision (a new revision, incl. the paid Campaign-Pass export) and
+  // when the recorded job is `failed`, because the RPC's reset path explicitly
+  // re-opens variant and options for a terminal failure (0063 §3).
+  const chooserOpen = !jobIsForApprovedRevision || jobStatus === 'failed';
+
+  // What is on record for the approved revision, shown only while it is locked;
+  // with the chooser open, stating a recorded choice beside a live one would
+  // contradict it.
   const recorded =
-    renderState !== null && jobStatus !== null
+    !chooserOpen && renderState !== null
       ? {
           variant: recordedRenderVariant(renderState),
           options: { music: renderState.options?.music === true },
         }
       : null;
-  const chosen = recorded ?? { variant, options: { music } };
+  // The FILE's cut, which is a fact about the job that produced it whether or
+  // not that job is the approved revision's — an earlier-version download must
+  // still be named after the cut it actually contains.
+  const fileVariant: PitchRenderVariant =
+    renderState !== null && jobStatus !== null ? recordedRenderVariant(renderState) : 'full';
+  // What an export button sends: with the chooser open that is the live choice,
+  // never a previous job's recorded one.
+  const pendingChoice = { variant, options: { music } };
+  const exportLabel = requesting
+    ? 'Requesting…'
+    : stale
+      ? 'Export the current version'
+      : jobStatus === 'failed' && jobIsForApprovedRevision
+        ? 'Try the export again'
+        : 'Export the MP4';
 
   return (
     <section className={styles.card} data-pitch-export>
@@ -441,7 +475,66 @@ export function PitchExportCard({
         <>
           <p className={styles.finePrint}>{entitlementLine(renderState)}</p>
 
-          {jobStatus === null && (
+          {recorded !== null && (
+            <p className={styles.finePrint} data-render-choice-recorded>
+              {`${RECORDED_CHOICE_PREFIX} ${
+                recorded.variant === 'highlight' ? HIGHLIGHT_LABEL : FULL_LABEL
+              }, ${recorded.options.music ? MUSIC_ON_COPY : MUSIC_OFF_COPY}.`}
+            </p>
+          )}
+
+          {rendering && (
+            <div aria-live="polite">
+              <p className={styles.muted}>{RENDERING_COPY}</p>
+              <p className={styles.finePrint}>{RENDERING_DETAIL_COPY}</p>
+            </div>
+          )}
+
+          {doneRevisionId !== null && !stale && (
+            <>
+              <p className={styles.muted}>{READY_COPY}</p>
+              <p className={styles.finePrint}>{READY_DETAIL_COPY}</p>
+              <button
+                className={styles.primary}
+                type="button"
+                disabled={downloading}
+                onClick={() => {
+                  void handleDownload(doneRevisionId, fileVariant);
+                }}
+              >
+                {downloading ? 'Preparing…' : 'Download the MP4'}
+              </button>
+            </>
+          )}
+
+          {doneRevisionId !== null && stale && (
+            <>
+              <p className={styles.muted} role="status" data-render-stale>
+                {STALE_COPY}
+              </p>
+              <div className={styles.actionRow}>
+                <button
+                  className={styles.secondary}
+                  type="button"
+                  disabled={downloading}
+                  onClick={() => {
+                    void handleDownload(doneRevisionId, fileVariant);
+                  }}
+                >
+                  {downloading ? 'Preparing…' : 'Download the earlier version'}
+                </button>
+              </div>
+            </>
+          )}
+
+          {jobStatus === 'failed' && jobIsForApprovedRevision && (
+            <>
+              <p className={styles.muted}>{FAILED_COPY}</p>
+              <p className={styles.finePrint}>{FAILED_DETAIL_COPY}</p>
+            </>
+          )}
+
+          {chooserOpen && (
             <div data-render-choice>
               <h3 className={styles.subTitle}>{CHOICE_TITLE}</h3>
               <p className={styles.muted}>{choiceIntro(daterName)}</p>
@@ -480,91 +573,12 @@ export function PitchExportCard({
                 type="button"
                 disabled={requesting}
                 onClick={() => {
-                  void handleExport(chosen);
+                  void handleExport(pendingChoice);
                 }}
               >
-                {requesting ? 'Requesting…' : 'Export the MP4'}
+                {exportLabel}
               </button>
             </div>
-          )}
-
-          {recorded !== null && (
-            <p className={styles.finePrint} data-render-choice-recorded>
-              {`${RECORDED_CHOICE_PREFIX} ${
-                recorded.variant === 'highlight' ? HIGHLIGHT_LABEL : FULL_LABEL
-              }, ${recorded.options.music ? MUSIC_ON_COPY : MUSIC_OFF_COPY}.`}
-            </p>
-          )}
-
-          {rendering && (
-            <div aria-live="polite">
-              <p className={styles.muted}>{RENDERING_COPY}</p>
-              <p className={styles.finePrint}>{RENDERING_DETAIL_COPY}</p>
-            </div>
-          )}
-
-          {doneRevisionId !== null && !stale && (
-            <>
-              <p className={styles.muted}>{READY_COPY}</p>
-              <p className={styles.finePrint}>{READY_DETAIL_COPY}</p>
-              <button
-                className={styles.primary}
-                type="button"
-                disabled={downloading}
-                onClick={() => {
-                  void handleDownload(doneRevisionId, chosen.variant);
-                }}
-              >
-                {downloading ? 'Preparing…' : 'Download the MP4'}
-              </button>
-            </>
-          )}
-
-          {doneRevisionId !== null && stale && (
-            <>
-              <p className={styles.muted} role="status" data-render-stale>
-                {STALE_COPY}
-              </p>
-              <div className={styles.actionRow}>
-                <button
-                  className={styles.secondary}
-                  type="button"
-                  disabled={downloading}
-                  onClick={() => {
-                    void handleDownload(doneRevisionId, chosen.variant);
-                  }}
-                >
-                  {downloading ? 'Preparing…' : 'Download the earlier version'}
-                </button>
-                <button
-                  className={styles.primary}
-                  type="button"
-                  disabled={requesting}
-                  onClick={() => {
-                    void handleExport(chosen);
-                  }}
-                >
-                  {requesting ? 'Requesting…' : 'Export the current version'}
-                </button>
-              </div>
-            </>
-          )}
-
-          {jobStatus === 'failed' && (
-            <>
-              <p className={styles.muted}>{FAILED_COPY}</p>
-              <p className={styles.finePrint}>{FAILED_DETAIL_COPY}</p>
-              <button
-                className={styles.primary}
-                type="button"
-                disabled={requesting}
-                onClick={() => {
-                  void handleExport(chosen);
-                }}
-              >
-                {requesting ? 'Requesting…' : 'Try the export again'}
-              </button>
-            </>
           )}
 
           {waitNotice !== null && (

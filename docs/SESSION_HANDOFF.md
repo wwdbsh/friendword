@@ -21,7 +21,22 @@
 
 ---
 
-## 1. 지금 상태 (2026-09-08 — fcp Goal `launch-readiness` 종료)
+## 1. 지금 상태 (2026-09-09 — fcp Goal `reel-redesign` 종료)
+
+> **Goal `reel-redesign`(Issue #96) 종료 (2026-09-09).** 냉정 평가(`docs/PRODUCT_COLD_REVIEW_2026-09-09.md` §1)가 프레임으로 입증한 릴스 결함을 T001~~T006(#97~~#102, PR #103~#108)으로 해소했다. 설계 계약은 `docs/REEL_V3_DESIGN.md`, 판정은 `docs/DECISIONS.md` 2026-09-09 항목 5건.
+>
+> - **모델**: 씬·scene_hash·웹 플레이어 불변, MP4는 파생물. 하이라이트 컷 플랜(문장 경계·연속·이름 문장 우선·15~30s)·타임드 단어 자막·측정 파형·스테이지 타이틀·QR 엔드카드 3.0s·비생성형 보정·시드 고정 음악 베드(더킹)를 렌더 워커+캡처 페이지+인코더에서 구현. migration 0063(잡 `variant/options/cut_plan/cut_hash/effective_variant`, `pitch_assets.asset_role`, DEFAULT 인자 단일 `request_pitch_render`, `get_pitch_render_state` 컬럼 추가)·0064(CHECK 함수 grant) hosted 적용.
+> - **셀피**: 앱 녹음 화면의 선택적 3~5초 전면 카메라 클립(`expo-camera`, 무음) → 기존 클립 인제스트(`asset_role='selfie'`) → 동의 화면에서 Dater가 모든 비디오에 대해 "Include / Leave it out"을 명시 답변(무응답=제외, 저장 전 승인 차단) → 워커가 프록시 프레임을 ffmpeg로 추출해 오프닝. 시뮬레이터 QA는 권한·거부·프리뷰·실패·삭제 경로까지(카메라 없음); 실촬영·인제스트·오프닝의 hosted 왕복은 **다음 TestFlight의 실기기 항목**.
+> - **kit**: 첫 렌더 전 Highlight/Full·음악 선택, 이후 잠금, `friendword-pitch-{variant}.mp4`. 플래그 `RENDER_HIGHLIGHT_ENABLED` 기본 ON(롤백 `false`).
+> - **프로덕션 실증**: `jordan-tbn8xp` 하이라이트 20.667s(컷 17.66s + 카드 3s), video ≥ audio, 프레임·레벨 체크리스트 통과(Issue #101 코멘트). 첫 시도는 0063 grant 누락으로 3회 실패 → 0064.
+> - **하니스**: DB 테스트 39가 역할별 CHECK 함수 실행을 검증. `renderQueue.e2e`는 이 머신에 Docker가 없어 미실행(하이라이트 시드 케이스 D는 미증명).
+> - **남은 위험(최종 통합 리뷰, 미수정)**: 오프닝 PNG ~75장을 메모리에 들고 디스크에 다시 쓰는 왕복(`openingFrames.readSequence` → `renderScene`), 오디오·오프닝 ffmpeg 패스가 개별 120s 타임아웃만 있고 `deadline` 대비 검사가 없어 최악의 경우 캡처 전에 예산을 소진(정직하게 실패하되 attempt 1회 소모), 롤백 플래그가 kit 선택 UI를 숨기지 않음(OPS 런북 참조).
+>
+> hosted 상태: migration 0064까지 적용. 게이트는 2026-09-08과 동일. 라이브 캠페인은 QA용 `jordan-tbn8xp` 1건(9/15 만료 후 정리 — 렌더 잡은 이번 실증으로 재생성됨).
+
+---
+
+## 1-b. 이전 상태 (2026-09-08 — fcp Goal `launch-readiness` 종료)
 
 > **Goal `launch-readiness`(Issue #69) 종료 (2026-09-08).** Claude가 실기기 없이 프로덕션 웹(Playwright 격리 프로필)·iOS 시뮬레이터(orca 좌표 탭 + CGEvent swipe)·hosted e2e 스크립트로 핵심 루프 전 구간을 자율 QA했고, 찾은 결함을 Task #70~#80·PR #81~#92로 수리·배포했다. 사용자는 승인 범위(Issue/PR/머지/db push 전권, sandbox 스위치는 드릴 중 임시)를 주고 자율 실행을 위임했다. 판정 이력은 `docs/DECISIONS.md` 2026-09-08 항목 8건, 결함 원장은 `docs/QA_FINDINGS_2026-09-08.md`.
 >
@@ -114,7 +129,7 @@ moderation 텍스트 해싱 · scene 해시 직렬화 · 분수 `pulseHz` 나눗
 - **프레임은 디스크에 쌓지 않습니다.** 리눅스에서 Chromium이 /tmp에 209MB를 전개하고 남는 게 ~300MB인데, 1080×1920 PNG 1,800장은 GB 단위입니다. ffmpeg stdin 스트리밍이 최적화가 아니라 **제약**입니다.
 - **캡처 중 CSS `transition`은 무력화**합니다. 벽시계로 보간되므로 캡처 속도에 따라 출력이 달라져 결정론이 깨집니다. 불투명도 램프는 이미 해석기가 계산하므로 꺼도 승인된 해석만 남습니다. **픽셀 동일성은 약속하지 않습니다**(§12).
 - **`elapsedMs` 반영이 한 커밋 늦습니다.** 주입 직후 찍으면 전 구간이 1프레임 밀립니다. "같은 t 두 번 = 동일" 검사로는 **일관되게 밀린 상태를 못 잡으므로** 샷 경계 검사가 따로 있습니다.
-- **오디오는 Introducer 원본 그대로**(§8-1). AAC면 `-c:a copy`, 아니면 순수 AAC. `loudnorm` 등 **파형을 바꾸는 필터 전면 금지**. 엔드카드 구간은 무음 패딩이고 `-shortest`를 쓰지 않습니다.
+- **웹 페이지 오디오는 Introducer 원본 그대로**(§8-1). **MP4는 파생물**(2026-09-09): `variant=highlight` 또는 음악 on이면 컷(`atrim`+`concat`, 20ms fade)·`sidechaincompress`(키는 `apad`로 베드 길이까지 패딩)·`amix`·AAC 128k `+bitexact`; Full+음악 off·플래그 off는 레거시 `-c:a copy` 경로가 바이트 동일(argv 스냅샷 테스트). `-shortest`는 여전히 쓰지 않고 video ≥ audio를 단언합니다. 엔드카드는 하이라이트 3.0s / 레거시 1.5s.
 - **엔드카드는 scene 스키마가 아니라 렌더러 크롬**입니다 — 브랜드 상수 + canonical 캠페인 URL을 승인 타임라인 **뒤에 순수 append**(1.5초). Dater 저작 텍스트 0. URL은 **환경 설정값**(하드코딩 금지). 동의 화면에 고지 1줄이 같은 슬라이스에 나갔습니다.
 - **번들 예산**: 렌더 라우트 ≈153MB / 250MB. `ffprobe`와 BlazeFace는 **렌더에 불필요하므로 넣지 마십시오**. `outputFileTracingIncludes`는 라우트별입니다.
 - **`serverExternalPackages: ['ffmpeg-static', 'ffprobe-static']`를 지우지 마십시오.** 두 패키지는 `path.join(__dirname, …)`로 바이너리를 찾는데, 번들되면 `__dirname`이 청크 디렉터리로 재작성돼 spawn ENOENT가 납니다. `outputFileTracingIncludes`는 **라우트별**입니다 — Chromium/ffmpeg를 exec하는 라우트를 새로 만들면 그 라우트의 엔트리도 추가해야 합니다(render-run·render-bench에 각각 있음).
@@ -140,6 +155,10 @@ moderation 텍스트 해싱 · scene 해시 직렬화 · 분수 `pulseHz` 나눗
 - **문구는 코드가 주는 것만 말합니다**(§12). 과대약속 감사에서 실제로 걷어낸 표현: `will review`, `will reply`, `when Friendword opens`, `beyond their review`, `check back soon`. 렌더 소요 시간 추정도 금지입니다(큐 대기가 무한정).
 - **개인정보·동의·identity·moderation·결제를 mock만으로 완료 처리 금지**(§9).
 - **hosted 실계정 `wwdbsh@gmail.com` 삭제·조작 금지.**
+- **CHECK·트리거가 부르는 private 함수는 쓰는 역할에 EXECUTE를 주고, 테스트는 `SET ROLE`로 직접 씁니다** — 0063이 이를 빠뜨려 첫 프로덕션 하이라이트가 3회 실패(0064).
+- **머지 전에 `fcp-goal.mjs transition --to review`** — 세 번 어겨 원장을 손으로 정합했습니다.
+- **사용자 기기의 마우스·키보드·입력 소스를 잡지 마십시오**(2026-09-09 사용자 지시). 시뮬레이터 조작은 `orca computer … --app com.apple.iphonesimulator`만 사용합니다. PHPicker 확인 버튼이 orca 탭에 반응하지 않으면 사진 대신 기존 초안을 쓰거나 실기기 항목으로 넘깁니다.
+- **node_modules 링커를 뒤집지 마십시오** — hoisted로 재설치하면 웹 UI 테스트가 React 중복으로 깨지고, 되돌린 뒤에도 stale 파일이 typecheck 13건을 만들었습니다(클린 재설치로 해소).
 - **TTS/합성 음성은 공개 데모에서 금지.**
 
 ### 운영 함정

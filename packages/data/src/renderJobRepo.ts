@@ -377,6 +377,12 @@ export async function recordRenderJobCut(
     })
     .eq('id', id)
     .eq('lease_token', lease)
+    // …and the lease must still be LIVE. A lease token matches until it is
+    // handed to another worker, so the token alone lets a worker whose lease
+    // merely EXPIRED — the case the reclaim path exists for — write its cut
+    // over a job someone else is already re-rendering. Expiry is the same
+    // predicate claim_media_render_job reclaims on, so the two agree.
+    .gt('lease_expires_at', new Date().toISOString())
     // The updated rows come back so a no-op is detectable: matching zero rows
     // means the lease lapsed and another worker owns the job, and silently
     // succeeding there would leave effective_variant reading as whatever the

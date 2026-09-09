@@ -5,8 +5,11 @@
 //  1. the defaults the design names — Highlight selected, music on — and that
 //     they are what a straight-to-export click actually sends,
 //  2. a changed choice reaches requestRender as {variant, options:{music}},
-//  3. once a job exists (any status) there is no chooser at all; the card
-//     reports the recorded choice instead,
+//  3. while the APPROVED REVISION's job is queued, leased or done there is no
+//     chooser and the card reports the recorded choice instead — but the state
+//     RPC returns the campaign's LATEST job, so a job belonging to an older
+//     revision, and a failed job the reset path lets you re-choose (0063 §3),
+//     must both re-open the chooser,
 //  4. a pre-0063 finished row (effective_variant null, variant at the column
 //     DEFAULT 'highlight') reads as Full — the MP4 on record is the full
 //     timeline the old worker made, and mislabeling it would name the file
@@ -37,6 +40,7 @@ type FakeRenderState = {
 const CAMPAIGN_ID = '11111111-1111-4111-8111-111111111111';
 const DRAFT_ID = '22222222-2222-4222-8222-222222222222';
 const REVISION_A = '33333333-3333-4333-8333-333333333333';
+const REVISION_B = '44444444-4444-4444-8444-444444444444';
 
 const harness = vi.hoisted(() => ({
   states: [] as FakeRenderState[],
@@ -127,6 +131,15 @@ function mountCard(daterName: string | null = 'Blair') {
   );
 }
 
+// jsdom implements neither half of the object-URL API. These no-ops live on the
+// real global rather than behind vi.stubGlobal because the card revokes on a
+// 0ms timer, which can outlive the test that started the download — a stub
+// removed by unstubAllGlobals first turned that into an uncaught TypeError.
+Object.assign(URL, {
+  createObjectURL: () => 'blob:friendword/0',
+  revokeObjectURL: () => undefined,
+});
+
 function chip(value: 'highlight' | 'full'): HTMLButtonElement {
   const found = document.querySelector<HTMLButtonElement>(`[data-render-variant="${value}"]`);
   if (found === null) {
@@ -156,11 +169,6 @@ async function downloadFrom(state: FakeRenderState): Promise<{ download: string 
   harness.approvedRevisionId = REVISION_A;
   harness.states = [state];
   const clicked = captureAnchorClicks();
-  vi.stubGlobal('URL', {
-    ...URL,
-    createObjectURL: () => 'blob:friendword/0',
-    revokeObjectURL: () => undefined,
-  });
   vi.stubGlobal('fetch', () =>
     Promise.resolve(new Response('ftypisom', { status: 200, headers: { 'content-length': '8' } })),
   );
@@ -232,7 +240,8 @@ describe('the kit export card chooses the cut before the render', () => {
     ]);
   });
 
-  it('locks the choice once a job exists and reports what was recorded', async () => {
+  it('locks the choice while the approved revision’s job is in flight', async () => {
+    harness.approvedRevisionId = REVISION_A;
     harness.states = [
       renderState({
         jobId: 'job-1',
@@ -306,5 +315,121 @@ describe('the kit export card chooses the cut before the render', () => {
       }),
     );
     expect(clicked).toEqual([{ download: 'friendword-pitch-highlight.mp4' }]);
+  });
+
+  // ── The chooser follows the APPROVED REVISION, not "any job exists" ──────
+  // get_pitch_render_state returns the campaign's LATEST job (0063 §4, ORDER BY
+  // created_at DESC LIMIT 1). Keying the lock on "a job exists" made the first
+  // export's choice silently govern every later revision — including the one
+  // the Campaign Pass is paid for — and hid the re-choice the RPC's reset path
+  // grants a failed job (0063 §3).
+  it('offers the choice again for a NEW approved revision and sends the fresh one', async () => {
+    harness.approvedRevisionId = REVISION_B;
+    harness.states = [
+      renderState({
+        jobId: 'job-1',
+        jobStatus: 'done',
+        revisionId: REVISION_A,
+        outputStoragePath: `pitch-media/${DRAFT_ID}/renders/${REVISION_A}.mp4`,
+        freeRenderUsed: true,
+        variant: 'highlight',
+        effectiveVariant: 'highlight',
+        options: { music: true },
+      }),
+    ];
+    mountCard();
+    await act(async () => {});
+
+    expect(document.querySelector('[data-render-choice]')).toBeTruthy();
+    // The previous job's choice is not restated as this export's.
+    expect(document.querySelector('[data-render-choice-recorded]')).toBeNull();
+
+    fireEvent.click(chip('full'));
+    fireEvent.click(document.querySelector('[data-render-music]') as HTMLInputElement);
+    fireEvent.click(screen.getByRole('button', { name: 'Export the current version' }));
+    await act(async () => {});
+
+    expect(harness.requests).toEqual([
+      { campaignId: CAMPAIGN_ID, choice: { variant: 'full', options: { music: false } } },
+    ]);
+  });
+
+  it('does not let a pre-0063 finished row of an OLD revision force Full on the new one', async () => {
+    // The pre-0063 row reads as Full for its own FILE (effective_variant null),
+    // but that says nothing about the revision now awaiting an export.
+    harness.approvedRevisionId = REVISION_B;
+    harness.states = [
+      renderState({
+        jobId: 'job-1',
+        jobStatus: 'done',
+        revisionId: REVISION_A,
+        outputStoragePath: `pitch-media/${DRAFT_ID}/renders/${REVISION_A}.mp4`,
+        freeRenderUsed: true,
+        variant: 'highlight',
+        effectiveVariant: null,
+        options: null,
+      }),
+    ];
+    mountCard();
+    await act(async () => {});
+
+    expect(chip('highlight').getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Export the current version' }));
+    await act(async () => {});
+
+    expect(harness.requests).toEqual([
+      { campaignId: CAMPAIGN_ID, choice: { variant: 'highlight', options: { music: true } } },
+    ]);
+  });
+
+  it('re-opens the choice after a failed job, as the reset path allows', async () => {
+    harness.approvedRevisionId = REVISION_A;
+    harness.states = [
+      renderState({
+        jobId: 'job-1',
+        jobStatus: 'failed',
+        revisionId: REVISION_A,
+        lastError: 'ffmpeg exited 1',
+        variant: 'full',
+        options: { music: false },
+      }),
+    ];
+    mountCard();
+    await act(async () => {});
+
+    expect(document.querySelector('[data-render-choice]')).toBeTruthy();
+    expect(document.querySelector('[data-render-choice-recorded]')).toBeNull();
+    expect(screen.getByText('The export failed.')).toBeTruthy();
+
+    fireEvent.click(chip('full'));
+    fireEvent.click(screen.getByRole('button', { name: 'Try the export again' }));
+    await act(async () => {});
+
+    expect(harness.requests).toEqual([
+      { campaignId: CAMPAIGN_ID, choice: { variant: 'full', options: { music: true } } },
+    ]);
+  });
+
+  it('keeps a done job for the SAME approved revision locked', async () => {
+    harness.approvedRevisionId = REVISION_A;
+    harness.states = [
+      renderState({
+        jobId: 'job-1',
+        jobStatus: 'done',
+        revisionId: REVISION_A,
+        outputStoragePath: `pitch-media/${DRAFT_ID}/renders/${REVISION_A}.mp4`,
+        freeRenderUsed: true,
+        variant: 'full',
+        effectiveVariant: 'full',
+        options: { music: true },
+      }),
+    ];
+    mountCard();
+    await act(async () => {});
+
+    expect(document.querySelector('[data-render-choice]')).toBeNull();
+    expect(document.querySelector('[data-render-choice-recorded]')?.textContent).toBe(
+      'This export was requested as Full, music on.',
+    );
   });
 });

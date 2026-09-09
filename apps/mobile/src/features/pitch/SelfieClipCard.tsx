@@ -48,6 +48,16 @@ export const SELFIE_CLIP_NO_SLOT_MESSAGE =
 
 export const SELFIE_CLIP_DENIED_MESSAGE = 'Camera is off for Friendword — enable it in Settings.';
 
+/**
+ * What the camera sheet says while nothing is recording.
+ *
+ * It names the part of the take that is actually used: the renderer splices in
+ * the first OPENING_MAX_MS (2.5s) of the clip and nothing after it (§2.2-4), so
+ * a person who saves their wave for second four never sees it in the video.
+ */
+export const SELFIE_CLIP_RECORD_HINT =
+  'Look into the camera and say hi. 3 to 5 seconds — the first 2.5 seconds open the video.';
+
 const RECORDING_OPTIONS: CameraRecordingOptions = {
   // Seconds. The OS stop is the backstop; the ticker below is what normally
   // ends the take, so the two must agree.
@@ -237,7 +247,7 @@ export function SelfieClipCard({
               ? `${formatSeconds(elapsedMs)} of ${formatSeconds(SELFIE_CLIP_MAX_MS)}${
                   canStop ? '' : ' — keep going to 3 seconds'
                 }`
-              : 'Look into the camera and say hi. 3 to 5 seconds.'}
+              : SELFIE_CLIP_RECORD_HINT}
           </Text>
           {recording ? (
             <HypeButton

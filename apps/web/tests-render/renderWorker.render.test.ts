@@ -190,12 +190,22 @@ function makeFakeClient(input: {
     return null;
   }
 
+  /** The `lease_expires_at > now` predicate, evaluated as the database would. */
+  function leaseExpiresAtExcludes(
+    gtFilters: Record<string, unknown>,
+    job: ClaimedRenderJob,
+  ): boolean {
+    const bound = gtFilters.lease_expires_at;
+    return typeof bound === 'string' && Date.parse(job.leaseExpiresAt) <= Date.parse(bound);
+  }
+
   function makeBuilder(table: string): Record<string, unknown> {
     // An UPDATE ... RETURNING reports the rows it matched; the worker refuses
     // to continue when that is empty (a lapsed lease).
     let updating = false;
     const filters: Record<string, unknown> = {};
     const inFilters: Record<string, readonly unknown[]> = {};
+    const gtFilters: Record<string, unknown> = {};
     const builder: Record<string, unknown> = {
       select: () => builder,
       eq: (column: string, value: unknown) => {
@@ -204,6 +214,13 @@ function makeFakeClient(input: {
       },
       in: (column: string, values: readonly unknown[]) => {
         inFilters[column] = [...values];
+        return builder;
+      },
+      // PostgREST's `.gt`, honoured rather than ignored: the cut write filters
+      // on a lease that has not expired, and a harness that dropped the
+      // predicate would report a write the database would have refused.
+      gt: (column: string, value: unknown) => {
+        gtFilters[column] = value;
         return builder;
       },
       order: () => builder,
@@ -217,7 +234,7 @@ function makeFakeClient(input: {
       then: (onF: (v: unknown) => unknown, onR?: (e: unknown) => unknown) =>
         Promise.resolve({
           data: updating
-            ? input.leaseLapsed === true
+            ? input.leaseLapsed === true || leaseExpiresAtExcludes(gtFilters, input.job)
               ? []
               : [{ id: JOB_ID }]
             : tableResult(table, filters, inFilters),
@@ -314,13 +331,16 @@ function job(overrides: Partial<ClaimedRenderJob> = {}): ClaimedRenderJob {
 
 const MP4_BYTES = new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]);
 
-function fakeRender(calls: { args: Parameters<typeof renderScene> }[]): typeof renderScene {
+function fakeRender(
+  calls: { args: Parameters<typeof renderScene> }[],
+  statsOverrides: { readonly openingFrames?: number } = {},
+): typeof renderScene {
   return async (...args: Parameters<typeof renderScene>) => {
     calls.push({ args });
     return {
       mp4: MP4_BYTES,
       stats: {
-        openingFrames: 0,
+        openingFrames: statsOverrides.openingFrames ?? 0,
         sceneFrames: 450,
         endCardFrames: 45,
         fps: 30,
@@ -403,6 +423,26 @@ describe('runRenderPass — contract pins', () => {
       output_storage_path: `pitch-media/${DRAFT_ID}/renders/${REVISION_ID}.mp4`,
       output_bytes: MP4_BYTES.byteLength,
       output_duration_ms: 16_500,
+    });
+  });
+
+  it('counts the selfie opening in the reported duration (§2.2-4)', async () => {
+    // The opening is spliced in FRONT of the scene and counted on its own; a
+    // duration built from scene + end card alone understates every MP4 that
+    // has one — here by the 75 frames (2.5s at 30fps) of the opener.
+    const world = makeFakeClient({
+      job: job(),
+      sceneCanonical: canonicalSceneText(),
+      voiceBytes: new Uint8Array([1, 2, 3]),
+    });
+    const renders: { args: Parameters<typeof renderScene> }[] = [];
+
+    await runRenderPass(world.client, passOptions(fakeRender(renders, { openingFrames: 75 })));
+
+    expect(world.completions[0]?.params).toMatchObject({
+      outcome: 'succeeded',
+      // (75 + 450 + 45) / 30 * 1000
+      output_duration_ms: 19_000,
     });
   });
 

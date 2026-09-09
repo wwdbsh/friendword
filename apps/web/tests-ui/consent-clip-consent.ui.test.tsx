@@ -352,6 +352,50 @@ describe('the consent surface asks about each clip', () => {
     });
   }
 
+  // The Dater may only INCLUDE footage they can watch. Below 'succeeded' the
+  // card has no proxy and no poster, so "include" there is consent to publish
+  // an unseen video; the question itself still has to be answered.
+  for (const [name, state] of [
+    ['still processing', 'pending'],
+    ['whose state never came back', null],
+  ] as const) {
+    it(`offers only "leave it out" for a clip ${name}`, async () => {
+      stubClipIngestFetch(state);
+      await mountReview();
+
+      const { include, exclude } = clipChoices();
+      expect(include.disabled).toBe(true);
+      expect(exclude.disabled).toBe(false);
+      expect(
+        screen.getByText('Still processing — you can include it once you can watch it here.'),
+      ).toBeTruthy();
+
+      // The gate is unchanged: unanswered still blocks, and the answer that IS
+      // available still opens it.
+      expect(approveButton().disabled).toBe(true);
+      fireEvent.click(exclude);
+      await act(async () => {});
+      expect(clipChoices().exclude.checked).toBe(true);
+      expect(saveButton().disabled).toBe(false);
+    });
+  }
+
+  it('offers "include" once the clip has passed and can be watched', async () => {
+    await mountReview();
+    const { include, exclude } = clipChoices();
+    expect(include.disabled).toBe(false);
+    expect(exclude.disabled).toBe(false);
+    expect(
+      screen.queryByText('Still processing — you can include it once you can watch it here.'),
+    ).toBeNull();
+
+    fireEvent.click(include);
+    await act(async () => {});
+    expect(clipChoices().include.checked).toBe(true);
+    await saveEdits();
+    expect(savedRevisions.at(-1)?.includedAssetIds).toContain(CLIP_ID);
+  });
+
   // B1b: an "include" that matches the snapshot records nothing on its own.
   it('will not approve on an include the save has not written yet', async () => {
     await mountReview();

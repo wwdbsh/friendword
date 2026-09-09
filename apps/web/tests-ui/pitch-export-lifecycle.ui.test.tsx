@@ -29,6 +29,12 @@ type FakeRenderState = {
   freeRenderUsed: boolean;
   passActive: boolean;
   updatedAt: string | null;
+  // 0063. Present on the fake because the card reads them: a fake that omits
+  // them is a shape the RPC can no longer return, and the card would be
+  // exercised against a state that cannot exist in production.
+  variant: 'full' | 'highlight' | null;
+  effectiveVariant: 'full' | 'highlight' | null;
+  options: { music?: boolean } | null;
 };
 
 const CAMPAIGN_ID = '11111111-1111-4111-8111-111111111111';
@@ -55,6 +61,9 @@ function renderState(overrides: Partial<FakeRenderState>): FakeRenderState {
     freeRenderUsed: false,
     passActive: false,
     updatedAt: null,
+    variant: null,
+    effectiveVariant: null,
+    options: null,
     ...overrides,
   };
 }
@@ -350,7 +359,9 @@ describe('kit MP4 export card lifecycle', () => {
       { headers: { authorization: 'Bearer token-1' } },
     );
     expect(anchors).toHaveLength(1);
-    expect(anchors[0]?.download).toBe('friendword-pitch.mp4');
+    // No 0063 columns on this finished row: it predates the highlight
+    // pipeline, so it is named for the full render it actually is.
+    expect(anchors[0]?.download).toBe('friendword-pitch-full.mp4');
     expect(anchors[0]?.href).toBe('blob:friendword/0');
     expect(created.map((blob) => blob.size)).toEqual([MP4_BODY.length]);
     expect(screen.queryByText('The download didn’t complete. Please try again.')).toBeNull();

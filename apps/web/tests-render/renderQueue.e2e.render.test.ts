@@ -89,7 +89,7 @@ const HIGHLIGHT_END_CARD_MS = 3_000;
  * correct product, and neither may be asserted blind.
  */
 const HIGHLIGHT_ON =
-  process.env.RENDER_HIGHLIGHT_ENABLED === 'true' || process.env.RENDER_HIGHLIGHT_ENABLED === '1';
+  process.env.RENDER_HIGHLIGHT_ENABLED !== 'false' && process.env.RENDER_HIGHLIGHT_ENABLED !== '0';
 
 function psql(sql: string): string {
   return execFileSync('psql', [DB_URL, '-v', 'ON_ERROR_STOP=1', '-Atc', sql], {

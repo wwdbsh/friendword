@@ -25,6 +25,9 @@ type FakeRenderState = {
   freeRenderUsed: boolean;
   passActive: boolean;
   updatedAt: string | null;
+  variant: 'full' | 'highlight' | null;
+  effectiveVariant: 'full' | 'highlight' | null;
+  options: { music?: boolean } | null;
 };
 
 const CAMPAIGN_ID = '11111111-1111-4111-8111-111111111111';
@@ -48,6 +51,9 @@ function renderState(overrides: Partial<FakeRenderState>): FakeRenderState {
     freeRenderUsed: false,
     passActive: false,
     updatedAt: null,
+    variant: null,
+    effectiveVariant: null,
+    options: null,
     ...overrides,
   };
 }

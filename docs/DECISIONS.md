@@ -711,3 +711,10 @@
 - **이유**: 아키텍트 반박(2026-09-09)이 코드로 확인 — 크롬·자막·엔드카드는 이미 렌더러 전용(`jobRunner.ts:294-303`)이라 v3 스키마는 재승인·해시 변동 비용만 발생; v3 클립 assert는 0050에 이미 배포; `media_render_jobs.revision_id UNIQUE`(0054:79)와 캠페인당 무료 unlock이 "리비전당 변형 2개"를 허용하지 않음; Dater 클립 개별 승인 UI 부재(`ConsentFlow.tsx:158-165`)로 셀피가 승인 없이 MP4에 들어갈 위험; 헤드리스 `<video>` 시크는 비결정론. 프로덕션 조사에서 8/9 이후 전사 전부에 단어 타이밍이 있어 단어 자막을 기본으로 둘 수 있음.
 - **검토 대안**: (a) goal.json 원안 — scene v3에 cuts/chrome/opening clip + DB duration 규칙 확장: 동의 재승인·빌더·플레이어·assert 재작성 비용, 불필요. (b) 리비전당 변형 2행(`UNIQUE(revision_id, variant)`): 멱등·무료 판정 재작성 필요, 무료 grant 소진 혼란. (c) 아키텍트의 최소안 — Highlight만 렌더, 셀피·Full 선택 보류: 사용자 지시(셀피·음악·보정 포함)와 Goal 성과(kit 선택)에 어긋나 채택하지 않음.
 - **영향**: 제품 — 새 승인 캠페인의 기본 MP4가 하이라이트; 웹 페이지는 그대로 전체 음성. 데이터 — 0063 migration(컬럼 추가·`request_pitch_render` DEFAULT 인자 단일 함수·`get_pitch_render_state` 컬럼 추가·`pitch_assets.asset_role`). 안전 — 셀피는 명시 승인 없이는 스냅샷 밖이라 0050 assert가 거부. 비용 — 하이라이트 프레임 수 30~40%로 예산 여유. 배포 — migration 먼저(구 번들 호환) → 웹 → 앱 다음 TestFlight. 롤백 — `RENDER_HIGHLIGHT_ENABLED=false`. goal.json의 "v3 스키마" 제약과 T002/T004 계약 문구는 `docs/REEL_V3_DESIGN.md` §8로 정정한다.
+
+## 2026-09-09: `request_pitch_render`는 캠페인 id 첫 인자를 유지하고 DEFAULT 인자로만 확장한다 (T002 / Issue #98)
+
+- **결정**: 설계서 §2.1의 `p_revision_id` 표기를 정정 — 배포된 함수는 캠페인 id(`target_campaign_id`)에서 승인 리비전을 유도하고(0054:325-380) PostgREST는 인자 **이름**으로 호출하므로 첫 인자 이름을 바꾸지 않는다. 0063은 1-인자 함수를 DROP하고 `(target_campaign_id, p_variant DEFAULT 'highlight', p_options DEFAULT '{}')` 단일 함수로 재생성한다(오버로드 0, pg_proc 테스트). 멱등 캐시 히트는 기존 잡의 variant를 바꾸지 않는다(무료 grant당 MP4 1개); 실패 잡 리셋 시에만 재선택. 옵션 화이트리스트는 `private.render_options_are_valid`로 컬럼 CHECK와 RPC가 공유한다. `pitch_assets.asset_role`은 video 자산에만 허용되고 INSERT 시에만 쓸 수 있다(0052 컬럼 grant 확장). 타임드 단어는 `packages/data/src/transcriptWordIndex.ts`의 단일 매핑을 소비하고 정렬·겹침 정제 + null 폴백만 추가한다(설계서 §0의 "타이밍과 텍스트가 분리" 전제는 이 함수에는 해당 없음).
+- **이유**: 인자 이름 변경은 모든 호출자를 깨고, 두 번째 매핑 규칙은 승인된 wordPop과 다른 단어를 강조할 수 있다.
+- **검토 대안**: 오버로드 추가(PGRST 모호성), 리비전 id 인자(호출자 전면 수정).
+- **영향**: 배포 순서 — 0063 push 후 웹 배포(구 번들의 1-인자 호출은 DEFAULT로 호환). 데이터 — 컬럼 추가만, 무료 1회 규칙 불변.

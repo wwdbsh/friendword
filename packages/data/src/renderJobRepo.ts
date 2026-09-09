@@ -36,6 +36,27 @@ export const PITCH_RENDER_SERVICE_RPCS = [
 
 export type PitchRenderJobStatus = 'queued' | 'leased' | 'done' | 'failed';
 
+/**
+ * Which MP4 the requester asked for (migration 0063). 'highlight' is a 15-30s
+ * cut of the approved sentences; 'full' is the whole approved recording. The
+ * choice is made BEFORE the render and belongs to the job row for its life:
+ * one revision gets one MP4.
+ */
+export type PitchRenderVariant = 'full' | 'highlight';
+
+/** Render options, whitelisted server-side by private.render_options_are_valid. */
+export type PitchRenderOptions = {
+  // Explicitly `| undefined` for exactOptionalPropertyTypes: the value arrives
+  // from a JSONB column where the key is genuinely optional.
+  readonly music?: boolean | undefined;
+};
+
+/** What the caller chose in the export card, if it chose at all. */
+export type PitchRenderChoice = {
+  readonly variant?: PitchRenderVariant;
+  readonly options?: PitchRenderOptions;
+};
+
 export type PitchRenderRequest = {
   readonly jobId: string;
   readonly jobStatus: PitchRenderJobStatus;
@@ -53,6 +74,11 @@ export type PitchRenderState = {
   readonly freeRenderUsed: boolean;
   readonly passActive: boolean;
   readonly updatedAt: string | null;
+  /** 0063. Null while no job exists (or before 0063 reaches this database). */
+  readonly variant: PitchRenderVariant | null;
+  /** What the worker actually rendered; differs from `variant` on fallback. */
+  readonly effectiveVariant: PitchRenderVariant | null;
+  readonly options: PitchRenderOptions | null;
 };
 
 export type ClaimedRenderJob = {
@@ -76,6 +102,11 @@ export type RenderCompletion =
   | { readonly outcome: 'failed'; readonly reason: string };
 
 const jobStatusSchema = z.enum(['queued', 'leased', 'done', 'failed']);
+const variantSchema = z.enum(['full', 'highlight']);
+// Unknown keys are stripped rather than rejected: the server owns the
+// whitelist (0063 CHECK), and a client that refuses to parse a newer option
+// would break the export card for a value it does not need to understand.
+const optionsSchema = z.object({ music: z.boolean().optional() });
 
 // 0054: request_pitch_render returns TABLE (job_id, job_status, revision_id,
 // output_storage_path, already_requested).
@@ -101,6 +132,11 @@ const stateRowsSchema = z.array(
     free_render_used: z.boolean(),
     pass_active: z.boolean(),
     updated_at: z.string().nullish(),
+    // 0063 appended these. `nullish` covers both "no job yet" and the deploy
+    // window in which this bundle runs against a pre-0063 database.
+    variant: variantSchema.nullish(),
+    effective_variant: variantSchema.nullish(),
+    options: optionsSchema.nullish(),
   }),
 );
 
@@ -122,16 +158,29 @@ export class RenderJobRepo {
 
   /**
    * Asks the server to render (or hand back) the MP4 of the campaign's
-   * current approved revision. Idempotent: a repeat request returns the
-   * stored job and consumes nothing. Server-side gates decide everything —
+   * current approved revision, optionally naming the variant and options
+   * (0063). Idempotent: a repeat request returns the stored job, consumes
+   * nothing and does NOT re-point it at another variant — one revision, one
+   * MP4. Only the reset of a terminally failed job may choose again. Server-side gates decide everything —
    * membership, campaign openness, and whether the Campaign Pass is required
    * — so a refusal here is the product answer, not an error to retry around.
    */
-  async requestRender(campaignId: string): Promise<PitchRenderRequest> {
+  async requestRender(campaignId: string, choice?: PitchRenderChoice): Promise<PitchRenderRequest> {
     await this.getRequiredSession();
-    const { data, error } = await callRenderRpc(this.client, 'request_pitch_render', {
-      target_campaign_id: uuidSchema.parse(campaignId),
-    });
+    const target_campaign_id = uuidSchema.parse(campaignId);
+    // Two literal call shapes rather than one spread: a caller that expressed
+    // no preference sends the 1-argument call the server has always accepted
+    // (so this bundle keeps working against a database that has not taken 0063
+    // yet), and rpcContract.test.ts can still read both argument lists
+    // statically — a spread would make it skip the check.
+    const { data, error } =
+      choice === undefined
+        ? await callRenderRpc(this.client, 'request_pitch_render', { target_campaign_id })
+        : await callRenderRpc(this.client, 'request_pitch_render', {
+            target_campaign_id,
+            p_variant: choice.variant ?? 'highlight',
+            p_options: choice.options ?? {},
+          });
     if (error !== null) {
       throw new DataLayerError('render.request', error);
     }
@@ -183,6 +232,9 @@ export class RenderJobRepo {
       freeRenderUsed: row.free_render_used,
       passActive: row.pass_active,
       updatedAt: row.updated_at ?? null,
+      variant: row.variant ?? null,
+      effectiveVariant: row.effective_variant ?? null,
+      options: row.options ?? null,
     };
   }
 

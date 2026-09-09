@@ -560,7 +560,12 @@ function clipAnswerKeys(answers: ReadonlyMap<string, ClipAnswer>): readonly stri
   return [...answers].map(([assetId, answer]) => `${assetId}:${answer}`);
 }
 
-/** The clip state line, for a card that has no decision to offer yet. */
+/**
+ * The clip state line, for a card that has no decision to offer yet.
+ *
+ * Both sentences explain a DISABLED "include": a clip is only includable once
+ * the Dater can watch it here, and the preview exists at 'succeeded' only.
+ */
 function clipPendingDecisionCopy(card: ClipIngestCard | null): string | null {
   switch (card?.state) {
     case 'succeeded':
@@ -569,8 +574,23 @@ function clipPendingDecisionCopy(card: ClipIngestCard | null): string | null {
     case 'failed':
       return 'It cannot be published either way — say so here so your answer is on the record.';
     default:
-      return 'Still processing — you can still decide.';
+      return 'Still processing — you can include it once you can watch it here.';
   }
+}
+
+/**
+ * Whether "include" is offered at all.
+ *
+ * Consent means a decision taken on the footage itself. Below 'succeeded' the
+ * card has no playable proxy and no poster, so an "include" there would be the
+ * Dater agreeing to publish a video they have not seen — the one thing this
+ * whole flow exists to prevent. "Leave it out" stays available at every state
+ * (refusing sight-unseen is always safe), and the SAVE gate is unchanged: an
+ * unanswered clip still blocks approval, so this narrows the answer, never
+ * skips the question.
+ */
+function clipIncludeSelectable(card: ClipIngestCard | null): boolean {
+  return card?.state === 'succeeded';
 }
 
 /** m:ss for a clip length the probe measured. */
@@ -2068,6 +2088,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                       // after approval — both would otherwise reach the render
                       // worker with no decision behind them.
                       const pendingCopy = clipPendingDecisionCopy(clip.card);
+                      const includeSelectable = clipIncludeSelectable(clip.card);
                       const groupName = `consent-clip-${clip.assetId}`;
                       return (
                         <div
@@ -2129,6 +2150,7 @@ export function ConsentFlow({ token }: { readonly token: string }) {
                                   name={groupName}
                                   value={value}
                                   checked={answer === value}
+                                  disabled={value === 'include' && !includeSelectable}
                                   onChange={() => {
                                     setEditStatus(null);
                                     setEditError(null);

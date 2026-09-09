@@ -250,10 +250,13 @@ export async function processRenderJob(
       );
     }
 
-    // The container's real timeline: approved scene frames plus the appended
-    // end card, at the encoder's frame rate.
+    // The container's real timeline: the selfie opening, the approved scene
+    // frames and the appended end card, at the encoder's frame rate. The
+    // opening is spliced in FRONT of the scene and counted separately by the
+    // engine (RenderStats.openingFrames), so leaving it out understated the
+    // duration of every MP4 that has one.
     const outputDurationMs = Math.round(
-      ((stats.sceneFrames + stats.endCardFrames) / stats.fps) * 1000,
+      ((stats.openingFrames + stats.sceneFrames + stats.endCardFrames) / stats.fps) * 1000,
     );
     await completeMediaRenderJob(client, job.jobId, job.leaseToken, {
       outcome: 'succeeded',

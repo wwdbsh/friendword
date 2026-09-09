@@ -73,6 +73,7 @@ vi.mock('../../services/mediaFiles', async (importOriginal) => ({
 const {
   SELFIE_CLIP_DENIED_MESSAGE,
   SELFIE_CLIP_GUIDELINE,
+  SELFIE_CLIP_RECORD_HINT,
   SELFIE_CLIP_NO_SLOT_MESSAGE,
   SELFIE_CLIP_TITLE,
   SelfieClipCard,
@@ -96,6 +97,14 @@ describe('SelfieClipCard', () => {
     expect(markup).toContain('approves it before it');
     expect(SELFIE_CLIP_GUIDELINE).toContain('Only your own face.');
     expect(markup).toContain('Add a selfie clip');
+  });
+
+  // The renderer uses the first 2.5s of the take and drops the rest (§2.2-4).
+  // The sheet has to say so before the take, or the wave lands after the cut.
+  it('tells the recorder which seconds of the take reach the video', () => {
+    expect(SELFIE_CLIP_RECORD_HINT).toBe(
+      'Look into the camera and say hi. 3 to 5 seconds — the first 2.5 seconds open the video.',
+    );
   });
 
   it('summarises a clip that is already on the draft, with a way to delete it', () => {

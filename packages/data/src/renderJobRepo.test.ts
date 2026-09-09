@@ -439,6 +439,10 @@ function fakeTableClient(
         call.filters.push([column, value]);
         return builder;
       },
+      gt: (column: string, value: unknown) => {
+        call.filters.push([`gt:${column}`, value]);
+        return builder;
+      },
       maybeSingle: async () => {
         calls.push(call);
         return { data: row, error };
@@ -497,11 +501,22 @@ describe('the worker records what it actually rendered (0063)', () => {
       cut_hash: 'a'.repeat(64),
     });
     // The lease is part of the predicate: a worker whose lease lapsed must not
-    // overwrite the plan of whoever picked the job up next.
-    expect(update?.filters).toEqual([
-      ['id', JOB_ID],
-      ['lease_token', LEASE_TOKEN],
+    // overwrite the plan of whoever picked the job up next. The token alone is
+    // not enough — it keeps matching after the lease EXPIRES, which is exactly
+    // when another worker may reclaim the job — so the expiry is filtered too.
+    expect(update?.filters.map(([column]) => column)).toEqual([
+      'id',
+      'lease_token',
+      'gt:lease_expires_at',
     ]);
+    expect(update?.filters[0]).toEqual(['id', JOB_ID]);
+    expect(update?.filters[1]).toEqual(['lease_token', LEASE_TOKEN]);
+    const [, sentAt] = update?.filters[2] ?? [];
+    // "Now", as an ISO instant PostgREST compares against lease_expires_at.
+    expect(typeof sentAt).toBe('string');
+    const asMs = Date.parse(String(sentAt));
+    expect(Number.isNaN(asMs)).toBe(false);
+    expect(Math.abs(asMs - Date.now())).toBeLessThan(5_000);
   });
 
   it('records a fallback as full with no plan', async () => {

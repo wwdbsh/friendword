@@ -590,6 +590,15 @@ SELECT date_trunc('month', now()) AS month,
 
 - 긴급 차단: `UPDATE app_config SET value = 'on' WHERE key = 'provider_kill_switch';`
 
+## 하이라이트 렌더 (0063·0064 이후 — 2026-09-09)
+
+- **무엇이 바뀌었나**: kit이 첫 렌더 전에 `variant`(highlight 기본/full)와 `options.music`을 고르고, 워커는 `media_render_jobs.cut_plan/cut_hash/effective_variant`를 리스 아래에서 기록한 뒤 오디오 컷·음악 더킹·오버레이 캡처·엔드카드 3.0s로 인코딩합니다. 리비전당 잡 1행·캠페인당 무료 1회는 그대로입니다. 0063 이전에 완료된 행은 `effective_variant`가 NULL이며 제품은 이를 Full로 읽습니다.
+- **롤백 스위치**: Vercel `RENDER_HIGHLIGHT_ENABLED=false`(또는 `0`) → 모든 잡을 레거시 Full 경로(무필터 `-c:a copy`, 엔드카드 1.5s)로 처리합니다. 코드 기본값은 ON입니다. 컬럼은 남겨도 무해합니다. **주의**: kit은 플래그를 읽지 않으므로 롤백 중에도 Highlight/음악을 고를 수 있고, 그 선택은 Full·무음으로 렌더된 뒤 잠깁니다(무료 1회 소진). 롤백을 켜면 같은 배포에서 kit 선택 UI를 숨기는 커밋을 함께 내거나(`PitchExportCard`의 chooser 조건), 롤백 창 동안 export를 요청한 캠페인의 잡·unlock 행을 지워 다시 고르게 해 주십시오.
+- **잡이 "lease no longer holds"로 3회 실패하면** DB 권한을 먼저 의심하십시오 — 2026-09-09 첫 프로덕션 렌더가 `42501 permission denied for function render_options_are_valid`(0063 CHECK 함수 grant 누락)로 이렇게 실패했고 0064가 고쳤습니다. 진단: service role로 `PATCH /rest/v1/media_render_jobs?id=eq.<job>` 를 보내 403이면 같은 부류입니다. 재시도는 실패한 잡 행(과 unlock 행이 있으면 함께)을 지우고 kit에서 다시 요청합니다(무료 1회 규칙은 완료된 잡에만 걸립니다).
+- **레벨 확인**: `ffmpeg -ss <엔드카드 시작> -t 2.8 -i out.mp4 -af astats=measure_overall=RMS_level -f null -` 의 RMS가 음성 구간 RMS보다 18dB 이상 낮아야 합니다(실측 −40.8 vs −20.2dB).
+- **셀피 오프닝**: 스냅샷 포함 ∩ `pitch_assets.asset_role='selfie'` ∩ 인제스트 `succeeded` ∩ 하이라이트 플랜 ∩ 플래그일 때만 붙습니다. 프록시 다운로드·ffmpeg 실패는 경고 로그 후 오프닝 없이 계속됩니다. 앱은 `expo-camera`가 들어간 다음 TestFlight부터 셀피 카드를 보여줍니다.
+- **앱 빌드 함정**: Expo 57 프리빌드 `ExpoCamera`/`ExpoCameraBarcodeScanning` xcframework가 프리빌드 `ExpoModulesCore` 57.0.3에 없는 심볼을 참조해 실행 즉시 dyld abort → `apps/mobile/package.json` `expo.autolinking.ios.buildFromSource`로 두 모듈을 소스 빌드합니다(`expo-camera` 57.0.3 고정). Metro가 `Unable to resolve expo-router/entry`를 내면 `expo start --clear`(캐시 문제; pnpm 링커를 hoisted로 바꾸면 웹 UI 테스트가 React 중복으로 깨집니다). `pnpm 11`은 `.npmrc`의 `node-linker`를 읽지 않습니다.
+
 ## 정기 운영 실행 (pg_cron + GitHub Actions — 2026-08-11 현재)
 
 실행처는 잡의 성격으로 갈립니다.
